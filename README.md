@@ -4,7 +4,7 @@ ChongZu is a Windows-native, local research-data processing project for a single
 
 This working project's fixed root is `E:\Desktop\ChongZu`.
 
-The repository is currently at **Phase 0**: baseline structure and environment audit. There is not yet an executable processing pipeline.
+The repository is currently at **Phase 1**: project-local Python foundation and environment diagnostics. There is not yet an executable data-processing pipeline.
 
 ## Non-negotiable constraints
 
@@ -29,7 +29,7 @@ The project intentionally excludes Kubernetes, Spark, Ray, NiFi, NeMo Curator, t
 5. Profile and clean deterministically, then persist to Parquet and DuckDB.
 6. Resume safely, skip unchanged files, and report per-file/per-stage timing and failures.
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for routing and component boundaries, [docs/ROADMAP.md](docs/ROADMAP.md) for staged delivery, and [docs/ENVIRONMENT_AUDIT.md](docs/ENVIRONMENT_AUDIT.md) for the Phase 0 host audit.
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for routing and component boundaries, [docs/ROADMAP.md](docs/ROADMAP.md) for staged delivery, [docs/ENVIRONMENT_AUDIT.md](docs/ENVIRONMENT_AUDIT.md) for the Phase 0 host audit, and [docs/RUNTIME.md](docs/RUNTIME.md) for the project-local runtime record.
 
 ## Repository layout
 
@@ -38,9 +38,9 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for routing and component bound
 | `src/chongzu/` | Future Python package |
 | `tests/` | Automated tests and small synthetic fixtures |
 | `config/` | Versioned, non-secret configuration templates |
-| `scripts/` | Future Windows provisioning and launch scripts |
+| `scripts/` | Windows environment, bootstrap, and diagnostic launch scripts |
 | `docs/` | Architecture, roadmap, and audit records |
-| `runtime/` | Project-local Python, Java, and Tika payloads; ignored by Git |
+| `runtime/` | Project-local CPython, venv, uv, Java, and Tika payloads; ignored by Git |
 | `models/` | OCR and Docling model artifacts; ignored by Git |
 | `cache/` | All controlled tool/package/model caches; ignored by Git |
 | `workspace/input/` | Real immutable source data; ignored by Git |
@@ -51,3 +51,14 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for routing and component bound
 | `workspace/logs/` | Structured run logs and metrics; ignored by Git |
 
 Only `.gitkeep` placeholders are versionable inside runtime, model, cache, and workspace directories. No real research data or downloaded artifact belongs in Git.
+
+## Phase 1 commands
+
+On Windows PowerShell 5.1, use a temporary execution-policy bypass if the host policy blocks local scripts; this does not change the policy permanently:
+
+```powershell
+PowerShell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\bootstrap.ps1
+PowerShell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\doctor.ps1
+```
+
+The scripts invoke only `runtime\uv\uv.exe` and `runtime\venv\Scripts\python.exe`. `env.ps1` changes only the current process and keeps cache/temp locations below this project.

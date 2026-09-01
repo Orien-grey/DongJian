@@ -1,0 +1,139 @@
+"""Centralized project paths.
+
+No directory is created when this module is imported. Callers can therefore use
+these constants for read-only diagnostics as well as for later pipeline stages.
+"""
+
+from __future__ import annotations
+
+import os
+from pathlib import Path
+
+PYTHON_VERSION = "3.11.15"
+PYTHON_RUNTIME_DIRNAME = f"cpython-{PYTHON_VERSION}-windows-x86_64-none"
+PROJECT_UV_VERSION = "0.11.21"
+PROJECT_UV_SHA256 = "5a7ec85884c2ccb1be560cb8fac3eb890df1adf49bfcc070a270ba70401bdd68"
+
+
+def _discover_project_root() -> Path:
+    """Find the repository root without relying on the current working directory."""
+
+    configured = os.environ.get("CHONGZU_PROJECT_ROOT")
+    if configured:
+        return Path(configured).expanduser().resolve()
+
+    here = Path(__file__).resolve()
+    candidates = (here, *here.parents)
+    for candidate in candidates:
+        if (candidate / "AGENTS.md").is_file() and (candidate / "runtime").is_dir():
+            return candidate
+
+    # This fallback keeps import errors understandable in a partially prepared
+    # checkout; doctor will report the missing/invalid root explicitly.
+    return here.parents[2]
+
+
+PROJECT_ROOT = _discover_project_root()
+
+RUNTIME_ROOT = PROJECT_ROOT / "runtime"
+PYTHON_RUNTIME_ROOT = RUNTIME_ROOT / "python"
+PYTHON_RUNTIME_DIR = PYTHON_RUNTIME_ROOT / PYTHON_RUNTIME_DIRNAME
+PYTHON_EXE = PYTHON_RUNTIME_DIR / "python.exe"
+UV_ROOT = RUNTIME_ROOT / "uv"
+UV_EXE = UV_ROOT / "uv.exe"
+VENV_ROOT = RUNTIME_ROOT / "venv"
+VENV_PYTHON_EXE = VENV_ROOT / "Scripts" / "python.exe"
+
+CACHE_ROOT = PROJECT_ROOT / "cache"
+UV_CACHE_DIR = CACHE_ROOT / "uv"
+PIP_CACHE_DIR = CACHE_ROOT / "pip"
+HUGGINGFACE_HOME = CACHE_ROOT / "huggingface"
+HUGGINGFACE_HUB_CACHE = HUGGINGFACE_HOME / "hub"
+DOCLING_CACHE_DIR = CACHE_ROOT / "docling"
+OCR_CACHE_DIR = CACHE_ROOT / "ocr"
+TIKA_CACHE_DIR = CACHE_ROOT / "tika"
+TEMP_ROOT = CACHE_ROOT / "temp"
+PYTHON_BYTECODE_CACHE = TEMP_ROOT / "pycache"
+PIP_CONFIG_FILE = PIP_CACHE_DIR / "pip.ini"
+
+MODELS_ROOT = PROJECT_ROOT / "models"
+OCR_MODELS_ROOT = MODELS_ROOT / "ocr"
+DOCLING_MODELS_ROOT = MODELS_ROOT / "docling"
+
+WORKSPACE_ROOT = PROJECT_ROOT / "workspace"
+INPUT_ROOT = WORKSPACE_ROOT / "input"
+STAGING_ROOT = WORKSPACE_ROOT / "staging"
+OUTPUT_ROOT = WORKSPACE_ROOT / "output"
+QUARANTINE_ROOT = WORKSPACE_ROOT / "quarantine"
+STATE_ROOT = WORKSPACE_ROOT / "state"
+LOGS_ROOT = WORKSPACE_ROOT / "logs"
+
+CORE_DIRECTORIES = {
+    "project_root": PROJECT_ROOT,
+    "runtime": RUNTIME_ROOT,
+    "runtime_python": PYTHON_RUNTIME_ROOT,
+    "runtime_uv": UV_ROOT,
+    "runtime_venv": VENV_ROOT,
+    "cache": CACHE_ROOT,
+    "cache_uv": UV_CACHE_DIR,
+    "cache_pip": PIP_CACHE_DIR,
+    "cache_huggingface": HUGGINGFACE_HOME,
+    "cache_huggingface_hub": HUGGINGFACE_HUB_CACHE,
+    "cache_docling": DOCLING_CACHE_DIR,
+    "cache_ocr": OCR_CACHE_DIR,
+    "cache_tika": TIKA_CACHE_DIR,
+    "cache_temp": TEMP_ROOT,
+    "cache_python_bytecode": PYTHON_BYTECODE_CACHE,
+    "models": MODELS_ROOT,
+    "models_ocr": OCR_MODELS_ROOT,
+    "models_docling": DOCLING_MODELS_ROOT,
+    "workspace": WORKSPACE_ROOT,
+    "workspace_input": INPUT_ROOT,
+    "workspace_staging": STAGING_ROOT,
+    "workspace_output": OUTPUT_ROOT,
+    "workspace_quarantine": QUARANTINE_ROOT,
+    "workspace_state": STATE_ROOT,
+    "workspace_logs": LOGS_ROOT,
+}
+
+# These are the process-local settings established by scripts/env.ps1. The
+# values are intentionally Path objects so doctor and future launchers can
+# apply one containment check to every setting.
+CONTROLLED_ENV_PATHS = {
+    "UV_CACHE_DIR": UV_CACHE_DIR,
+    "PIP_CACHE_DIR": PIP_CACHE_DIR,
+    "HF_HOME": HUGGINGFACE_HOME,
+    "HUGGINGFACE_HUB_CACHE": HUGGINGFACE_HUB_CACHE,
+    "TMP": TEMP_ROOT,
+    "TEMP": TEMP_ROOT,
+    "PYTHONPYCACHEPREFIX": PYTHON_BYTECODE_CACHE,
+    "UV_PYTHON_INSTALL_DIR": PYTHON_RUNTIME_ROOT,
+    "UV_PYTHON": PYTHON_EXE,
+    "UV_PROJECT_ENVIRONMENT": VENV_ROOT,
+    "PIP_CONFIG_FILE": PIP_CONFIG_FILE,
+}
+
+
+def is_within_project(path: Path) -> bool:
+    """Return whether *path* resolves below ``PROJECT_ROOT``."""
+
+    try:
+        Path(path).resolve().relative_to(PROJECT_ROOT)
+    except (OSError, ValueError):
+        return False
+    return True
+
+
+def ensure_within_project(path: Path) -> Path:
+    """Resolve a path and raise if it would escape the project root."""
+
+    resolved = Path(path).resolve()
+    if not is_within_project(resolved):
+        raise ValueError(f"Path escapes project root: {resolved}")
+    return resolved
+
+
+def project_path(*parts: str | os.PathLike[str]) -> Path:
+    """Join path components below the project root with containment checking."""
+
+    return ensure_within_project(PROJECT_ROOT.joinpath(*parts))

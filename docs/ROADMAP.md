@@ -16,6 +16,8 @@ Acceptance: the repository contains only baseline documents and placeholders, an
 
 ## Phase 1 - Reproducible project-local Python foundation
 
+Status: foundation prepared on 2026-09-01; portable-release caveats remain intentionally open.
+
 - Define a minimal `pyproject.toml`, locked dependency groups, package metadata, and command-line entry point.
 - Create explicit Windows scripts to provision a pinned CPython 3.11.x distribution into `runtime/python/` and install only small foundational dependencies locally.
 - Configure uv/pip/temp caches below `cache/`; disable Python user-site and prevent global interpreter fallback.
@@ -100,4 +102,3 @@ Acceptance: all transformations are traceable, raw canonical data remains unchan
 - Produce an artifact/license inventory, integrity manifest, backup/restore guidance, and operator runbook.
 
 Acceptance: the full prepared project runs offline and incrementally, unchanged files are skipped, corrupt files do not stop the batch, and all runtime/cache writes remain under the project root.
-
