@@ -1,6 +1,9 @@
 # Project-local runtime record
 
-Phase 1 runtime preparation was performed on 2026-09-01 (Asia/Shanghai) for the fixed project root `E:\Desktop\ChongZu`.
+Phase 1 runtime preparation and Phase 2.5 portable-runtime validation were
+performed on 2026-09-01 (Asia/Shanghai) for the fixed development root
+`E:\Desktop\ChongZu`. Launchers and the production paths below are root-relative
+at runtime and are intended to survive copying the project directory.
 
 ## CPython selection
 
@@ -67,6 +70,48 @@ sys.base_prefix= E:\Desktop\ChongZu\runtime\python\cpython-3.11.15-windows-x86_6
 
 This is project-contained, but an ordinary Windows venv is **not claimed to be fully relocatable**. Its launcher/metadata can retain the base interpreter path. Moving the whole project directory may therefore require rebuilding `runtime\venv` from the project CPython. A genuinely relocatable release bundle is a later release-phase concern.
 
+## Phase 2.5 portable runtime foundation
+
+The development venv above is deliberately not the delivery runtime. The
+portable contract is a standalone CPython tree plus a flat, project-local
+package directory:
+
+```text
+runtime\python\cpython-3.11.15-windows-x86_64-none\python.exe
+runtime\packages\
+src\
+```
+
+Formal launchers (`doctor.cmd` and `chongzu.cmd`) derive the project root from
+their own location, set `PYTHONPATH` to the relocated `src;runtime\packages`,
+and invoke the standalone executable directly. They never activate or invoke
+`runtime\venv`. In the standalone process `sys.prefix == sys.base_prefix` is
+expected; that is a normal, non-venv interpreter.
+
+The Phase 2 runtime dependency is installed into `runtime\packages` with the
+project-private uv and the locked version/hash:
+
+```text
+runtime\uv\uv.exe pip install --target runtime\packages --python runtime\python\cpython-3.11.15-windows-x86_64-none\python.exe --no-deps --only-binary=:all: --exact duckdb==1.5.5
+```
+
+| Package | Version | Source/constraint |
+| --- | --- | --- |
+| `duckdb` | `1.5.5` | `uv.lock`, Windows x64 wheel hash `sha256:9f4287f97ccf0c1f3d471e7115be2b067cbf99627e2d34bffd462dd64703cddc` |
+
+The package payload is ignored by Git; only `runtime\packages\.gitkeep` is
+intended to be tracked. Future production dependencies must follow the same rule and be
+verified by portable doctor. The package directory is intentionally a target
+installation rather than an editable install, so it contains no reference to
+the original checkout path.
+
+All cache/temp variables remain process-local and are rooted below the current
+project directory. Relocating the bundle therefore re-anchors the runtime,
+package imports, registry, logs, and caches to the new root. The standalone
+CPython payload itself is the uv-managed `python-build-standalone` family
+recorded above; a release build must still archive and verify the complete
+payload before distribution.
+
 ## Process-local containment
 
 [`scripts/env.ps1`](../scripts/env.ps1) is compatible with Windows PowerShell 5.1. It derives the root from `$PSScriptRoot`, creates only project-local cache/temp subdirectories, and changes only the current process environment. It never calls `setx`, edits `PATH`, edits the registry, or writes user/system environment settings.
@@ -81,7 +126,7 @@ HUGGINGFACE_HUB_CACHE    E:\Desktop\ChongZu\cache\huggingface\hub
 TMP / TEMP               E:\Desktop\ChongZu\cache\temp
 PYTHONPYCACHEPREFIX      E:\Desktop\ChongZu\cache\temp\pycache
 PYTHONNOUSERSITE         1
-PYTHONPATH               E:\Desktop\ChongZu\src
+PYTHONPATH               E:\Desktop\ChongZu\src;E:\Desktop\ChongZu\runtime\packages
 UV_PYTHON_INSTALL_DIR    E:\Desktop\ChongZu\runtime\python
 UV_PROJECT_ENVIRONMENT   E:\Desktop\ChongZu\runtime\venv
 PIP_CONFIG_FILE          E:\Desktop\ChongZu\cache\pip\pip.ini
@@ -93,7 +138,9 @@ Always load `scripts\env.ps1` before invoking uv. During this preparation, two i
 
 ## Phase 1/2 Python packages
 
-The lock file is [`uv.lock`](../uv.lock). `uv sync --locked` installed exactly these packages into the project venv:
+The lock file is [`uv.lock`](../uv.lock). `uv sync --locked` installs the
+development/test set into `runtime\venv`; the production subset is installed
+as a target into `runtime\packages` with the same pinned versions:
 
 | Package | Version | Role |
 | --- | --- | --- |

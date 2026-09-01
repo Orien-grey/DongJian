@@ -188,7 +188,17 @@ Logs are structured and stored under `workspace/logs/`; operational state belong
 
 ## 11. Runtime and cache containment
 
-Production launchers invoke explicit executables below `runtime/`, construct a minimal environment, and set all supported cache/model/temp locations below the repository. Python user-site loading is disabled. Java/Tika temporary state is redirected locally. Hugging Face, Docling, OCR, uv, and pip caches are explicitly configured and tested with a clean user profile and an intentionally restricted global `PATH`.
+Production launchers invoke the standalone
+`runtime/python/cpython-3.11.15-windows-x86_64-none/python.exe` and expose only
+`src/` plus the target-installed `runtime/packages/` on `PYTHONPATH`. They
+derive every path from the launcher location, so a copied project does not
+retain an origin-root dependency. `runtime/venv/` is development-only (pytest
+and provisioning), not part of the portable runtime contract; ordinary
+Windows venv metadata may require rebuilding after a move. Python user-site
+loading is disabled. Java/Tika temporary state is redirected locally when
+those phases are provisioned. Hugging Face, Docling, OCR, uv, and pip caches
+are explicitly configured and tested with a clean user profile and an
+intentionally restricted global `PATH`.
 
 Offline acceptance testing must prove that a prepared copy can process fixtures with network access disabled and without system Python or Java. Any component that attempts an implicit download fails the acceptance test.
 

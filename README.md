@@ -4,7 +4,8 @@ ChongZu is a Windows-native, local research-data processing project for a single
 
 This working project's fixed root is `E:\Desktop\ChongZu`.
 
-The repository is currently at **Phase 2**: project-local Python plus a
+The repository is currently at **Phase 2.5**: a relocatable standalone Python
+runtime and project-local package target sit underneath the Phase 2
 read-only discovery, fingerprint, lightweight type-detection, and DuckDB file
 registry foundation. Content extraction is intentionally not part of this
 phase.
@@ -43,7 +44,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for routing and component bound
 | `config/` | Versioned, non-secret configuration templates |
 | `scripts/` | Windows environment, bootstrap, and diagnostic launch scripts |
 | `docs/` | Architecture, roadmap, and audit records |
-| `runtime/` | Project-local CPython, venv, uv, Java, and Tika payloads; ignored by Git |
+| `runtime/` | Project-local standalone CPython, production packages, development venv, uv, Java, and Tika payloads; ignored by Git |
 | `models/` | OCR and Docling model artifacts; ignored by Git |
 | `cache/` | All controlled tool/package/model caches; ignored by Git |
 | `workspace/input/` | Real immutable source data; ignored by Git |
@@ -55,7 +56,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for routing and component bound
 
 Only `.gitkeep` placeholders are versionable inside runtime, model, cache, and workspace directories. No real research data or downloaded artifact belongs in Git.
 
-## Phase 1 and Phase 2 commands
+## Phase 2.5 commands
 
 On Windows PowerShell 5.1, use a temporary execution-policy bypass if the host policy blocks local scripts; this does not change the policy permanently:
 
@@ -64,18 +65,32 @@ PowerShell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\bootstrap.ps1
 PowerShell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\doctor.ps1
 ```
 
-The scripts invoke only `runtime\uv\uv.exe` and `runtime\venv\Scripts\python.exe`. `env.ps1` changes only the current process and keeps cache/temp locations below this project.
+The formal launchers invoke only the standalone
+`runtime\python\cpython-3.11.15-windows-x86_64-none\python.exe` together
+with `runtime\packages` and `src`; they do not activate or depend on
+`runtime\venv`. `runtime\venv\Scripts\python.exe` remains a development
+environment for pytest and `uv sync`. `env.ps1` changes only the current
+process and keeps cache/temp locations below the current project root.
+
+From either `cmd.exe` or PowerShell, no activation is required:
+
+```text
+.\doctor.cmd
+.\chongzu.cmd scan "D:\Research Data\项目一"
+.\chongzu.cmd registry summary
+```
 
 With the environment initialized, discovery is read-only and accepts any
 directory; it is not coupled to `workspace\input`:
 
 ```powershell
 . .\scripts\env.ps1
-& .\runtime\venv\Scripts\python.exe -m chongzu scan "E:\some\data" --workers 4
-& .\runtime\venv\Scripts\python.exe -m chongzu scan "E:\some\data" --rehash
-& .\runtime\venv\Scripts\python.exe -m chongzu registry summary
-& .\runtime\venv\Scripts\python.exe -m chongzu registry files --state present
-& .\runtime\venv\Scripts\python.exe -m chongzu benchmark scan "E:\some\data"
+& $env:CHONGZU_DEV_PYTHON -m pytest
+& $env:CHONGZU_PYTHON -m chongzu scan "E:\some\data" --workers 4
+& $env:CHONGZU_PYTHON -m chongzu scan "E:\some\data" --rehash
+& $env:CHONGZU_PYTHON -m chongzu registry summary
+& $env:CHONGZU_PYTHON -m chongzu registry files --state present
+& $env:CHONGZU_PYTHON -m chongzu benchmark scan "E:\some\data"
 ```
 
 The registry is `workspace\state\registry.duckdb`; detailed run JSONL logs are

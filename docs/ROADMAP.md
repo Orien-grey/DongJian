@@ -29,7 +29,7 @@ Acceptance: a non-admin Windows x64 user can prepare and run a small `doctor` co
 
 ## Phase 2 - Discovery, fingerprints, registry, and lightweight detection
 
-Status: implementation complete in the working tree; no Phase 2 commit has been made.
+Status: completed and committed on 2026-09-01 (`feat: add incremental file registry`).
 
 - Implement safe recursive discovery for an arbitrary source root, path normalization, no-link traversal, and source immutability checks.
 - Stream SHA-256 calculation and create a versioned DuckDB schema for runs, path instances, content identities, attempts, errors, and timings.
@@ -39,6 +39,26 @@ Status: implementation complete in the working tree; no Phase 2 commit has been 
 - Define the canonical extraction contracts needed by later phases; actual PDF/Office/OCR extraction remains deferred.
 
 Acceptance: interrupted runs resume, unchanged files skip, changed content reprocesses, and one failed file cannot stop a batch.
+
+## Phase 2.5 - Portable runtime foundation
+
+Status: in progress on 2026-09-01; changes intentionally remain uncommitted
+until relocation acceptance is complete.
+
+- Keep `runtime/venv/` as a development-only environment; it is not part of
+  the portable runtime contract.
+- Install the locked DuckDB runtime package into `runtime/packages/` beside
+  the standalone CPython 3.11.15 tree.
+- Make `env.ps1`, `doctor.ps1`, `doctor.cmd`, and `chongzu.cmd` derive the
+  current root and invoke standalone Python without activation or PATH lookup.
+- Verify cache/temp/package/source imports and registry writes after copying
+  the runnable subset to a different directory.
+- Add launcher argument, portable-doctor, and relocation tests while keeping
+  all Phase 2 read-only discovery behavior unchanged.
+
+Acceptance: a copied project can run doctor, a synthetic scan, and registry
+summary on Windows x64 without Python/Java/Conda/WSL/Docker installation or
+the original project path; all mutable writes stay below the copied root.
 
 ## Phase 3 - Fast native extraction
 

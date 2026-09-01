@@ -6,7 +6,19 @@ from chongzu import paths
 
 
 def test_controlled_environment_is_project_local() -> None:
-    for name in ("UV_CACHE_DIR", "PIP_CACHE_DIR", "HF_HOME", "HUGGINGFACE_HUB_CACHE", "TMP", "TEMP", "UV_PYTHON"):
+    for name in (
+        "CHONGZU_ROOT",
+        "CHONGZU_PYTHON",
+        "CHONGZU_PACKAGES",
+        "CHONGZU_SRC",
+        "UV_CACHE_DIR",
+        "PIP_CACHE_DIR",
+        "HF_HOME",
+        "HUGGINGFACE_HUB_CACHE",
+        "TMP",
+        "TEMP",
+        "UV_PYTHON",
+    ):
         value = os.environ.get(name)
         assert value, name
         assert paths.is_within_project(Path(value)), (name, value)

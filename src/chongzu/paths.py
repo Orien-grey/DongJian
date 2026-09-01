@@ -13,6 +13,7 @@ PYTHON_VERSION = "3.11.15"
 PYTHON_RUNTIME_DIRNAME = f"cpython-{PYTHON_VERSION}-windows-x86_64-none"
 PROJECT_UV_VERSION = "0.11.21"
 PROJECT_UV_SHA256 = "5a7ec85884c2ccb1be560cb8fac3eb890df1adf49bfcc070a270ba70401bdd68"
+DUCKDB_VERSION = "1.5.5"
 PIPELINE_VERSION = "phase2-discovery"
 REGISTRY_SCHEMA_NAME = "chongzu_file_registry"
 REGISTRY_SCHEMA_VERSION = 1
@@ -28,7 +29,10 @@ def _discover_project_root() -> Path:
     here = Path(__file__).resolve()
     candidates = (here, *here.parents)
     for candidate in candidates:
-        if (candidate / "AGENTS.md").is_file() and (candidate / "runtime").is_dir():
+        # Runtime copies may intentionally omit repository documentation.  A
+        # runnable root is identified by its source and runtime trees rather
+        # than by a Git-only file.
+        if (candidate / "runtime").is_dir() and (candidate / "src").is_dir():
             return candidate
 
     # This fallback keeps import errors understandable in a partially prepared
@@ -42,6 +46,8 @@ RUNTIME_ROOT = PROJECT_ROOT / "runtime"
 PYTHON_RUNTIME_ROOT = RUNTIME_ROOT / "python"
 PYTHON_RUNTIME_DIR = PYTHON_RUNTIME_ROOT / PYTHON_RUNTIME_DIRNAME
 PYTHON_EXE = PYTHON_RUNTIME_DIR / "python.exe"
+SRC_ROOT = PROJECT_ROOT / "src"
+PACKAGES_ROOT = RUNTIME_ROOT / "packages"
 UV_ROOT = RUNTIME_ROOT / "uv"
 UV_EXE = UV_ROOT / "uv.exe"
 VENV_ROOT = RUNTIME_ROOT / "venv"
@@ -76,6 +82,8 @@ CORE_DIRECTORIES = {
     "project_root": PROJECT_ROOT,
     "runtime": RUNTIME_ROOT,
     "runtime_python": PYTHON_RUNTIME_ROOT,
+    "runtime_python_standalone": PYTHON_RUNTIME_DIR,
+    "runtime_packages": PACKAGES_ROOT,
     "runtime_uv": UV_ROOT,
     "runtime_venv": VENV_ROOT,
     "cache": CACHE_ROOT,
@@ -104,6 +112,13 @@ CORE_DIRECTORIES = {
 # values are intentionally Path objects so doctor and future launchers can
 # apply one containment check to every setting.
 CONTROLLED_ENV_PATHS = {
+    "CHONGZU_PROJECT_ROOT": PROJECT_ROOT,
+    "CHONGZU_ROOT": PROJECT_ROOT,
+    "CHONGZU_RUNTIME_ROOT": RUNTIME_ROOT,
+    "CHONGZU_PYTHON": PYTHON_EXE,
+    "CHONGZU_DEV_PYTHON": VENV_PYTHON_EXE,
+    "CHONGZU_PACKAGES": PACKAGES_ROOT,
+    "CHONGZU_SRC": SRC_ROOT,
     "UV_CACHE_DIR": UV_CACHE_DIR,
     "PIP_CACHE_DIR": PIP_CACHE_DIR,
     "HF_HOME": HUGGINGFACE_HOME,

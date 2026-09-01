@@ -73,6 +73,10 @@ def _sha256(path: Path) -> str:
 
 def _check_runtime(report: DoctorReport) -> None:
     executable = Path(sys.executable).resolve()
+    portable_executable = paths.PYTHON_EXE.resolve()
+    development_executable = paths.VENV_PYTHON_EXE.resolve()
+    is_portable = executable == portable_executable
+    is_development = executable == development_executable
     if executable.is_file() and paths.is_within_project(executable):
         report.add("python executable", "PASS", str(executable))
     else:
@@ -80,6 +84,22 @@ def _check_runtime(report: DoctorReport) -> None:
             "python executable",
             "FAIL",
             f"{executable} is outside the project root",
+            fatal=True,
+        )
+
+    if is_portable:
+        report.add("portable Python executable", "PASS", str(executable))
+    elif is_development:
+        report.add(
+            "portable Python executable",
+            "FAIL",
+            f"development venv active; production requires {portable_executable}",
+        )
+    else:
+        report.add(
+            "portable Python executable",
+            "FAIL",
+            f"active interpreter is {executable}; production requires {portable_executable}",
             fatal=True,
         )
 
@@ -101,6 +121,22 @@ def _check_runtime(report: DoctorReport) -> None:
             report.add(name, "PASS", str(prefix.resolve()))
         else:
             report.add(name, "FAIL", f"outside project root: {prefix}", fatal=True)
+
+    if is_portable and sys.prefix == sys.base_prefix:
+        report.add("portable sys.prefix", "PASS", "sys.prefix == sys.base_prefix (standalone runtime)")
+    elif is_development:
+        report.add(
+            "portable sys.prefix",
+            "FAIL",
+            "development venv has a distinct sys.prefix; this is expected only for development",
+        )
+    else:
+        report.add(
+            "portable sys.prefix",
+            "FAIL",
+            f"sys.prefix={sys.prefix}; sys.base_prefix={sys.base_prefix}",
+            fatal=True,
+        )
 
     search_paths = [Path(entry) for entry in sys.path if entry]
     outside = [str(entry) for entry in search_paths if not paths.is_within_project(entry)]
@@ -154,6 +190,13 @@ def _check_directories(report: DoctorReport) -> None:
         if not paths.is_within_project(directory):
             report.add(name, "FAIL", f"outside project root: {directory}", fatal=True)
         elif not directory.is_dir():
+            if name == "runtime_venv":
+                report.add(
+                    name,
+                    "INFO",
+                    "development-only venv is absent; portable runtime does not require it",
+                )
+                continue
             report.add(name, "FAIL", f"missing directory: {directory}", fatal=True)
         elif os.access(str(directory), os.W_OK):
             report.add(name, "PASS", f"exists and is writable: {directory}")
@@ -181,6 +224,119 @@ def _check_environment_paths(report: DoctorReport) -> None:
                     report.add(name + " target", "FAIL", f"expected {expected}, got {values[0]}", fatal=True)
             except OSError as exc:
                 report.add(name + " target", "FAIL", str(exc), fatal=True)
+
+
+def _check_portable_imports(report: DoctorReport) -> None:
+    """Verify imports and executable selection for the production runtime.
+
+    The development venv is intentionally allowed to report non-fatal FAIL
+    entries so existing developer checks remain useful.  Only the standalone
+    interpreter can produce a portable PASS, and any failure there is fatal.
+    """
+
+    executable = Path(sys.executable).resolve()
+    portable_executable = paths.PYTHON_EXE.resolve()
+    development_executable = paths.VENV_PYTHON_EXE.resolve()
+    is_portable = executable == portable_executable
+    is_development = executable == development_executable
+    strict = is_portable or not is_development
+    failures: list[str] = []
+
+    if is_portable:
+        report.add("PATH Python", "PASS", "launcher invoked the explicit project standalone executable")
+    elif is_development:
+        report.add("PATH Python", "FAIL", "development venv active; launchers must use standalone Python")
+        failures.append("PATH Python")
+    else:
+        report.add("PATH Python", "FAIL", f"unexpected interpreter: {executable}", fatal=True)
+        failures.append("PATH Python")
+
+    if paths.PACKAGES_ROOT.is_dir() and paths.is_within_project(paths.PACKAGES_ROOT):
+        report.add("portable packages", "PASS", str(paths.PACKAGES_ROOT))
+    else:
+        report.add(
+            "portable packages",
+            "FAIL",
+            f"missing or outside project: {paths.PACKAGES_ROOT}",
+            fatal=strict,
+        )
+        failures.append("portable packages")
+
+    try:
+        import duckdb  # type: ignore[import-not-found]
+
+        duckdb_file = Path(duckdb.__file__).resolve()
+    except Exception as exc:  # pragma: no cover - depends on broken runtime payload
+        duckdb_file = None
+        report.add("portable DuckDB import", "FAIL", str(exc), fatal=strict)
+        failures.append("portable DuckDB import")
+    else:
+        if is_portable and paths.is_within_project(duckdb_file) and duckdb_file.is_relative_to(paths.PACKAGES_ROOT.resolve()):
+            report.add("portable DuckDB import", "PASS", str(duckdb_file))
+        elif is_development:
+            report.add(
+                "portable DuckDB import",
+                "FAIL",
+                f"development import is {duckdb_file}; production must import from {paths.PACKAGES_ROOT}",
+            )
+            failures.append("portable DuckDB import")
+        else:
+            report.add(
+                "portable DuckDB import",
+                "FAIL",
+                f"imported from {duckdb_file}; expected below {paths.PACKAGES_ROOT}",
+                fatal=True,
+            )
+            failures.append("portable DuckDB import")
+
+        duckdb_version = str(getattr(duckdb, "__version__", ""))
+        if is_portable and duckdb_version == paths.DUCKDB_VERSION:
+            report.add("portable DuckDB version", "PASS", duckdb_version)
+        elif is_development:
+            report.add(
+                "portable DuckDB version",
+                "FAIL",
+                f"development import reports {duckdb_version or 'unknown'}; production requires {paths.DUCKDB_VERSION}",
+            )
+            failures.append("portable DuckDB version")
+        else:
+            report.add(
+                "portable DuckDB version",
+                "FAIL",
+                f"{duckdb_version or 'unknown'}; required {paths.DUCKDB_VERSION}",
+                fatal=True,
+            )
+            failures.append("portable DuckDB version")
+
+    source_file = Path(__file__).resolve()
+    if paths.is_within_project(source_file) and source_file.is_relative_to(paths.SRC_ROOT.resolve()):
+        report.add("portable chongzu source import", "PASS", str(source_file))
+    elif is_development:
+        report.add("portable chongzu source import", "FAIL", f"imported from {source_file}")
+        failures.append("portable chongzu source import")
+    else:
+        report.add("portable chongzu source import", "FAIL", f"imported from {source_file}", fatal=True)
+        failures.append("portable chongzu source import")
+
+    if is_portable and sys.prefix == sys.base_prefix:
+        prefix_ok = True
+    elif is_development:
+        prefix_ok = False
+    else:
+        prefix_ok = False
+    if not prefix_ok:
+        failures.append("portable sys.prefix")
+
+    if not failures:
+        report.add("PORTABLE RUNTIME", "PASS", "standalone CPython + project-local packages are active")
+    elif is_development:
+        report.add(
+            "PORTABLE RUNTIME",
+            "FAIL",
+            "development venv is not part of the portable runtime contract",
+        )
+    else:
+        report.add("PORTABLE RUNTIME", "FAIL", "; ".join(failures), fatal=True)
 
 
 def _check_uv(report: DoctorReport) -> None:
@@ -227,12 +383,12 @@ def _check_optional_tools(report: DoctorReport) -> None:
 
     java = shutil.which("java")
     if java:
-        report.add("Java/Tika", "INFO", f"Java present at {java}; NOT REQUIRED IN PHASE 1")
+        report.add("Java/Tika", "INFO", f"Java present at {java}; NOT REQUIRED IN PHASE 2.5")
     else:
-        report.add("Java/Tika", "INFO", "NOT INSTALLED / NOT REQUIRED IN PHASE 1")
+        report.add("Java/Tika", "INFO", "NOT INSTALLED / NOT REQUIRED IN PHASE 2.5")
 
-    report.add("Docling", "INFO", "NOT INSTALLED / NOT REQUIRED IN PHASE 1")
-    report.add("OCR/RapidOCR", "INFO", "NOT INSTALLED / NOT REQUIRED IN PHASE 1")
+    report.add("Docling", "INFO", "NOT INSTALLED / NOT REQUIRED IN PHASE 2.5")
+    report.add("OCR/RapidOCR", "INFO", "NOT INSTALLED / NOT REQUIRED IN PHASE 2.5")
 
 
 def run_checks() -> DoctorReport:
@@ -244,6 +400,7 @@ def run_checks() -> DoctorReport:
     else:
         report.add("project root", "FAIL", str(paths.PROJECT_ROOT), fatal=True)
     _check_runtime(report)
+    _check_portable_imports(report)
     _check_directories(report)
     _check_environment_paths(report)
     _check_uv(report)

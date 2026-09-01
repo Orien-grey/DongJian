@@ -6,7 +6,7 @@ from chongzu import paths
 def test_project_root_is_repository_root() -> None:
     assert paths.PROJECT_ROOT.is_dir()
     assert (paths.PROJECT_ROOT / "AGENTS.md").is_file()
-    assert paths.PROJECT_ROOT == Path(r"E:\Desktop\ChongZu").resolve()
+    assert paths.PROJECT_ROOT == Path(__file__).resolve().parents[1]
 
 
 def test_core_paths_are_inside_project_root() -> None:
@@ -27,4 +27,3 @@ def test_python_runtime_identity_is_pinned() -> None:
     assert paths.PYTHON_VERSION == "3.11.15"
     assert paths.PYTHON_EXE == paths.PYTHON_RUNTIME_DIR / "python.exe"
     assert paths.is_within_project(paths.PYTHON_EXE)
-

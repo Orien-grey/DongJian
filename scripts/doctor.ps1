@@ -7,9 +7,9 @@ $projectRoot = (Resolve-Path -LiteralPath (Join-Path -Path $scriptRoot -ChildPat
 
 . (Join-Path -Path $scriptRoot -ChildPath 'env.ps1')
 
-$pythonExe = $env:CHONGZU_PROJECT_PYTHON
+$pythonExe = $env:CHONGZU_PYTHON
 if (-not (Test-Path -LiteralPath $pythonExe -PathType Leaf)) {
-    Write-Error "Project virtual-environment Python was not found: $pythonExe"
+    Write-Error "Project standalone Python was not found: $pythonExe"
     exit 2
 }
 

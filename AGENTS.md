@@ -59,12 +59,29 @@ Every escalation must store a machine-readable reason, the attempted route, timi
 
 All mutable or large runtime assets belong in the designated repository directories:
 
-- `runtime/python/`, `runtime/java/`, `runtime/tika/`
+- `runtime/python/`, `runtime/packages/`, `runtime/java/`, `runtime/tika/`
 - `cache/uv/`, `cache/pip/`, `cache/huggingface/`, `cache/docling/`, `cache/ocr/`, `cache/tika/`, `cache/temp/`
 - `models/ocr/`, `models/docling/`
 - `workspace/input/`, `workspace/staging/`, `workspace/output/`, `workspace/quarantine/`, `workspace/state/`, `workspace/logs/`
 
 Future Windows launchers must derive the repository root from their own location and explicitly set applicable cache/model variables before starting Python or Java. At minimum, isolate Python user packages and bytecode behavior, uv/pip caches, Hugging Face caches, Docling artifacts, OCR artifacts, Tika state, Java temporary files, and generic temporary files. Validate each third-party component's supported environment variables before relying on them.
+
+### Portable runtime contract
+
+- `runtime/python/cpython-3.11.15-windows-x86_64-none/python.exe` is the
+  production interpreter. Formal launchers and the production CLI must invoke
+  it by an absolute path derived from the launcher location.
+- `runtime/packages/` is the production package directory. Runtime packages
+  are installed there with the project-local `runtime/uv/uv.exe` and pinned
+  versions from `uv.lock`; no global or user site-packages are valid inputs.
+- `runtime/venv/` is a development environment for pytest and provisioning
+  only. **Development venv is not part of the portable runtime contract.** A
+  normal Windows venv may retain absolute interpreter metadata and may need to
+  be rebuilt after relocation.
+- Every future production dependency must be installed and verified in
+  `runtime/packages/` as part of the portable bundle, not only in the
+  development venv. Launchers must set `PYTHONPATH` to the relocated `src/`
+  and `runtime/packages/` directories and must not rely on the caller's PATH.
 
 ## Development rules
 
