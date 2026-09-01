@@ -312,6 +312,7 @@ def _check_portable_imports(report: DoctorReport) -> None:
     structured_dependencies = (
         ("Polars", "polars", paths.POLARS_VERSION),
         ("python-calamine", "python_calamine", paths.PYTHON_CALAMINE_VERSION),
+        ("PyMuPDF", "pymupdf", paths.PYMUPDF_VERSION),
     )
     for display_name, module_name, required_version in structured_dependencies:
         try:

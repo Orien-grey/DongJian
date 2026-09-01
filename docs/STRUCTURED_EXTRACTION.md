@@ -2,7 +2,9 @@
 
 Phase 3 implements the registry-backed CSV/TSV/XLS/XLSX path. It produces real
 `TableAsset`, `extraction_runs`, `quality_issues`, Parquet, and provenance JSON.
-It does not implement PDF, image, text, OCR, semantic/LLM, search, or UI work.
+PDF native text is now a separate Phase 4A route; see
+[`PDF_EXTRACTION.md`](PDF_EXTRACTION.md). This document does not describe
+image/OCR, semantic/LLM, search, or UI work.
 
 ## Operator contract
 

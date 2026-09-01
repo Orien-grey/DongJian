@@ -12,7 +12,7 @@ from . import __version__
 from .doctor import main as doctor_main
 from .registry import Registry, RegistryError, canonical_source_root
 from .scan import ScanError, benchmark_metrics, scan_source
-from .extract import StructuredExtractionError, extract_structured
+from .extract import PDFExtractionError, StructuredExtractionError, extract_pdf, extract_structured
 
 
 def _print_summary(summary) -> None:
@@ -47,6 +47,10 @@ def _build_parser() -> argparse.ArgumentParser:
     extract_structured_parser.add_argument("source", type=Path)
     extract_structured_parser.add_argument("--workers", type=int, default=None)
     extract_structured_parser.add_argument("--force", action="store_true")
+    extract_pdf_parser = extract_sub.add_parser("pdf", help="extract native PDF text and profiles")
+    extract_pdf_parser.add_argument("source", type=Path)
+    extract_pdf_parser.add_argument("--workers", type=int, default=None)
+    extract_pdf_parser.add_argument("--force", action="store_true")
 
     registry_parser = sub.add_parser("registry", help="inspect the local DuckDB registry")
     registry_sub = registry_parser.add_subparsers(dest="registry_command", required=True)
@@ -67,6 +71,10 @@ def _build_parser() -> argparse.ArgumentParser:
     benchmark_structured.add_argument("source", type=Path)
     benchmark_structured.add_argument("--workers", type=int, default=None)
     benchmark_structured.add_argument("--force", action="store_true")
+    benchmark_pdf = benchmark_sub.add_parser("pdf", help="measure native PDF text extraction throughput")
+    benchmark_pdf.add_argument("source", type=Path)
+    benchmark_pdf.add_argument("--workers", type=int, default=None)
+    benchmark_pdf.add_argument("--force", action="store_true")
     return parser
 
 
@@ -84,8 +92,27 @@ def _print_structured_summary(summary) -> None:
     print(f"Elapsed: {summary.wall_time_ms:.2f} ms")
 
 
+def _print_pdf_summary(summary) -> None:
+    print(f"Source: {summary.source_root}")
+    print(f"Files considered: {summary.files_considered}")
+    print(f"PDF files: {summary.pdf_files}")
+    print(f"Extracted: {summary.extracted}")
+    print(f"Reused: {summary.reused}")
+    print(f"Text assets produced: {summary.text_assets_produced}")
+    print(f"Quality issues: {summary.quality_issues}")
+    print(f"Failed PDFs: {summary.failed_pdfs}")
+    print(f"Pages: {summary.pages}")
+    print(f"Total chars: {summary.total_chars}")
+    print(f"Total bytes: {summary.total_bytes}")
+    print(f"Native-text PDFs: {summary.native_text_pdfs}")
+    print(f"Mixed PDFs: {summary.mixed_pdfs}")
+    print(f"Suspected-scanned PDFs: {summary.suspected_scanned_pdfs}")
+    print(f"Unknown PDFs: {summary.unknown_pdfs}")
+    print(f"Elapsed: {summary.wall_time_ms:.2f} ms")
+
+
 def main(argv: Sequence[str] | None = None) -> int:
-    """Dispatch Phase 1 diagnostics and Phase 2 registry commands."""
+    """Dispatch diagnostics, registry inspection, and extraction commands."""
 
     args = list(sys.argv[1:] if argv is None else argv)
     parser = _build_parser()
@@ -101,6 +128,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             summary = extract_structured(parsed.source, workers=parsed.workers, force=parsed.force)
             _print_structured_summary(summary)
             return 0
+        if parsed.command == "extract" and parsed.extract_command == "pdf":
+            summary = extract_pdf(parsed.source, workers=parsed.workers, force=parsed.force)
+            _print_pdf_summary(summary)
+            return 0
         if parsed.command == "benchmark" and parsed.benchmark_command == "scan":
             summary = scan_source(parsed.source, workers=parsed.workers, rehash=parsed.rehash)
             _print_summary(summary)
@@ -111,6 +142,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         if parsed.command == "benchmark" and parsed.benchmark_command == "structured":
             summary = extract_structured(parsed.source, workers=parsed.workers, force=parsed.force)
             _print_structured_summary(summary)
+            print("Benchmark:")
+            for key, value in summary.benchmark_metrics().items():
+                print(f"{key}: {value:.3f}" if isinstance(value, float) else f"{key}: {value}")
+            return 0
+        if parsed.command == "benchmark" and parsed.benchmark_command == "pdf":
+            summary = extract_pdf(parsed.source, workers=parsed.workers, force=parsed.force)
+            _print_pdf_summary(summary)
             print("Benchmark:")
             for key, value in summary.benchmark_metrics().items():
                 print(f"{key}: {value:.3f}" if isinstance(value, float) else f"{key}: {value}")
@@ -132,7 +170,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 registry.close()
         parser.print_help()
         return 0
-    except (ScanError, StructuredExtractionError, RegistryError, ValueError, OSError) as exc:
+    except (ScanError, StructuredExtractionError, PDFExtractionError, RegistryError, ValueError, OSError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
 

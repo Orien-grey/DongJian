@@ -89,6 +89,7 @@ def _text() -> TextAsset:
         text="research text",
         language="en",
         created_at=utc_now(),
+        source_relative_path="report.pdf",
     )
 
 
@@ -183,3 +184,4 @@ def test_text_chunk_provenance_reaches_source_and_extraction_run() -> None:
     assert chunk.provenance.content_sha256 == CONTENT_SHA256
     assert chunk.provenance.page_number == 1
     assert chunk.provenance.extraction_run_id == RUN_ID
+    assert text_asset.source_relative_path == "report.pdf"

@@ -131,10 +131,12 @@ endpoint or install a vector database/local embedding model.
 ## Technology direction and exclusions
 
 Phase 3 uses pinned project-local python-calamine and Polars wheels for
-CSV/TSV/XLS/XLSX and Parquet. PyMuPDF/img2table remain Phase 4 candidates,
-RapidOCR is deferred to images/scans, and GMFT/Docling remain difficult-table
-benchmark candidates rather than default dependencies. Do not add Pandas,
-NumPy, PyArrow, or OpenPyXL without representative-corpus evidence.
+CSV/TSV/XLS/XLSX and Parquet. Phase 4A uses the pinned PyMuPDF wheel only for
+native PDF page/text facts and profiling; it does not perform table extraction
+or OCR. img2table remains a Phase 4B candidate, RapidOCR is deferred to
+images/scans, and GMFT/Docling remain difficult-table benchmark candidates
+rather than default dependencies. Do not add Pandas, NumPy, PyArrow, or
+OpenPyXL without representative-corpus evidence.
 
 Apache Tika, a Java runtime, Unstructured, Data Prep Kit, NiFi, NeMo Curator,
 OpenRefine runtime/server, WSL, Docker, Kubernetes, Spark, and Ray are not part

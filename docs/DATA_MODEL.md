@@ -75,12 +75,16 @@ record. Full raw Sheet snapshots are retained separately from region assets.
 | `extractor` | `str` | Extractor implementation name. |
 | `extractor_version` | `str` | Exact extractor version/config family. |
 | `source_kind` | `SourceKind` | File/page/image/slide/section origin. |
+| `source_relative_path` | `str | None` | Original path relative to the scanned source root when available. |
 | `page_number` | `int | None` | One-based source page when applicable. |
 | `section` | `str | None` | Section/heading/logical region when available. |
 | `bbox` | `BoundingBox | None` | Source region when available. |
 | `text` | `str` | Extracted local text. |
 | `language` | `str | None` | Detected/declared language when available. |
 | `created_at` | `datetime` | Asset creation time. |
+| `raw_artifact_path` | `str | None` | Workspace-relative verbatim extractor text artifact. |
+| `normalized_artifact_path` | `str | None` | Workspace-relative deterministic normalized text artifact. |
+| `metadata_artifact_path` | `str | None` | Workspace-relative block/page provenance metadata. |
 
 ## TextChunk
 
@@ -157,7 +161,8 @@ parent text asset plus deterministic index and offsets.
 DuckDB schema v3 maps tuples/mappings/bounding boxes to JSON catalog columns
 and stores text directly in the initial contract. Phase 3 writes real table
 catalog rows whose payload paths reference Parquet and metadata below
-`workspace/artifacts/`. Text/semantic tables remain empty until their phases;
+`workspace/artifacts/`. Phase 4A writes real PDF TextAsset/TextChunk rows and
+profile JSON under the same workspace root; semantic metadata remains empty and
 no demo business data is generated.
 
 The immutable layer sequence is:

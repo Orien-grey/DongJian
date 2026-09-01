@@ -77,16 +77,32 @@ the user-selected representative real corpus benchmark before final tuning.
 Acceptance: representative structured fixtures/corpus files yield traceable
 TableAssets and Parquet with measured accuracy, speed, memory, and failures.
 
-## Phase 4 - PDF native text/table benchmark
+## Phase 4A - Native PDF text extraction and profiling
 
-- Benchmark PyMuPDF for ordinary text-layer PDF text and layout coordinates.
-- Benchmark img2table for native PDF table candidates.
-- Measure page text coverage, empty/image-only pages, layout/table signals,
-  timing, memory, and extraction confidence on a real sanitized corpus.
-- Emit both TableAssets and TextAssets when present.
+Status: implementation and synthetic/relocation acceptance complete; awaiting a
+user-selected representative PDF corpus.
 
-Acceptance: ordinary PDFs follow measured lightweight paths; inadequate pages
-carry explicit evidence for Phase 5/6 escalation.
+- Use PyMuPDF to inventory every page and extract native text blocks only.
+- Persist page/block bounding boxes, page dimensions/rotation, image counts,
+  profile metadata, deterministic TextAssets/TextChunks, and extraction timings.
+- Classify PDFs conservatively as `native_text`, `mixed`,
+  `suspected_scanned`, or `unknown`.
+- Store weak table-candidate hints as quality evidence, never as TableAssets.
+
+Acceptance: native text and scan/mixed signals are reproducible, source hashes
+are unchanged, and relocation loads PyMuPDF only from `runtime\\packages`.
+
+## Phase 4B - Native PDF table benchmark
+
+- Compare PyMuPDF layout facts with `img2table` on 30--100 representative,
+  sanitized PDFs selected by the user.
+- Measure table detection recall, false positives, row/column correctness,
+  merged-cell handling, header preservation, borderless tables, speed, memory,
+  and runtime-size increase.
+- Add no OCR or heavy document stack until the measured corpus requires it.
+
+Acceptance: a measured native table route produces traceable TableAssets and
+explicitly records pages that need a later visual/OCR benchmark.
 
 ## Phase 5 - Image and scanned-document extraction
 

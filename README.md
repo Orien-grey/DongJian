@@ -14,8 +14,10 @@ Phase 3 now implements the first business extraction path: strict CSV/TSV and
 native XLS/XLSX extraction into traceable `TableAsset` records plus separate
 raw and normalized Parquet. It uses bounded workers, a central DuckDB writer,
 content/version-based reuse, and atomic publication below `workspace/`. It does
-not extract PDF/images/Office text, call an LLM, create embeddings, or provide
-a frontend.
+not extract images/Office text, call an LLM, create embeddings, or provide a
+frontend. Phase 4A adds the native PDF facts path: PyMuPDF page inventories,
+native text blocks, page/block provenance, deterministic chunks, and PDF
+profiles. It deliberately does not create PDF table assets or run OCR.
 
 ## Product flow
 
@@ -50,6 +52,9 @@ records. AI-generated display names never become stable asset IDs.
 The Phase 2 lightweight detector remains in place. Detection records what a
 file appears to be; the deterministic processing policy separately records
 whether the product supports it and which extraction branches are candidates.
+In the current Phase 4A implementation, the PDF table branch is only a routing
+candidate; `extract pdf` produces native `TextAsset`/`TextChunk` rows and profile
+artifacts, not PDF `TableAsset` rows.
 
 ## Data safety and semantic boundary
 
@@ -98,6 +103,8 @@ Formal portable launchers require no activation:
 .\chongzu.cmd scan "D:\Research Data\Project"
 .\chongzu.cmd extract structured "D:\Research Data\Project" --workers 4
 .\chongzu.cmd benchmark structured "D:\Research Data\Project"
+.\chongzu.cmd extract pdf "D:\Research Data\Project"
+.\chongzu.cmd benchmark pdf "D:\Research Data\Project"
 .\chongzu.cmd registry summary
 ```
 
@@ -116,7 +123,7 @@ operators do not need a separate scan step. `--force` republishes an otherwise
 reusable extraction. The registry is `workspace\state\registry.duckdb`.
 
 Pinned production packages are DuckDB 1.5.5, Polars 1.44.1 (with its
-`polars-runtime-32` 1.44.1 Windows wheel), and python-calamine 0.8.2. They live
-in `runtime\packages`; PyArrow, Pandas, NumPy, OpenPyXL, PyMuPDF, OCR, Docling,
-Torch, Java, and Tika are not installed. See
-[Structured extraction](docs/STRUCTURED_EXTRACTION.md).
+`polars-runtime-32` 1.44.1 Windows wheel), python-calamine 0.8.2, and PyMuPDF
+1.28.2. They live in `runtime\packages`; PyArrow, Pandas, NumPy, OpenPyXL,
+OCR, Docling, Torch, Java, and Tika are not installed. See [Structured
+extraction](docs/STRUCTURED_EXTRACTION.md) and [PDF extraction](docs/PDF_EXTRACTION.md).

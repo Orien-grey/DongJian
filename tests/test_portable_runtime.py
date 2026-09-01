@@ -9,6 +9,7 @@ from pathlib import Path
 
 from chongzu import paths
 from tests.xlsx_factory import write_xlsx
+from tests.pdf_factory import write_pdf
 
 
 def _portable_env(root: Path, *, clean_host: bool = False) -> dict[str, str]:
@@ -263,13 +264,40 @@ def test_relocated_copy_reanchors_runtime_registry_and_cache() -> None:
         assert catalog_data["catalog"]["table_assets"] == 2
         assert catalog_data["catalog"]["table_rows"] == 4
 
+        pdf_source = destination / "workspace" / "pdf fixtures 中文"
+        pdf_source.mkdir(parents=True)
+        write_pdf(pdf_source / "native.pdf", [{"texts": [(72, 72, "relocated native text")]}])
+        pdf_hashes = {_sha256(path) for path in pdf_source.iterdir()}
+        pdf_extraction = _run_cmd(
+            destination / "chongzu.cmd",
+            ["extract", "pdf", str(pdf_source)],
+            destination,
+            clean_env,
+        )
+        assert pdf_extraction.returncode == 0, pdf_extraction.stdout + pdf_extraction.stderr
+        assert "PDF files: 1" in pdf_extraction.stdout
+        assert "Text assets produced: 1" in pdf_extraction.stdout
+        assert pdf_hashes == {_sha256(path) for path in pdf_source.iterdir()}
+        pdf_catalog = _run_cmd(
+            destination / "chongzu.cmd",
+            ["registry", "summary", "--source", str(pdf_source)],
+            destination,
+            clean_env,
+        )
+        assert pdf_catalog.returncode == 0, pdf_catalog.stdout + pdf_catalog.stderr
+        pdf_catalog_data = json.loads(pdf_catalog.stdout)
+        assert pdf_catalog_data["catalog"]["text_assets"] == 1
+        assert pdf_catalog_data["catalog"]["text_chunks"] == 1
+
         probe_code = (
-            "import duckdb,json,polars,python_calamine,sys,pathlib; "
+            "import duckdb,json,polars,python_calamine,pymupdf,sys,pathlib; "
             "c=duckdb.connect('workspace/state/registry.duckdb'); "
             "p=c.execute(\"select normalized_artifact_path from table_assets where is_current=true limit 1\").fetchone()[0]; "
             "f=polars.read_parquet(pathlib.Path('workspace')/p); "
             "print(json.dumps({'exe':sys.executable,'duckdb':duckdb.__file__,'polars':polars.__file__,"
-            "'calamine':python_calamine.__file__,'rows':f.height}))"
+            "'calamine':python_calamine.__file__,'pymupdf':pymupdf.__file__,"
+            "'text':c.execute(\"select normalized_artifact_path from text_assets where is_current=true and source_relative_path='native.pdf'\").fetchone()[0],"
+            "'rows':f.height}))"
         )
         probe = subprocess.run(
             [str(destination / "runtime" / "python" / paths.PYTHON_RUNTIME_DIRNAME / "python.exe"), "-c", probe_code],
@@ -284,10 +312,13 @@ def test_relocated_copy_reanchors_runtime_registry_and_cache() -> None:
         probe_result = json.loads(probe.stdout.strip().splitlines()[-1])
         assert probe_result["rows"] == 2
         assert Path(probe_result["exe"]).resolve() == destination / "runtime" / "python" / paths.PYTHON_RUNTIME_DIRNAME / "python.exe"
-        for module_name in ("duckdb", "polars", "calamine"):
+        for module_name in ("duckdb", "polars", "calamine", "pymupdf"):
             module_path = Path(probe_result[module_name]).resolve()
             assert module_path.is_relative_to((destination / "runtime" / "packages").resolve())
             assert "appdata" not in str(module_path).casefold()
+        text_artifact = destination / "workspace" / probe_result["text"]
+        assert text_artifact.is_file()
+        assert "relocated native text" in text_artifact.read_text(encoding="utf-8")
     finally:
         if destination.exists():
             shutil.rmtree(destination)

@@ -62,7 +62,7 @@ detection evidence; they are not moved/deleted and do not fail the scan.
 | --- | --- |
 | `extraction_runs` | Content/extraction identity, source, force flag, route/config, timings, extractor versions, counts, outcome, and structured error. |
 | `table_assets` | Current/historical TableAsset metadata, source row/column range, extractor/run, dimensions, artifact paths, confidence, and quality state. |
-| `text_assets` | TextAsset content and source/extractor/run provenance. |
+| `text_assets` | Current/historical TextAsset content, source/extractor/run provenance, and raw/normalized/metadata artifact paths. |
 | `text_chunks` | Searchable deterministic chunks with offsets and provenance JSON. |
 | `semantic_metadata` | Separate model-generated names/categories/descriptions/fields/summaries with model/prompt/time/confidence. |
 | `quality_issues` | Deterministic/AI/human issues and `open/accepted/ignored/resolved` review status. |
@@ -92,6 +92,12 @@ condition that can fail a whole run.
 Structured extraction reuse requires exact path-instance `file_id`, content
 SHA-256, extractor name and version, structured configuration version, schema
 version, and business format.
+PDF native-text reuse uses the same identity discipline plus
+`pdf-native-text-v1` and `text-chunk-v1`. A successful or partial PDF run stores
+its profile JSON path and profile payload in `extraction_runs.warnings_json`;
+current TextAsset rows remain independently queryable. Missing text/profile
+artifacts invalidate reuse. A failed rerun records the error and leaves prior
+successful artifacts available for audit.
 Missing artifacts invalidate reuse. `--force` bypasses reuse. A changed file or
 changed extractor/config version creates another run; reuse never depends on a
 filename or AI-generated display name.

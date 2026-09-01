@@ -111,10 +111,27 @@ atomic artifact publication, and the bounded registry-backed coordinator.
 twice the bounded worker count. Workers never write DuckDB; the coordinator is
 the single catalog writer.
 
-`TextAsset` records provenance, page/section/bounding box, extracted text,
-language, and creation time. `TextChunk` is a deterministic searchable slice
-with character offsets and explicit source/extraction provenance. Embeddings
-are deliberately absent.
+Phase 4A keeps PDF logic in `src/chongzu/extract/pdf/`. The PyMuPDF route opens
+one registered PDF at a time, inventories every page, extracts only native text
+blocks, and records page dimensions, rotation, image/drawing signals, block
+bounding boxes, timings, and a PDF profile. A PDF can therefore produce many
+`TextAsset`/`TextChunk` rows while remaining eligible for a future table route;
+no PDF page is converted to a `TableAsset` in this phase. The default PDF
+coordinator is serial, with a bounded process pool available for explicit
+`--workers 2..4`; DuckDB remains a central single writer.
+
+The profile classification is conservative: `native_text` means every page has
+effective native text; `mixed` means native and blank/suspected-scanned evidence
+coexist; `suspected_scanned` requires image evidence on a majority of pages; and
+`unknown` means no native text without enough scan evidence. These are routing
+facts, not OCR decisions. Weak `possible_table_candidate` hints are stored as
+quality issues/profile evidence only and never create table rows.
+
+`TextAsset` records source relative path, provenance, page/section/bounding box,
+normalized extracted text, language, and separate raw/normalized/metadata
+artifact paths. `TextChunk` is a deterministic searchable slice with character
+offsets and explicit source/extraction provenance. Embeddings are deliberately
+absent.
 
 Stable table/text/chunk IDs are derived from extraction provenance. Semantic
 display names, categories, model responses, and UI edits never participate in

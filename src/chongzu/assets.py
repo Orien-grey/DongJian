@@ -168,8 +168,16 @@ def make_text_asset_id(
     )
 
 
-def make_chunk_id(*, text_asset_id: str, chunk_index: int, char_start: int, char_end: int) -> str:
+def make_chunk_id(
+    *,
+    text_asset_id: str,
+    chunk_index: int,
+    char_start: int,
+    char_end: int,
+    chunk_config_version: str = "chunk-v1",
+) -> str:
     _required(text_asset_id, "text_asset_id")
+    _required(chunk_config_version, "chunk_config_version")
     if chunk_index < 0 or char_start < 0 or char_end < char_start:
         raise ValueError("chunk identity offsets must be ordered and non-negative")
     return _stable_id(
@@ -177,6 +185,7 @@ def make_chunk_id(*, text_asset_id: str, chunk_index: int, char_start: int, char
         {
             "char_end": char_end,
             "char_start": char_start,
+            "chunk_config_version": chunk_config_version,
             "chunk_index": chunk_index,
             "text_asset_id": text_asset_id,
         },
@@ -257,6 +266,10 @@ class TextAsset:
     text: str
     language: str | None
     created_at: datetime
+    source_relative_path: str | None = None
+    raw_artifact_path: str | None = None
+    normalized_artifact_path: str | None = None
+    metadata_artifact_path: str | None = None
 
     def __post_init__(self) -> None:
         for name in ("text_asset_id", "file_id", "extraction_run_id", "extractor", "extractor_version"):
@@ -265,6 +278,15 @@ class TextAsset:
         object.__setattr__(self, "source_kind", SourceKind(self.source_kind))
         if self.page_number is not None and self.page_number < 1:
             raise ValueError("page_number must be one-based")
+        for name in (
+            "source_relative_path",
+            "raw_artifact_path",
+            "normalized_artifact_path",
+            "metadata_artifact_path",
+        ):
+            value = getattr(self, name)
+            if value is not None:
+                _required(value, name)
         _timestamp(self.created_at, "created_at")
 
 

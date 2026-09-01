@@ -16,6 +16,7 @@ dependencies = [
     "duckdb==1.5.5",
     "polars==1.44.1",
     "python-calamine==0.8.2",
+    "PyMuPDF==1.28.2",
 ]
 
 [dependency-groups]
