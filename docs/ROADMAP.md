@@ -1,127 +1,166 @@
 # Roadmap
 
-The phases are ordered to establish containment and incremental correctness before adding expensive document intelligence. A phase is complete only when its acceptance criteria are automated or documented with reproducible evidence.
+The roadmap builds a Windows x64 portable research-data workbench around two
+independent outputs: table assets and text assets. A phase advances only with
+reproducible tests/benchmarks and without weakening source immutability,
+provenance, or relocation.
 
 ## Phase 0 - Baseline and environment audit
 
-Status: completed as repository scaffolding on 2026-09-01.
+Status: completed 2026-09-01.
 
-- Record the current Windows, PowerShell, Git, uv, Python, and Java environment without changing it.
-- Establish source, test, documentation, runtime, cache, model, and workspace directories.
-- Document Windows-only constraints, fixed component boundaries, routing rules, and prohibited platforms/stacks.
-- Ignore all real data, downloaded runtimes/models, caches, generated outputs, logs, and large binaries.
-- Do not install dependencies, download artifacts, create a UI, or make a Git commit.
+- Recorded the Windows/PowerShell/Git/uv/Python/Java environment read-only.
+- Established source, test, config, runtime, cache, model, and workspace trees.
+- Fixed Windows x64, non-admin, offline-core, and source-immutability rules.
+- Added ignore rules so data, runtime payloads, caches, models, logs, and
+  generated stores cannot be committed accidentally.
 
-Acceptance: the repository contains only baseline documents and placeholders, and Git reports no downloaded runtime, model, cache, or real input payload.
+## Phase 1 - Project-local Python foundation
 
-## Phase 1 - Reproducible project-local Python foundation
+Status: completed 2026-09-01.
 
-Status: foundation prepared on 2026-09-01; portable-release caveats remain intentionally open.
+- Pinned CPython 3.11.15 and project-local uv.
+- Added repository-derived path/environment control and doctor diagnostics.
+- Created a development venv and locked minimal DuckDB/pytest dependencies.
+- Prevented Conda, PATH Python, user site-packages, and external cache fallback.
 
-- Define a minimal `pyproject.toml`, locked dependency groups, package metadata, and command-line entry point.
-- Create explicit Windows scripts to provision a pinned CPython 3.11.x distribution into `runtime/python/` and install only small foundational dependencies locally.
-- Configure uv/pip/temp caches below `cache/`; disable Python user-site and prevent global interpreter fallback.
-- Implement root/path resolution, typed configuration, structured logging, version reporting, and environment diagnostics.
-- Add tests proving launch failure is clear when the local runtime is absent and proving execution does not select the PATH Python.
-- Record artifact source, version, license, SHA-256, and reproducible provisioning steps.
+## Phase 2 - Discovery, fingerprint, registry, lightweight detection
 
-Acceptance: a non-admin Windows x64 user can prepare and run a small `doctor` command from the project-local Python, with caches contained in the repository. No Java, OCR model, Torch, or Docling is required yet.
+Status: completed and committed 2026-09-01.
 
-## Phase 2 - Discovery, fingerprints, registry, and lightweight detection
+- Added safe recursive discovery, streaming SHA-256, content/path identities,
+  incremental scan state, interruption recovery, and bounded hashing.
+- Added DuckDB registry tables for scans, files, contents, attempts, and errors.
+- Added lightweight magic/container/text detection and isolated corrupt inputs.
+- Preserved source files and recorded new/changed/unchanged/missing states.
 
-Status: completed and committed on 2026-09-01 (`feat: add incremental file registry`).
+## Phase 2.5 - Portable runtime contract
 
-- Implement safe recursive discovery for an arbitrary source root, path normalization, no-link traversal, and source immutability checks.
-- Stream SHA-256 calculation and create a versioned DuckDB schema for runs, path instances, content identities, attempts, errors, and timings.
-- Implement the resumable metadata fast candidate, `--rehash`, unchanged skipping, new/changed/missing states, and exact duplicate reporting.
-- Detect common magic bytes, OOXML ZIP containers, OLE, text/web assets, and conservative unknowns without Tika or archive extraction.
-- Add bounded queues, single-writer persistence, benchmark metrics, per-file isolation, and synthetic fixture tests.
-- Define the canonical extraction contracts needed by later phases; actual PDF/Office/OCR extraction remains deferred.
+Status: completed, verified, and committed 2026-09-01 as
+`8507ed3ed2753d98985769e68e3c6f2417879695`.
 
-Acceptance: interrupted runs resume, unchanged files skip, changed content reprocesses, and one failed file cannot stop a batch.
+- Separated the development venv from the production runtime contract.
+- Installed the locked DuckDB runtime package in `runtime/packages/` beside
+  standalone CPython.
+- Added root-derived `doctor.cmd` and `chongzu.cmd` launchers.
+- Verified runtime/package/source/cache/registry relocation with a copied
+  runnable subset.
 
-## Phase 2.5 - Portable runtime foundation
+## Architecture Refactor - Asset and policy foundation
 
-Status: in progress on 2026-09-01; changes intentionally remain uncommitted
-until relocation acceptance is complete.
+Status: current working phase; intentionally not committed in this round.
 
-- Keep `runtime/venv/` as a development-only environment; it is not part of
-  the portable runtime contract.
-- Install the locked DuckDB runtime package into `runtime/packages/` beside
-  the standalone CPython 3.11.15 tree.
-- Make `env.ps1`, `doctor.ps1`, `doctor.cmd`, and `chongzu.cmd` derive the
-  current root and invoke standalone Python without activation or PATH lookup.
-- Verify cache/temp/package/source imports and registry writes after copying
-  the runnable subset to a different directory.
-- Add launcher argument, portable-doctor, and relocation tests while keeping
-  all Phase 2 read-only discovery behavior unchanged.
+- Reframes the product around independent table and text extraction.
+- Defines `TableAsset`, `TextAsset`, `TextChunk`, `SemanticMetadata`,
+  `QualityIssue`, stable IDs, and provenance.
+- Adds deterministic business-format policy and retained `unsupported` state.
+- Adds schema v1-to-v2 migration, policy fields, and empty catalog contract
+  tables without fake extraction data.
+- Defines provider-neutral Qwen and future search/embedding interface positions.
+- Replaces the default Tika/Java/general-parser roadmap with benchmark-driven
+  extraction phases.
 
-Acceptance: a copied project can run doctor, a synthetic scan, and registry
-summary on Windows x64 without Python/Java/Conda/WSL/Docker installation or
-the original project path; all mutable writes stay below the copied root.
+## Phase 3 - Native structured extraction benchmark
 
-## Phase 3 - Fast native extraction
+- Benchmark CSV/TSV ingestion, encoding/error behavior, and bounded streaming.
+- Benchmark XLS/XLSX with `python-calamine` as the primary reader.
+- Use Polars for normalization/profiling and publish raw/normalized Parquet.
+- Preserve sheets as independent table sources; one workbook may yield many
+  `TableAsset` records.
+- Defer `openpyxl` until representative files prove that formatting, formulas,
+  comments, merged cells, or similar details are required.
 
-- Add text/CSV/TSV, JSON/JSONL, HTML, and XML adapters.
-- Add XLS/XLSX extraction with python-calamine and narrowly triggered openpyxl fallback.
-- Add DOCX and PPTX adapters with python-docx/python-pptx and safe zip/XML inspection.
-- Normalize all results to canonical records and persist bulk data to Parquet with Polars/DuckDB validation.
-- Create mismatch, corruption, encoding, oversize, and archive-safety tests.
+Acceptance: representative structured fixtures/corpus files yield traceable
+TableAssets and Parquet with measured accuracy, speed, memory, and failures.
 
-Acceptance: representative fast-path fixtures process without Java, OCR, or Docling and emit deterministic canonical outputs.
+## Phase 4 - PDF native text/table benchmark
 
-## Phase 4 - PDF medium path
+- Benchmark PyMuPDF for ordinary text-layer PDF text and layout coordinates.
+- Benchmark img2table for native PDF table candidates.
+- Measure page text coverage, empty/image-only pages, layout/table signals,
+  timing, memory, and extraction confidence on a real sanitized corpus.
+- Emit both TableAssets and TextAssets when present.
 
-- Add PyMuPDF extraction for metadata, text, pages, blocks, coordinates, links, and selected images.
-- Implement measurable PDF quality signals: text coverage, empty/image-only pages, image dominance, block ordering indicators, and table/layout heuristics.
-- Define versioned thresholds and explainable reason codes for accepting PyMuPDF output or requesting a later slow path.
-- Benchmark time, memory, page throughput, and output quality on synthetic/sanitized fixtures.
+Acceptance: ordinary PDFs follow measured lightweight paths; inadequate pages
+carry explicit evidence for Phase 5/6 escalation.
 
-Acceptance: normal text-layer PDFs never require Docling and every rejected/low-quality PDF has recorded evidence.
+## Phase 5 - Image and scanned-document extraction
 
-## Phase 5 - Project-local Java and Tika
+- Benchmark RapidOCR with pinned ONNX Runtime and project-local models.
+- Extract page titles, body text, table text, source notes, and annotations from
+  JPG/JPEG/PNG, including webpage screenshots.
+- Apply OCR only to scanned/image-only PDF pages selected by recorded signals.
+- Keep OCR/visual workers lazy, bounded, offline, and independently timed.
 
-- Provision a pinned Windows x64 Java runtime and pinned Tika artifact below `runtime/`, with hashes and licenses.
-- Add a bounded, supervised Tika lifecycle for true type detection and legacy/unknown/parser-failure fallback.
-- Redirect Java/Tika temporary and cache state into project directories and prohibit PATH Java fallback.
-- Add extension/MIME mismatch, legacy-format, timeout, crash-restart, and malformed-input tests.
+Acceptance: images and scanned pages can emit both text and table candidates
+with coordinates, confidence, model/version, and source provenance.
 
-Acceptance: Tika works offline from local Java, cannot escape to a system Java/cache, and a Tika failure remains isolated.
+## Phase 6 - Complex table benchmark
 
-## Phase 6 - OCR medium path
+- Compare img2table, GMFT, and Docling on the actual corpus's difficult tables.
+- Score structure fidelity, merged/multi-row headers, false positives, runtime,
+  memory, bundle size, portability, and offline artifact requirements.
+- Retain only heavy components whose measured benefit justifies their cost.
+- Keep GMFT/Docling behind explicit evidence-based escalation gates.
 
-- Provision pinned RapidOCR/ONNX Runtime dependencies and OCR models into controlled local directories.
-- Add JPG/PNG extraction and selected scanned-PDF-page OCR, with page batching and independent concurrency/memory limits.
-- Record OCR model/version, page selection reason, confidence, timing, and provenance.
-- Test rotation, resolution, blank pages, corrupt images, and offline model loading.
+Acceptance: the selected complex-table path has reproducible superiority on
+defined cases; no heavy candidate becomes a universal/default route.
 
-Acceptance: image OCR is fully offline, model paths are explicit, and only required pages are rasterized/OCRed.
+## Phase 7 - Qwen semantic enrichment
 
-## Phase 7 - Docling slow path
+- Implement a provider adapter for a user-configured OpenAI-compatible base URL.
+- Target Qwen3.6-35B-A3B initially while keeping model selection configurable.
+- Generate naming, category, descriptions, semantic field mappings, summaries,
+  quality suggestions, and optional difficult visual-review results.
+- Version prompts, validate structured responses, redact secrets, isolate
+  request failures, and prohibit automatic public fallback.
+- Never allow model output to overwrite raw or normalized extraction.
 
-- Pin and provision Docling, its compatible heavy dependencies, and required artifacts/models locally.
-- Implement lazy worker initialization and very low bounded concurrency.
-- Enforce routing gates for scanned PDFs, inadequate text coverage, complex layouts/tables, explicit policy, or prior extractor failure.
-- Compare slow-path output with PyMuPDF/OCR results and retain the selected result plus decision evidence.
-- Test prepared-bundle offline execution and ensure no import or inference step triggers a download.
+Acceptance: semantic metadata and review issues are reproducible/auditable,
+optional, and separable from core extraction correctness.
 
-Acceptance: Docling processes only justified files, every escalation has a stable reason code, and the default PDF path remains PyMuPDF.
+## Phase 8 - Cleaning and Data Catalog
 
-## Phase 8 - Profiling, cleaning, and quality analysis
+- Implement deterministic Unicode/null/row/column/type/name normalization.
+- Add profiling, reversible cleaning operations, issue detection, and human
+  accept/modify/ignore/resolve workflows.
+- Catalog raw, normalized, and semantic layers in DuckDB while large tables
+  remain Parquet-first.
+- Reconcile catalog counts and lineage back to source files and extraction runs.
 
-- Implement Polars-based profiling and deterministic normalization.
-- Add RapidFuzz-assisted candidate matching with thresholds, review states, and reversible transformation logs.
-- Materialize raw canonical, profiled, and cleaned Parquet layers and query them through DuckDB.
-- Generate batch quality reports for extraction coverage, failures, duplicates, anomalies, route distribution, and performance.
-- Keep any future LLM semantic cleaning optional, isolated, disabled by default, and outside core acceptance criteria.
+Acceptance: every transformation is traceable and raw assets remain immutable.
 
-Acceptance: all transformations are traceable, raw canonical data remains unchanged, and quality reports reconcile to the registry.
+## Phase 9 - Local frontend
 
-## Phase 9 - Performance hardening and portable release
+- Implement Overview, Data Catalog, Asset Detail, Quality Review, and initial
+  Search/Analysis surfaces described in `UI_ARCHITECTURE.md`.
+- Support raw-versus-extracted comparison and human confirmation of AI advice.
+- Keep the frontend local, relocatable, and independent of a database service.
 
-- Benchmark a representative approximately 1,500-file corpus and tune bounded concurrency per workload class.
-- Add resource budgets, timeouts, cancellation, recovery drills, and performance regression thresholds.
-- Verify a clean prepared copy on Windows x64 with no admin rights, no system Python/Java, restricted PATH, clean user caches, and networking disabled.
-- Produce an artifact/license inventory, integrity manifest, backup/restore guidance, and operator runbook.
+Acceptance: users can inspect provenance and review suggestions without direct
+database manipulation or source-file mutation.
 
-Acceptance: the full prepared project runs offline and incrementally, unchanged files are skipped, corrupt files do not stop the batch, and all runtime/cache writes remain under the project root.
+## Phase 10 - Search, SQL, and text retrieval
+
+- Add structured catalog selection and validated read-only DuckDB SQL.
+- Add deterministic keyword retrieval over TextChunks.
+- Evaluate a user-supplied embedding service only after its contract is known;
+  add vector retrieval without making it a core correctness dependency.
+- Combine retrieved evidence with configured Qwen answers and citations back to
+  assets/chunks.
+
+Acceptance: structured and text answers are read-only, evidence-linked, and
+safe against unrestricted generated SQL.
+
+## Release - Full offline Windows bundle
+
+- Benchmark the representative approximately 1,500-file project and tune
+  bounded queues/resource limits.
+- Build and verify the complete Windows x64 portable bundle with integrity and
+  license manifests, backup/recovery guidance, and an operator runbook.
+- Test relocation with no admin rights, no system Python/Java/Conda/WSL/Docker,
+  restricted PATH, clean user caches, and networking disabled for core work.
+
+Acceptance: the copied bundle processes incrementally offline, contains every
+required dependency/model locally, isolates failures, preserves provenance,
+and writes all mutable state below its relocated root.

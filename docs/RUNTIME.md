@@ -2,7 +2,8 @@
 
 Phase 1 runtime preparation and Phase 2.5 portable-runtime validation were
 performed on 2026-09-01 (Asia/Shanghai) for the fixed development root
-`E:\Desktop\ChongZu`. Launchers and the production paths below are root-relative
+`E:\Desktop\ChongZu`. The later Architecture Refactor changes the product
+shape but does not change this accepted runtime contract. Launchers and the production paths below are root-relative
 at runtime and are intended to survive copying the project directory.
 
 ## CPython selection
@@ -132,7 +133,7 @@ UV_PROJECT_ENVIRONMENT   E:\Desktop\ChongZu\runtime\venv
 PIP_CONFIG_FILE          E:\Desktop\ChongZu\cache\pip\pip.ini
 ```
 
-`UV_NO_CONFIG=1`, `UV_LINK_MODE=copy`, `PIP_NO_INPUT=1`, and `PIP_DISABLE_PIP_VERSION_CHECK=1` are also set to reduce hidden host configuration and cache coupling. Heavy component cache/model variables will be added and verified only in their later phases.
+`UV_NO_CONFIG=1`, `UV_LINK_MODE=copy`, `PIP_NO_INPUT=1`, and `PIP_DISABLE_PIP_VERSION_CHECK=1` are also set to reduce hidden host configuration and cache coupling. Heavy component cache/model variables will be added and verified only if a later benchmark selects the corresponding component.
 
 Always load `scripts\env.ps1` before invoking uv. During this preparation, two initial bare uv probes demonstrated why: without the project variables uv attempted to initialize/open its default user paths under `%LOCALAPPDATA%\uv\cache` and `%APPDATA%\uv\python`; both probes failed before creating anything. Every successful download, lock, sync, and verification command then used the project-local variables.
 
@@ -153,6 +154,15 @@ as a target into `runtime\packages` with the same pinned versions:
 | `pluggy` | `1.6.0` | pytest dependency |
 | `pygments` | `2.21.0` | pytest dependency |
 
-No Polars, PyArrow, PyMuPDF, Docling, Torch, RapidOCR, python-calamine, openpyxl, BeautifulSoup, or Tika client was installed. DuckDB 1.5.5 is the only Phase 2 runtime dependency; its Windows x64 wheel hash is recorded in `uv.lock`.
+No Calamine/python-calamine, Polars, PyArrow, PyMuPDF, RapidOCR, ONNX
+Runtime, img2table, GMFT, Docling, Torch, openpyxl, Java, or Tika client was
+installed. DuckDB 1.5.5 remains the only production runtime dependency; its
+Windows x64 wheel hash is recorded in `uv.lock`.
+
+The Architecture Refactor adds only standard-library contracts and empty
+DuckDB catalog tables. It makes no network request and does not call the
+configured LLM. Java/Tika is no longer a planned default route; GMFT and
+Docling remain future benchmark candidates rather than portable-bundle
+requirements.
 
 The standalone CPython image also contains its own project-local bootstrap tools `pip==26.1.2` and `setuptools==82.0.1` under `runtime\python`; they are not system packages and are not exposed through the venv because the venv does not use system site-packages. The package build isolation uses the exact `setuptools==80.10.2` requirement declared in `pyproject.toml`.

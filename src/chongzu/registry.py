@@ -11,6 +11,7 @@ from uuid import NAMESPACE_URL, uuid5
 import duckdb
 
 from . import paths
+from .processing_policy import ProcessingPlan, RegistryFileInfo, plan_processing
 from .types import ExistingFile, FileOutcome, ScanSummary
 
 
@@ -38,7 +39,7 @@ def file_id_for(source_root: str, relative_path: str) -> str:
     return uuid5(NAMESPACE_URL, identity).hex
 
 
-SCHEMA_STATEMENTS = (
+CORE_SCHEMA_STATEMENTS = (
     """
     CREATE TABLE IF NOT EXISTS scan_runs (
         run_id VARCHAR PRIMARY KEY,
@@ -81,6 +82,13 @@ SCHEMA_STATEMENTS = (
         detection_method VARCHAR NOT NULL,
         detection_confidence VARCHAR NOT NULL,
         routing_class VARCHAR NOT NULL,
+        support_status VARCHAR NOT NULL,
+        business_format VARCHAR,
+        table_candidate BOOLEAN NOT NULL,
+        text_candidate BOOLEAN NOT NULL,
+        may_require_ocr BOOLEAN NOT NULL,
+        may_require_visual_processing BOOLEAN NOT NULL,
+        policy_reason VARCHAR NOT NULL,
         current_presence_state VARCHAR NOT NULL,
         first_seen_run VARCHAR NOT NULL,
         last_seen_run VARCHAR NOT NULL,
@@ -140,7 +148,196 @@ SCHEMA_STATEMENTS = (
     "CREATE INDEX IF NOT EXISTS idx_files_source_path ON files(source_root, relative_path)",
     "CREATE INDEX IF NOT EXISTS idx_files_sha256 ON files(sha256)",
     "CREATE INDEX IF NOT EXISTS idx_files_presence ON files(source_root, current_presence_state)",
+    "CREATE INDEX IF NOT EXISTS idx_files_support ON files(support_status, business_format)",
 )
+
+
+CATALOG_SCHEMA_STATEMENTS = (
+    """
+    CREATE TABLE IF NOT EXISTS extraction_runs (
+        extraction_run_id VARCHAR PRIMARY KEY,
+        file_id VARCHAR NOT NULL,
+        content_sha256 VARCHAR NOT NULL,
+        started_at TIMESTAMP NOT NULL,
+        finished_at TIMESTAMP,
+        status VARCHAR NOT NULL,
+        pipeline_version VARCHAR NOT NULL,
+        configuration_version VARCHAR NOT NULL,
+        attempted_route VARCHAR NOT NULL,
+        route_reason VARCHAR NOT NULL,
+        timings_json JSON,
+        warnings_json JSON,
+        extractor_versions_json JSON,
+        error_category VARCHAR,
+        error_message VARCHAR
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS table_assets (
+        table_id VARCHAR PRIMARY KEY,
+        file_id VARCHAR NOT NULL,
+        content_sha256 VARCHAR NOT NULL,
+        extraction_run_id VARCHAR NOT NULL,
+        extractor VARCHAR NOT NULL,
+        extractor_version VARCHAR NOT NULL,
+        source_kind VARCHAR NOT NULL,
+        sheet_name VARCHAR,
+        page_number INTEGER,
+        bbox_json JSON,
+        row_count BIGINT NOT NULL,
+        column_count BIGINT NOT NULL,
+        columns_json JSON NOT NULL,
+        raw_artifact_path VARCHAR NOT NULL,
+        normalized_artifact_path VARCHAR,
+        extraction_confidence DOUBLE,
+        quality_status VARCHAR NOT NULL,
+        created_at TIMESTAMP NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS text_assets (
+        text_asset_id VARCHAR PRIMARY KEY,
+        file_id VARCHAR NOT NULL,
+        content_sha256 VARCHAR NOT NULL,
+        extraction_run_id VARCHAR NOT NULL,
+        extractor VARCHAR NOT NULL,
+        extractor_version VARCHAR NOT NULL,
+        source_kind VARCHAR NOT NULL,
+        page_number INTEGER,
+        section VARCHAR,
+        bbox_json JSON,
+        text VARCHAR NOT NULL,
+        language VARCHAR,
+        created_at TIMESTAMP NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS text_chunks (
+        chunk_id VARCHAR PRIMARY KEY,
+        text_asset_id VARCHAR NOT NULL,
+        file_id VARCHAR NOT NULL,
+        chunk_index INTEGER NOT NULL,
+        text VARCHAR NOT NULL,
+        char_start BIGINT NOT NULL,
+        char_end BIGINT NOT NULL,
+        provenance_json JSON NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS semantic_metadata (
+        asset_id VARCHAR NOT NULL,
+        asset_type VARCHAR NOT NULL,
+        display_name VARCHAR NOT NULL,
+        category VARCHAR NOT NULL,
+        description VARCHAR NOT NULL,
+        keywords_json JSON NOT NULL,
+        summary VARCHAR NOT NULL,
+        semantic_fields_json JSON NOT NULL,
+        model VARCHAR NOT NULL,
+        prompt_version VARCHAR NOT NULL,
+        confidence DOUBLE,
+        generated_at TIMESTAMP NOT NULL,
+        PRIMARY KEY(asset_id, asset_type, model, prompt_version, generated_at)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS quality_issues (
+        issue_id VARCHAR PRIMARY KEY,
+        asset_id VARCHAR NOT NULL,
+        severity VARCHAR NOT NULL,
+        issue_type VARCHAR NOT NULL,
+        description VARCHAR NOT NULL,
+        evidence_json JSON NOT NULL,
+        detected_by VARCHAR NOT NULL,
+        suggested_action VARCHAR NOT NULL,
+        status VARCHAR NOT NULL CHECK (status IN ('open', 'accepted', 'ignored', 'resolved'))
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_table_assets_file ON table_assets(file_id, content_sha256)",
+    "CREATE INDEX IF NOT EXISTS idx_text_assets_file ON text_assets(file_id, content_sha256)",
+    "CREATE INDEX IF NOT EXISTS idx_text_chunks_asset ON text_chunks(text_asset_id, chunk_index)",
+    "CREATE INDEX IF NOT EXISTS idx_semantic_metadata_asset ON semantic_metadata(asset_id, asset_type)",
+    "CREATE INDEX IF NOT EXISTS idx_quality_issues_asset ON quality_issues(asset_id, status)",
+    "CREATE INDEX IF NOT EXISTS idx_extraction_runs_file ON extraction_runs(file_id, content_sha256)",
+)
+
+
+SCHEMA_STATEMENTS = CORE_SCHEMA_STATEMENTS + CATALOG_SCHEMA_STATEMENTS
+
+
+def _processing_plan(
+    *, file_id: str, detected_type: str, mime_like_type: str, observed_extension: str, routing_class: str
+) -> ProcessingPlan:
+    return plan_processing(
+        RegistryFileInfo(
+            file_id=file_id,
+            detected_type=detected_type,
+            mime_like_type=mime_like_type,
+            observed_extension=observed_extension,
+            routing_class=routing_class,
+        )
+    )
+
+
+def _migrate_v1_to_v2(connection: duckdb.DuckDBPyConnection) -> None:
+    # DuckDB does not support mixing ALTER TABLE and later updates to that table
+    # in one explicit transaction. Column/table creation is therefore
+    # idempotent and restartable; the policy backfill and metadata version bump
+    # remain atomic so a partial migration never advertises schema v2.
+    columns = {row[1] for row in connection.execute("PRAGMA table_info('files')").fetchall()}
+    additions = {
+        "support_status": "ALTER TABLE files ADD COLUMN support_status VARCHAR DEFAULT 'unsupported'",
+        "business_format": "ALTER TABLE files ADD COLUMN business_format VARCHAR",
+        "table_candidate": "ALTER TABLE files ADD COLUMN table_candidate BOOLEAN DEFAULT FALSE",
+        "text_candidate": "ALTER TABLE files ADD COLUMN text_candidate BOOLEAN DEFAULT FALSE",
+        "may_require_ocr": "ALTER TABLE files ADD COLUMN may_require_ocr BOOLEAN DEFAULT FALSE",
+        "may_require_visual_processing": "ALTER TABLE files ADD COLUMN may_require_visual_processing BOOLEAN DEFAULT FALSE",
+        "policy_reason": "ALTER TABLE files ADD COLUMN policy_reason VARCHAR DEFAULT 'migration_pending'",
+    }
+    for name, statement in additions.items():
+        if name not in columns:
+            connection.execute(statement)
+    for statement in CATALOG_SCHEMA_STATEMENTS:
+        connection.execute(statement)
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_files_support ON files(support_status, business_format)")
+
+    connection.execute("BEGIN TRANSACTION")
+    try:
+        rows = connection.execute(
+            "SELECT file_id, detected_type, mime_like_type, observed_extension, routing_class FROM files"
+        ).fetchall()
+        for file_id, detected_type, mime_like_type, observed_extension, routing_class in rows:
+            plan = _processing_plan(
+                file_id=file_id,
+                detected_type=detected_type,
+                mime_like_type=mime_like_type,
+                observed_extension=observed_extension,
+                routing_class=routing_class,
+            )
+            connection.execute(
+                """
+                UPDATE files SET support_status=?, business_format=?, table_candidate=?, text_candidate=?,
+                    may_require_ocr=?, may_require_visual_processing=?, policy_reason=? WHERE file_id=?
+                """,
+                [
+                    plan.support_status.value,
+                    plan.business_format.value if plan.business_format else None,
+                    plan.attempt_table_extraction,
+                    plan.attempt_text_extraction,
+                    plan.may_require_ocr,
+                    plan.may_require_visual_processing,
+                    plan.reason_code,
+                    file_id,
+                ],
+            )
+        connection.execute(
+            "UPDATE registry_meta SET meta_value=?, updated_at=? WHERE meta_key=?",
+            [str(paths.REGISTRY_SCHEMA_VERSION), utc_now(), paths.REGISTRY_SCHEMA_NAME],
+        )
+        connection.execute("COMMIT")
+    except Exception:
+        connection.execute("ROLLBACK")
+        raise
 
 
 def initialize_schema(connection: duckdb.DuckDBPyConnection) -> None:
@@ -168,7 +365,9 @@ def initialize_schema(connection: duckdb.DuckDBPyConnection) -> None:
     version = int(row[0])
     if version > paths.REGISTRY_SCHEMA_VERSION:
         raise RegistryError(f"Registry schema {version} is newer than supported {paths.REGISTRY_SCHEMA_VERSION}")
-    if version < paths.REGISTRY_SCHEMA_VERSION:
+    if version == 1 and paths.REGISTRY_SCHEMA_VERSION == 2:
+        _migrate_v1_to_v2(connection)
+    elif version < paths.REGISTRY_SCHEMA_VERSION:
         raise RegistryError(f"Registry schema migration from {version} to {paths.REGISTRY_SCHEMA_VERSION} is not implemented")
 
 
@@ -264,6 +463,13 @@ class Registry:
 
     def record_file_outcome(self, run_id: str, outcome: FileOutcome) -> None:
         connection = self.connection
+        plan = _processing_plan(
+            file_id=outcome.file_id,
+            detected_type=outcome.detection.detected_type,
+            mime_like_type=outcome.detection.mime_like_type,
+            observed_extension=outcome.observed_extension,
+            routing_class=outcome.detection.routing_class,
+        )
         existing = connection.execute(
             "SELECT first_seen_run, sha256, last_changed_run FROM files WHERE file_id = ?",
             [outcome.file_id],
@@ -297,6 +503,8 @@ class Registry:
                     UPDATE files SET source_root=?, relative_path=?, filename=?, observed_extension=?,
                         size_bytes=?, mtime_ns=?, sha256=?, detected_type=?, mime_like_type=?,
                         detection_method=?, detection_confidence=?, routing_class=?,
+                        support_status=?, business_format=?, table_candidate=?, text_candidate=?,
+                        may_require_ocr=?, may_require_visual_processing=?, policy_reason=?,
                         current_presence_state=?, last_seen_run=?, last_changed_run=?,
                         latest_error_code=?, latest_error_message=?, last_fingerprint_ms=?,
                         last_detection_ms=?, updated_at=? WHERE file_id=?
@@ -314,6 +522,13 @@ class Registry:
                         outcome.detection.method,
                         outcome.detection.confidence,
                         outcome.detection.routing_class,
+                        plan.support_status.value,
+                        plan.business_format.value if plan.business_format else None,
+                        plan.attempt_table_extraction,
+                        plan.attempt_text_extraction,
+                        plan.may_require_ocr,
+                        plan.may_require_visual_processing,
+                        plan.reason_code,
                         presence,
                         run_id,
                         last_changed_run,
@@ -328,7 +543,15 @@ class Registry:
             else:
                 connection.execute(
                     """
-                    INSERT INTO files VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO files(
+                        file_id, source_root, relative_path, filename, observed_extension,
+                        size_bytes, mtime_ns, sha256, detected_type, mime_like_type,
+                        detection_method, detection_confidence, routing_class, support_status,
+                        business_format, table_candidate, text_candidate, may_require_ocr,
+                        may_require_visual_processing, policy_reason, current_presence_state,
+                        first_seen_run, last_seen_run, last_changed_run, latest_error_code,
+                        latest_error_message, last_fingerprint_ms, last_detection_ms, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     [
                         outcome.file_id,
@@ -344,6 +567,13 @@ class Registry:
                         outcome.detection.method,
                         outcome.detection.confidence,
                         outcome.detection.routing_class,
+                        plan.support_status.value,
+                        plan.business_format.value if plan.business_format else None,
+                        plan.attempt_table_extraction,
+                        plan.attempt_text_extraction,
+                        plan.may_require_ocr,
+                        plan.may_require_visual_processing,
+                        plan.reason_code,
                         presence,
                         first_seen_run,
                         run_id,
@@ -531,7 +761,7 @@ class Registry:
             params.append(state)
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         cursor = self.connection.execute(
-            f"SELECT file_id, source_root, relative_path, filename, observed_extension, size_bytes, mtime_ns, sha256, detected_type, mime_like_type, detection_method, detection_confidence, routing_class, current_presence_state, first_seen_run, last_seen_run, last_changed_run, latest_error_code, latest_error_message FROM files {where} ORDER BY source_root, relative_path LIMIT {int(limit)}",
+            f"SELECT file_id, source_root, relative_path, filename, observed_extension, size_bytes, mtime_ns, sha256, detected_type, mime_like_type, detection_method, detection_confidence, routing_class, support_status, business_format, table_candidate, text_candidate, may_require_ocr, may_require_visual_processing, policy_reason, current_presence_state, first_seen_run, last_seen_run, last_changed_run, latest_error_code, latest_error_message FROM files {where} ORDER BY source_root, relative_path LIMIT {int(limit)}",
             params,
         )
         columns = [item[0] for item in cursor.description]

@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "chongzu"
 version = "0.1.0.dev0"
-description = "Windows-native local research data processing foundation"
+description = "Relocatable Windows research table and text organization workbench"
 readme = "README.md"
 requires-python = ">=3.11,<3.12"
 license = { text = "Proprietary - project-specific research tooling" }

@@ -3,6 +3,10 @@
 Audit time: 2026-09-01 (Asia/Shanghai)  
 Project root: `E:\Desktop\ChongZu`
 
+Planning implications in this historical Phase 0 snapshot record the plan at
+audit time. The later Architecture Refactor supersedes the Java/Tika direction:
+Java/Tika is no longer a planned default dependency or fallback.
+
 This is a read-only observation of the host environment before project bootstrapping. External tools found here are not approved production dependencies.
 
 | Item | Observed result | Location / evidence | Project implication |

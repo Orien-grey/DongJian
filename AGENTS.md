@@ -2,93 +2,153 @@
 
 These instructions apply to the entire repository.
 
-## Mission and platform boundary
+## Product mission and platform
 
-Build a local, Windows-native pipeline for extracting, structuring, cleaning, and profiling roughly 1,500 heterogeneous files from one scientific research project directory.
+ChongZu is a fully relocatable, Windows x64 local workbench for organizing one
+scientific research project. Its two extraction jobs are **table extraction**
+and **text extraction**. A user-configured OpenAI-compatible service may later
+add semantic naming, categorization, field explanations, summaries, and
+complex quality judgments. Extraction and deterministic correctness must not
+depend on an LLM.
 
-- The fixed root of this working project is `E:\Desktop\ChongZu`. Launchers should still derive the root from their own location so every internal path is controlled and testable.
-- The only supported production platform is Windows x64.
-- The prepared system must run without administrator rights and without WSL, Docker, Conda, or a network connection during the core processing workflow.
-- Python, Java, native tools, models, and Python packages must live below this repository root. Production launchers must not depend on a system Python, a system Java, `%USERPROFILE%`, or globally configured `PATH` entries.
-- If a required project-local runtime or artifact is missing, fail with an actionable message. Never silently fall back to a global executable or user cache.
-- Provisioning may use the network only in an explicit future preparation step. Processing must never download packages, models, or artifacts implicitly.
+- The fixed development root is `E:\Desktop\ChongZu`. Every launcher and
+  internal path must still derive the current root from the launcher's own
+  location so a copied bundle re-anchors itself.
+- Production supports Windows x64 only, without administrator rights, WSL,
+  Docker, Conda, or required system services.
+- CPython, uv, Python packages, native tools, and model artifacts must live
+  below this repository. Never fall back to a system executable, the caller's
+  `PATH`, `%USERPROFILE%`, or a user cache.
+- The core workflow is offline. The only future processing-time network target
+  is an LLM base URL explicitly configured by the user. There is no public
+  endpoint fallback and no implicit package/model download.
+- Missing project-local runtime components must produce actionable failures.
 
-## Fixed technology direction
+## Product processing boundary
 
-- CPython 3.11.x: project-local, independently runnable, and ultimately portable.
-- Apache Tika: authoritative MIME/type identification plus legacy Office, unknown-format, and parser-failure fallback.
-- PyMuPDF: primary extractor for ordinary PDFs with usable text layers.
-- Docling: slow path only for scanned PDFs, complex layout, or complex tables. Never route every PDF to Docling.
-- `python-calamine`: primary XLS/XLSX reader.
-- `openpyxl`: fallback only when formatting, formula, comments, merged-cell, or similar workbook details are actually required.
-- RapidOCR with ONNX Runtime: image OCR and necessary scanned-page OCR.
-- `python-docx`, `python-pptx`, `lxml`/BeautifulSoup, and standard-library `zipfile`: lightweight native format paths.
-- Polars: primary tabular computation engine.
-- DuckDB plus Parquet: registry, structured persistence, and querying.
-- RapidFuzz and similarly lightweight deterministic algorithms: matching and cleaning.
-- LLM support, if ever added, is optional tier-three semantic cleaning. Core execution and correctness must not depend on an LLM.
+The first-stage business formats are CSV, TSV, XLS, XLSX, PDF, JPG, JPEG, PNG,
+DOC, DOCX, PPT, PPTX, and TXT.
 
-Do not introduce WSL, Docker, Kubernetes, Spark, Ray, NiFi, NeMo Curator, the full Unstructured stack, Data Prep Kit runtime, or OpenRefine Server.
+The registry may discover any file. HTML, CSS, XML, JavaScript, archive
+contents, executable/binary unknowns, and other formats outside the explicit
+list remain registered but are marked `unsupported`. Do not delete, move, or
+turn one unsupported file into a batch failure. A web-page screenshot is an
+image and therefore remains supported.
 
-## Routing contract
+The processing policy independently decides table and text work:
 
-Maintain explicit fast/medium/slow routing with recorded reasons:
+```text
+FILE REGISTRY
+      |
+      v
+Processing Policy
+      |
+      +----------------------+
+      |                      |
+      v                      v
+TABLE EXTRACTION        TEXT EXTRACTION
+      |                      |
+      v                      v
+TableAsset              TextAsset/TextChunk
+      |                      |
+      +----------+-----------+
+                 |
+                 v
+         Semantic Enrichment
+                 |
+                 v
+            Data Catalog
+         DuckDB + Parquet
+```
 
-1. Discover the file, collect metadata, compute a stable SHA-256 fingerprint, and identify its real type. Treat the extension only as a hint.
-2. Prefer fast native parsers for Excel, delimited text, JSON, HTML, XML, DOCX, PPTX, and similar formats.
-3. Send ordinary text-layer PDFs to PyMuPDF. Images and image-only pages may use RapidOCR.
-4. Escalate to Docling only when measurable signals show that a cheaper result is missing or inadequate, such as image-only PDF pages, very low text coverage, complex layout, or complex tables.
-5. Use Tika parsing for legacy Office, unknown formats, and failed primary paths. Tika detection remains part of type identification.
-6. Normalize every successful extractor result into the canonical text/table representation before profiling, cleaning, and Parquet/DuckDB persistence.
+One file may produce independently 0..N `TableAsset` values and 0..N
+`TextAsset` values. Never model table versus text as mutually exclusive. PDF,
+images, DOC/DOCX, and PPT/PPTX are dual-extraction candidates.
 
-Every escalation must store a machine-readable reason, the attempted route, timings, warnings, and extractor versions.
+## Canonical contracts and provenance
 
-## Data safety, resilience, and performance
+- Keep file registry, processing policy, extraction, deterministic cleaning,
+  semantic enrichment, catalog persistence, and future search as separate
+  layers.
+- Stable asset IDs derive from extraction provenance, never an AI display
+  name. Every table/text asset must reference the source `file_id`, content
+  SHA-256, sheet/page/section coordinates as applicable, extractor and version,
+  and extraction run.
+- Preserve `raw -> normalized -> semantic` boundaries. Normalized data never
+  overwrites raw extraction. Semantic metadata is a separate suggestion layer
+  and never overwrites either raw or normalized content.
+- Publish derived artifacts atomically below `workspace/`. Do not write beside
+  or modify source files. `workspace/input/` is immutable evidence.
+- Persist per-file and per-stage timings, route/policy reasons, warnings,
+  errors, output references, byte/page/row counts, and extractor versions.
+- Isolate corrupt and unsupported files. Interrupted work must be resumable,
+  and unchanged content must be skippable using content plus pipeline/config
+  versions.
 
-- Never edit source files in place. Treat `workspace/input/` as immutable input.
-- Isolate each file's work and errors. A corrupt or unsupported file must be recorded and must not terminate the whole batch.
-- Use a persistent per-file state machine and atomic output publication so interrupted runs can resume safely.
-- Skip unchanged files using the stable fingerprint together with pipeline/configuration version information.
-- Bound concurrency separately for cheap parsing, Java/Tika, OCR, and Docling. Do not create unbounded task or process queues; apply backpressure.
-- Record wall time per file and per stage, route decisions, byte/page/row counts, outcome, warning/error category, and output references.
-- Keep the fast path cheap. Do not import or initialize heavyweight OCR/Docling stacks in workers that do not need them.
-- Prefer streaming or bounded batches and avoid loading arbitrarily large inputs wholly into memory.
-- Write derived artifacts only below `workspace/`; keep original evidence and provenance traceable.
+## Cleaning and AI boundary
 
-## Runtime and cache containment
+Deterministic cleaning is local code: Unicode normalization, trimming, empty
+rows/columns, duplicates, null handling, numeric/date inference, obvious
+encoding repair, and mechanical column-name normalization.
 
-All mutable or large runtime assets belong in the designated repository directories:
+Semantic cleaning is future Qwen-assisted review: multi-row headers, actual
+field meaning, dataset names/categories, synonymous fields, unit semantics,
+related-table judgments, anomaly explanation, and difficult OCR/visual review.
+The expected initial model is `Qwen3.6-35B-A3B`, but model selection must be
+configuration-driven. The LLM may create `SemanticMetadata`, `QualityIssue`,
+or suggested actions only. It cannot directly mutate extracted data.
 
-- `runtime/python/`, `runtime/packages/`, `runtime/java/`, `runtime/tika/`
-- `cache/uv/`, `cache/pip/`, `cache/huggingface/`, `cache/docling/`, `cache/ocr/`, `cache/tika/`, `cache/temp/`
-- `models/ocr/`, `models/docling/`
-- `workspace/input/`, `workspace/staging/`, `workspace/output/`, `workspace/quarantine/`, `workspace/state/`, `workspace/logs/`
+Do not add embedding fields to core asset contracts. Embedding and vector
+retrieval remain future injected interfaces; do not assume an embedding
+endpoint or install a vector database/local embedding model.
 
-Future Windows launchers must derive the repository root from their own location and explicitly set applicable cache/model variables before starting Python or Java. At minimum, isolate Python user packages and bytecode behavior, uv/pip caches, Hugging Face caches, Docling artifacts, OCR artifacts, Tika state, Java temporary files, and generic temporary files. Validate each third-party component's supported environment variables before relying on them.
+## Data layer
 
-### Portable runtime contract
+- Keep the embedded registry/catalog at `workspace/state/registry.duckdb`.
+  ChongZu does not require MySQL or a database service process.
+- DuckDB holds catalog metadata, provenance, run state, and query state.
+  Large table data belongs primarily in Parquet and is queried directly by
+  DuckDB.
+- The catalog contract includes `files`, `contents`, `scan_runs`,
+  `extraction_runs`, `table_assets`, `text_assets`, `text_chunks`,
+  `semantic_metadata`, and `quality_issues`. Never populate demo business rows
+  in a real registry.
 
-- `runtime/python/cpython-3.11.15-windows-x86_64-none/python.exe` is the
-  production interpreter. Formal launchers and the production CLI must invoke
-  it by an absolute path derived from the launcher location.
-- `runtime/packages/` is the production package directory. Runtime packages
-  are installed there with the project-local `runtime/uv/uv.exe` and pinned
-  versions from `uv.lock`; no global or user site-packages are valid inputs.
-- `runtime/venv/` is a development environment for pytest and provisioning
-  only. **Development venv is not part of the portable runtime contract.** A
-  normal Windows venv may retain absolute interpreter metadata and may need to
-  be rebuilt after relocation.
-- Every future production dependency must be installed and verified in
-  `runtime/packages/` as part of the portable bundle, not only in the
-  development venv. Launchers must set `PYTHONPATH` to the relocated `src/`
-  and `runtime/packages/` directories and must not rely on the caller's PATH.
+## Runtime containment
+
+- Production Python is
+  `runtime/python/cpython-3.11.15-windows-x86_64-none/python.exe`.
+- Production packages live in `runtime/packages/` and are installed by the
+  project-local `runtime/uv/uv.exe` from pinned `uv.lock` versions.
+- `runtime/venv/` is development-only and is not part of the relocatable
+  runtime contract.
+- Launchers set `PYTHONPATH` to relocated `src/` and `runtime/packages/` and
+  explicitly isolate Python/uv/pip/Hugging Face/OCR/temporary state below the
+  repository.
+- Real inputs, runtimes, packages, caches, models, secrets, logs, databases,
+  Parquet, and generated outputs are never committed.
+
+## Technology direction and exclusions
+
+Future benchmark phases may evaluate python-calamine/Polars for structured
+data, PyMuPDF/img2table for native PDFs, RapidOCR for images/scans, and GMFT or
+Docling only for difficult tables. GMFT and Docling are benchmark candidates,
+not default dependencies.
+
+Apache Tika, a Java runtime, Unstructured, Data Prep Kit, NiFi, NeMo Curator,
+OpenRefine runtime/server, WSL, Docker, Kubernetes, Spark, and Ray are not part
+of the current plan. Keep the stable Phase 2 lightweight detector for registry
+facts and policy decisions; do not add HTML/CSS/XML business extractors.
 
 ## Development rules
 
-- Keep format adapters small and behind stable interfaces. Routing, extraction, canonicalization, profiling, cleaning, and persistence must remain separate layers.
-- Prefer deterministic, testable rules. Store schema and pipeline versions explicitly.
-- Use structured error categories rather than swallowing exceptions or storing only free-form messages.
-- Add small synthetic fixtures only; never commit real research inputs, extracted data, credentials, models, runtimes, logs, or generated databases.
-- Pin runtime and dependency versions in the future provisioning/lock files. Record licenses and hashes for downloaded binaries and models.
-- Tests must cover corrupt files, extension/MIME mismatches, interrupted runs, unchanged-file skipping, parser fallback, and bounded concurrency.
-- Phase 0 is documentation and directory scaffolding only. Do not install dependencies, download runtimes/models, or create a UI during this phase.
+- Keep adapters small and behind stable interfaces. Avoid importing heavy
+  libraries in workers that do not need them.
+- Bound cheap parsing, OCR, visual, and future heavy benchmark concurrency
+  separately with backpressure.
+- Prefer deterministic rules and structured error/status enums.
+- Add only small synthetic fixtures. Tests cover corruption, extension/type
+  mismatch, interruption, unchanged skipping, unsupported policy, independent
+  multi-asset output, provenance, fallback decisions, and bounded concurrency.
+- Provisioning is an explicit future operation. Do not install or download
+  extraction dependencies/models while doing architecture-only work.

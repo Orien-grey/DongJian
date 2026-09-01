@@ -200,9 +200,22 @@ def test_worker_bound_and_schema_version(tmp_path: Path) -> None:
         normalize_workers(MAX_WORKERS + 1)
     registry = Registry.open(_registry(tmp_path))
     try:
-        assert registry.schema_version() == 1
+        assert registry.schema_version() == 2
         tables = {row[0] for row in registry.connection.execute("SHOW TABLES").fetchall()}
-        assert {"scan_runs", "files", "contents", "file_attempts", "run_errors", "registry_meta"} <= tables
+        assert {
+            "scan_runs",
+            "files",
+            "contents",
+            "file_attempts",
+            "run_errors",
+            "registry_meta",
+            "extraction_runs",
+            "table_assets",
+            "text_assets",
+            "text_chunks",
+            "semantic_metadata",
+            "quality_issues",
+        } <= tables
     finally:
         registry.close()
 
@@ -216,6 +229,53 @@ def test_newer_registry_schema_is_rejected(tmp_path: Path) -> None:
     connection.close()
     with pytest.raises(RegistryError):
         Registry.open(database)
+
+
+def test_schema_v1_registry_migrates_policy_and_empty_catalog(tmp_path: Path) -> None:
+    database = _registry(tmp_path)
+    database.parent.mkdir(parents=True)
+    connection = duckdb.connect(str(database))
+    connection.execute(
+        "CREATE TABLE registry_meta (meta_key VARCHAR PRIMARY KEY, meta_value VARCHAR NOT NULL, updated_at TIMESTAMP NOT NULL)"
+    )
+    connection.execute("INSERT INTO registry_meta VALUES ('chongzu_file_registry', '1', CURRENT_TIMESTAMP)")
+    connection.execute(
+        """
+        CREATE TABLE files (
+            file_id VARCHAR PRIMARY KEY, source_root VARCHAR NOT NULL,
+            relative_path VARCHAR NOT NULL, filename VARCHAR NOT NULL,
+            observed_extension VARCHAR NOT NULL, size_bytes BIGINT, mtime_ns BIGINT,
+            sha256 VARCHAR, detected_type VARCHAR NOT NULL, mime_like_type VARCHAR NOT NULL,
+            detection_method VARCHAR NOT NULL, detection_confidence VARCHAR NOT NULL,
+            routing_class VARCHAR NOT NULL, current_presence_state VARCHAR NOT NULL,
+            first_seen_run VARCHAR NOT NULL, last_seen_run VARCHAR NOT NULL,
+            last_changed_run VARCHAR, latest_error_code VARCHAR, latest_error_message VARCHAR,
+            last_fingerprint_ms DOUBLE, last_detection_ms DOUBLE, updated_at TIMESTAMP NOT NULL
+        )
+        """
+    )
+    connection.execute(
+        """
+        INSERT INTO files VALUES (
+            'file-html', 'C:/source', 'page.html', 'page.html', '.html', 10, 1,
+            ?, 'html', 'text/html', 'text-signature', 'medium', 'web_asset',
+            'present', 'run-1', 'run-1', 'run-1', NULL, NULL, 1, 1, CURRENT_TIMESTAMP
+        )
+        """,
+        ["b" * 64],
+    )
+    connection.close()
+
+    registry = Registry.open(database)
+    try:
+        assert registry.schema_version() == 2
+        row = registry.list_files()[0]
+        assert row["support_status"] == "unsupported"
+        assert row["policy_reason"] == "unsupported_business_format"
+        assert registry.connection.execute("SELECT COUNT(*) FROM table_assets").fetchone()[0] == 0
+        assert registry.connection.execute("SELECT COUNT(*) FROM text_assets").fetchone()[0] == 0
+    finally:
+        registry.close()
 
 
 def test_open_run_is_marked_interrupted_for_resume(tmp_path: Path) -> None:

@@ -1,73 +1,115 @@
-# Phase 2 registry
+# Registry and embedded catalog
 
-The Phase 2 source of truth is the project-local DuckDB database at
-`workspace/state/registry.duckdb`. A scan writes only this database and a
-JSONL run log below `workspace/logs/`; the source directory is opened
-read-only.
+The source of truth is the embedded DuckDB file
+`workspace/state/registry.duckdb`. ChongZu does not use MySQL and does not need
+a database service process. Scans write only below `workspace/state/` and
+`workspace/logs/`; source directories are read-only.
 
-## Schema version
+## Schema version 2
 
-`registry_meta` stores the key `chongzu_file_registry` and schema version `1`.
-The pipeline version is recorded in every `scan_runs` row. A future schema
-change must add an explicit migration rather than silently changing a table.
+`registry_meta` stores `chongzu_file_registry = 2`. Opening a valid schema v1
+database performs an explicit resumable v1-to-v2 migration. A database
+newer than the supported version is rejected. No silent destructive rebuild is
+allowed.
 
-## Tables
+The migration:
+
+- preserves every Phase 2 row and table;
+- adds deterministic processing-policy fields to `files`;
+- backfills those fields from stored detector/extension facts;
+- creates empty catalog contract tables and indexes;
+- does not create demo/synthetic extraction rows.
+
+DuckDB does not permit the required ALTER and backfill on the same old table in
+one explicit transaction. DDL steps are therefore idempotent and restartable;
+policy backfill and the schema-version update commit atomically, so an
+interrupted partial migration continues to advertise v1 until it can finish.
+
+## Phase 2 registry tables
 
 | Table | Purpose |
 | --- | --- |
-| `scan_runs` | One run record: run ID, normalized source root, start/end/status, counts, byte total, stage timings, pipeline/schema version, and log path. |
-| `files` | A path observation. The primary `file_id` is deterministic for `(source_root, relative_path)` and is not a content ID. It stores filename, extension hint, stat metadata, latest type/detection evidence, routing class, presence, errors, and run links. |
-| `contents` | One row per stable SHA-256. This is the content identity and records size plus first/last run references. |
-| `file_attempts` | The per-run observation, including before/after metadata, whether a hash was reused, detector output, status, errors, and fingerprint/detection timings. |
-| `run_errors` | Discovery and run-level errors that do not belong to a successfully observed file. |
-| `registry_meta` | Schema-name/version metadata. |
+| `scan_runs` | Run identity, source root, timestamps/status, counts, timings, log path, and pipeline/schema versions. |
+| `files` | Stable path identity, stat/fingerprint, detected type, current presence/error, policy support, candidate routes, and run references. |
+| `contents` | One row per stable content SHA-256 with size and first/last seen run. |
+| `file_attempts` | Per-scan file observation, hash reuse, before/after stats, detector evidence, error, and timing. |
+| `run_errors` | Discovery/run errors that are not a successful file observation. |
+| `registry_meta` | Schema name/version metadata. |
 
-`scan_runs.status = 'complete'` means the coordinator finished the run. It may
-still have a non-zero `failed_count`; the per-file `file_attempts.status` and
-error columns isolate those failures without aborting the batch. A run-level
-`failed` status is reserved for an inability to write or finalize the registry.
-If a process stops after per-file writes, the next run marks its still-open
-same-source run `interrupted` and retries/reconciles from the durable path rows.
+Path identity and content identity remain separate. `file_id` is deterministic
+for `(source_root, relative_path)`; `contents.sha256` is immutable content
+identity. Duplicate paths retain distinct file rows and share a content digest.
 
-Path identity and content identity are intentionally separate. Two paths may
-have different `file_id` values and the same `contents.sha256`; those are exact
-duplicate paths. Nothing is deleted or coalesced because of a duplicate.
+## Processing policy fields in `files`
 
-## Incremental rule
+| Field | Meaning |
+| --- | --- |
+| `support_status` | `supported` or `unsupported` business processing status. |
+| `business_format` | Resolved supported format, or null when unsupported/ambiguous. |
+| `table_candidate` | Policy says a table extraction branch should be attempted. |
+| `text_candidate` | Policy says a text extraction branch should be attempted. |
+| `may_require_ocr` | OCR may be required after measurable evidence. |
+| `may_require_visual_processing` | Visual/layout processing may be required. |
+| `policy_reason` | Stable machine-readable explanation of the decision. |
 
-The first scan hashes every discovered regular file that can be opened, with a
-streaming SHA-256 reader. On a
-later scan, a present path whose relative path, byte size, and `mtime_ns` all
-match the previous observation is a **fast candidate** and its previously
-stored digest may be reused. `--rehash` disables that optimization. A new path,
-or any size/mtime change, is hashed again. A file that disappears is retained
-in `files` and marked `current_presence_state = 'missing'`.
+These are independent booleans. PDF/image/DOC/DOCX/PPT/PPTX can be both table
+and text candidates. Unsupported files stay present with their SHA-256 and
+detection evidence; they are not moved/deleted and do not fail the scan.
 
-The metadata fast path is only a performance optimization. It never replaces
-SHA-256 as the authoritative content identity. A stat before and after hashing
-is compared; a change or disappearance yields `changed_during_scan` and that
-digest is not accepted as stable. If a previous stable digest exists, the path
-row retains that last-known digest while the failed `file_attempts` row records
-the unstable attempt; no new content row is created.
+## Empty catalog contract tables
 
-## Lightweight detection
+| Table | Purpose |
+| --- | --- |
+| `extraction_runs` | File/content identity, route and reason, config/pipeline versions, timings, warnings, extractor versions, outcome, and structured error. |
+| `table_assets` | TableAsset metadata, source location, extractor, run, dimensions, artifact paths, confidence, and quality state. |
+| `text_assets` | TextAsset content and source/extractor/run provenance. |
+| `text_chunks` | Searchable deterministic chunks with offsets and provenance JSON. |
+| `semantic_metadata` | Separate model-generated names/categories/descriptions/fields/summaries with model/prompt/time/confidence. |
+| `quality_issues` | Deterministic/AI/human issues and `open/accepted/ignored/resolved` review status. |
 
-The detector combines the observed extension, bounded header reads, and (for
-ZIP signatures) the central directory only. It recognizes PDF, JPEG, PNG, ZIP,
-OOXML XLSX/DOCX/PPTX containers, OLE compound storage, basic HTML/XML/text,
-CSS, and `Zone.Identifier` metadata. A `.下载` name is therefore still
-recognized when its bytes identify a PDF or OOXML package. Corrupt ZIPs are
-recorded as isolated detector errors; they do not abort a run. Uncertain binary
-files remain `unknown` and are not ignored.
+One `file_id` is intentionally non-unique in both asset tables. There can be
+zero, one, or many table rows and independently zero, one, or many text rows.
+Semantic metadata has its own versioned identity tuple and cannot replace an
+asset row.
 
-This is deliberately not authoritative MIME detection. A later Phase 5
-project-local Tika service will be an explicit detector/parser fallback for
-legacy Office and ambiguous or failed inputs. Its result will be recorded as a
-new detection method; it will not change the path/content identity model.
+Bulk table cells will be Parquet-first. DuckDB stores catalog metadata,
+provenance, processing/query state, and directly queries Parquet rather than
+duplicating every large table cell in catalog rows.
 
-## Read-only guarantee
+## Incremental scan semantics
 
-Discovery does not follow directory symlinks or Windows reparse-point
-junctions. Hashing and detection only open source files for reads. No rename,
-move, copy, delete, timestamp update, or sidecar write is performed below the
-source root. Registry, logs, and all mutable state stay under `workspace/`.
+The first scan streams SHA-256 for every readable regular file. Later scans may
+reuse a digest only when path, size, and `mtime_ns` match; `--rehash` disables
+this metadata fast candidate. A before/after stat guards against files changing
+during hashing. Missing paths remain in `files` with
+`current_presence_state='missing'`.
+
+`scan_runs.status='complete'` means the coordinator finalized the run and may
+still have isolated failed file attempts. An interrupted open run is marked
+`interrupted` on the next scan of that source. Registry write failure is the
+condition that can fail a whole run.
+
+Future extraction reuse additionally requires matching content SHA-256 plus
+pipeline/configuration/extractor versions. It must never reuse by filename or
+AI-generated display name.
+
+## Lightweight detection versus business support
+
+The detector reads bounded headers, extension hints, and OOXML ZIP central
+directories without extracting archive members. It recognizes PDF, JPEG, PNG,
+ZIP, OOXML XLSX/DOCX/PPTX, OLE, HTML/XML/text, CSS, Zone.Identifier, and unknown
+binaries. Extension/type mismatches are retained as evidence.
+
+Detection is not business support. The rule policy maps only CSV, TSV, XLS,
+XLSX, PDF, JPG/JPEG, PNG, DOC, DOCX, PPT, PPTX, and TXT into supported work.
+HTML/CSS/XML/JS, ZIP contents, ambiguous/unknown binaries, and unlisted formats
+are registered as unsupported. Apache Tika/Java is no longer a planned default
+detector or fallback; the Phase 2 lightweight detector remains the Registry
+input until benchmark evidence justifies a narrowly scoped addition.
+
+## Source safety
+
+Discovery does not follow symlink/reparse-point directory traversal. Hashing
+and detection open sources for reads only. No rename, move, copy, delete,
+timestamp update, archive expansion, or sidecar write is performed below the
+source root. Derived data, state, and logs stay below `workspace/`.

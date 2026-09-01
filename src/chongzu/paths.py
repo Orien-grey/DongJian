@@ -16,7 +16,7 @@ PROJECT_UV_SHA256 = "5a7ec85884c2ccb1be560cb8fac3eb890df1adf49bfcc070a270ba70401
 DUCKDB_VERSION = "1.5.5"
 PIPELINE_VERSION = "phase2-discovery"
 REGISTRY_SCHEMA_NAME = "chongzu_file_registry"
-REGISTRY_SCHEMA_VERSION = 1
+REGISTRY_SCHEMA_VERSION = 2
 
 
 def _discover_project_root() -> Path:

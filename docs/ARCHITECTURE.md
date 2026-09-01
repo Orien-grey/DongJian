@@ -1,212 +1,228 @@
 # Architecture
 
-## 1. System objective
+## Product boundary
 
-The system processes one local scientific-project directory of roughly 1,500 heterogeneous files on Windows x64. It optimizes for throughput without sacrificing provenance, restartability, or extraction quality. The key design rule is to use the cheapest parser that can produce an adequate result and to make every more expensive escalation explainable.
+ChongZu is a fully relocatable Windows x64 workbench for organizing research
+data in one local scientific project. The core has exactly two extraction
+responsibilities: tables and text. File discovery, extraction, deterministic
+normalization, semantic suggestions, persistence, and future retrieval remain
+separate layers.
 
-The processing core must operate offline after preparation. All executable runtimes, native libraries, models, and mutable caches are rooted inside the project directory.
+The source directory is immutable. All mutable state and derived artifacts are
+root-relative below `workspace/`; runtime and cache state is root-relative
+below `runtime/`, `cache/`, and `models/`.
 
-## 2. Logical pipeline
+## System flow
 
 ```text
-immutable input
-    -> discovery + metadata
-    -> SHA-256 fingerprint + incremental registry lookup
-    -> actual type detection
-    -> fast / medium / slow route
-    -> canonical text + tables + provenance
-    -> profiling
-    -> deterministic cleaning
-    -> Parquet + DuckDB + quality reports
+FILE REGISTRY
+      |
+      v
+Processing Policy
+      |
+      +----------------------+
+      |                      |
+      v                      v
+TABLE EXTRACTION        TEXT EXTRACTION
+      |                      |
+      v                      v
+TableAsset              TextAsset/TextChunk
+      |                      |
+      +----------+-----------+
+                 |
+                 v
+         Semantic Enrichment
+            Qwen API
+                 |
+         +-------+---------+
+         |       |         |
+       naming category semantic schema
+         |       |         |
+         +-------+---------+
+                 |
+                 v
+            Data Catalog
+                 |
+          DuckDB + Parquet
+                 |
+                 v
+            Future Search
+         SQL + Text Retrieval
 ```
 
-Each arrow is a recorded stage with start/end time, status, warnings, and structured failure details. The coordinator commits a file result only after required artifacts have been written successfully.
+The arrows from policy to extraction are independent. For every registered
+file, table cardinality is 0..N and text cardinality is separately 0..N. A
+PDF, image, Word document, or presentation can yield both types. No enum,
+database uniqueness rule, worker route, or UI assumption may turn this into an
+exclusive table-versus-text choice.
 
-## 3. Discovery, fingerprints, and incremental identity
+## Registry and processing policy
 
-Discovery walks an explicitly supplied source root (for example,
-`python -m chongzu scan "E:\some\data"`) without modifying it and records at least:
+Phase 2 discovery collects path identity, immutable content SHA-256, stat
+metadata, lightweight detected type, extension hint, MIME-like value,
+detection evidence, and scan provenance. The extension is a hint, not truth.
+The lightweight detector remains intentionally small and does not extract
+business content.
 
-- normalized absolute source path and source-root-relative path;
-- byte size and filesystem timestamps;
-- SHA-256 content digest;
-- observed extension and detected MIME/type;
-- pipeline version, configuration hash, and relevant extractor/model versions.
+`processing_policy.plan_processing()` consumes only Registry facts and emits:
 
-Size and modification time may be used as a cheap candidate check, but SHA-256 is the authoritative content identity. The Phase 2 registry reuses a
-previous digest only when the same path instance is still present and its size
-and `mtime_ns` match; `--rehash` forces a streaming hash. A stat-before/stat-
-after mismatch is recorded as `changed_during_scan` and is never accepted as a
-stable digest. Missing paths remain historical rows. Rename handling can later
-reuse content-derived artifacts while preserving a new source-path observation.
+- `support_status` (`supported` or `unsupported`);
+- resolved first-stage business format when supported;
+- independent table/text candidate booleans;
+- possible OCR and visual-processing booleans;
+- a machine-readable reason code.
 
-Discovery does not follow directory symlinks or Windows junction/reparse
-points, keeps a visited-directory guard, and records permission, broken-link,
-and filesystem errors per entry. A single error cannot terminate the batch.
+This is deterministic rule code and never invokes an LLM. Unsupported files
+stay in `files`, preserve their fingerprint and type evidence, and do not fail
+the scan or get deleted/moved.
 
-The coordinator uses a bounded `ThreadPoolExecutor` for stat, streaming hash,
-and lightweight detection work. It submits only a small multiple of the worker
-count and performs all DuckDB writes on the coordinator connection. Per-file
-hash/detection timings and run-level stage timings are persisted.
+| Real/detected format | Table candidate | Text candidate | OCR possible | Visual possible |
+| --- | --- | --- | --- | --- |
+| CSV / TSV | yes | no default pass | no | no |
+| XLS / XLSX | yes | no default pass | no | no |
+| PDF | yes | yes | yes | yes |
+| JPEG / PNG | yes | yes | yes | yes |
+| DOC / DOCX | yes | yes | future evidence only | future evidence only |
+| PPT / PPTX | yes | yes | future evidence only | future evidence only |
+| TXT | no | yes | no | no |
+| HTML / CSS / XML / JS | no | no | no | no; unsupported |
+| ZIP content / unknown binary / unlisted | no | no | no | no; unsupported |
 
-Suggested file state transitions are `discovered -> identified -> routed -> extracting -> canonicalized -> profiled -> cleaned -> persisted -> complete`, with terminal per-attempt states such as `unsupported`, `failed`, and `quarantined`. Interrupted nonterminal states are eligible for safe retry.
+OLE detection cannot identify legacy Excel/Word/PowerPoint from bytes alone;
+the policy uses `.xls`, `.doc`, or `.ppt` as a bounded format hint. Ambiguous
+OLE containers remain unsupported until a future benchmark proves a safe
+project-local detector. A JPEG/PNG web screenshot remains supported because
+its real type is an image, not HTML.
 
-## 4. Lightweight type identification (Phase 2)
+## Extraction contracts
 
-Extensions are hints, never ground truth. Phase 2 uses only standard-library
-signature/header checks and ZIP central-directory inspection. It recognizes
-PDF, JPEG, PNG, ZIP, OOXML XLSX/DOCX/PPTX, OLE compound storage, basic
-HTML/XML/text, CSS, and Zone.Identifier metadata. It records the observed
-extension, detected type, MIME-like type, method, confidence, evidence, and a
-conservative provisional routing class. A `.下载` file is classified by its
-bytes when the magic/container is clear; uncertain binary remains `unknown`.
+The canonical Python models live in `src/chongzu/assets.py`; the schema mapping
+is documented in [DATA_MODEL.md](DATA_MODEL.md).
 
-Corrupt ZIP inspection is isolated as `corrupted_zip`. No archive member is
-extracted in this phase.
+`TableAsset` records provenance, source location, dimensions and columns, raw
+and optional normalized artifact paths, extraction confidence, and quality
+status. Large row data is not forced into the catalog row: raw/normalized table
+payloads will normally be stored in Parquet below `workspace/output/`.
 
-Apache Tika is intentionally not installed yet. In Phase 5 it will be a
-project-local Java service for authoritative MIME detection and legacy/unknown
-or parser-failure fallback, with the same bounded and auditable lifecycle.
+`TextAsset` records provenance, page/section/bounding box, extracted text,
+language, and creation time. `TextChunk` is a deterministic searchable slice
+with character offsets and explicit source/extraction provenance. Embeddings
+are deliberately absent.
 
-Detection output includes detected MIME, confidence or evidence where available, extension mismatch, container/encryption indicators, and the selected route. A password-protected, unsupported, truncated, or suspicious file is recorded as a per-file outcome rather than aborting the batch.
+Stable table/text/chunk IDs are derived from extraction provenance. Semantic
+display names, categories, model responses, and UI edits never participate in
+ID generation.
 
-## 5. Routing tiers
+## Extraction runs and lineage
 
-### 5.1 Fast path
+An extraction run must record the source file and content SHA-256, pipeline and
+configuration versions, attempted route, route reason, stage timings, warnings,
+extractor versions, outcome, and structured error category. Assets refer to the
+run that created them.
 
-Fast adapters avoid heavyweight model initialization and should handle the majority of files.
+The minimum lineage chain is:
 
-| Input family | Primary implementation | Fallback/escalation signal |
-| --- | --- | --- |
-| CSV/TSV and delimited text | streaming decoding plus Polars | ambiguous encoding/dialect, malformed structure, or resource limit |
-| JSON/JSONL | standard library/streamed normalization, then Polars where tabular | invalid/truncated content or excessive nesting |
-| HTML | lxml/BeautifulSoup | malformed or unsupported embedded content |
-| XML | lxml with safe parser settings | malformed, huge, or schema-specific content |
-| TXT/Markdown/log-like text | bounded decoding with recorded encoding | low decode confidence or binary mismatch |
-| XLS/XLSX | python-calamine | required styles, formulas, comments, merged-cell semantics, or unsupported workbook feature |
-| XLSX detail fallback | openpyxl, read-only/data-only modes where appropriate | corrupt/encrypted workbook or unsupported feature |
-| DOCX | python-docx plus zip/XML inspection where needed | corrupt package, embedded legacy object, or layout needs outside scope |
-| PPTX | python-pptx plus zip/XML inspection where needed | corrupt package, embedded legacy object, or unsupported content |
+```text
+TableAsset/TextAsset
+  -> extraction_run_id
+  -> file_id + content_sha256
+  -> source_root + relative_path
+  -> sheet/page/section/bbox
+  -> extractor + extractor_version
+```
 
-The fast path returns text segments, tables, metadata, warnings, and quality signals. It does not attempt visual reconstruction when that is unnecessary for downstream research analysis.
+Raw output is immutable evidence. New extractor/config versions create new
+run evidence and publish new derived artifacts; they do not overwrite prior raw
+assets. Publication uses staging plus an atomic replace/rename where Windows
+filesystem semantics permit.
 
-### 5.2 Medium path
+## Raw, normalized, and semantic layers
 
-The medium path is more expensive but remains deterministic and locally bounded.
+The three layers have different authority:
 
-- **Ordinary PDF:** PyMuPDF extracts metadata, page text, blocks, coordinates, links, and images as required. It is always attempted before Docling for a normal PDF.
-- **Images and selected scanned pages:** RapidOCR with ONNX Runtime handles JPG/PNG and page images that genuinely need OCR. OCR workers are separately bounded because memory and CPU cost differ from text parsing.
-- **Legacy/unknown/failure fallback:** Tika parsing handles legacy Office formats, unusual containers, unknown formats, or primary-parser failures when its detected type supports extraction.
+1. **Raw** is the extractor result plus exact provenance.
+2. **Normalized** is deterministic mechanical transformation of raw data.
+3. **Semantic** is model/human interpretation linked to an asset ID.
 
-PDF assessment records page count, text characters and coverage per page, image dominance, empty-page ratio, extraction exceptions, and table/layout indicators. These signals determine whether the PyMuPDF result is adequate.
+Deterministic cleaning includes Unicode normalization, trimming, removing or
+flagging empty rows/columns, duplicate-row handling, null normalization,
+numeric/date inference, obvious encoding repair, and mechanical column-name
+normalization. Every transformation must be versioned and reversible or
+reproducible.
 
-### 5.3 Slow path
+Semantic cleaning includes multi-row header interpretation, field meaning,
+dataset naming/category, synonym and unit judgments, related-table decisions,
+anomaly explanation, and difficult OCR/visual review. It creates
+`SemanticMetadata`, `QualityIssue`, or a suggested transformation for review.
+It cannot mutate raw or normalized data directly.
 
-Docling is opt-in by routing evidence, never the default PDF parser. Valid escalation reasons include:
+## Semantic provider boundary
 
-- a PDF is image-only or has materially inadequate text coverage;
-- page reading order is demonstrably unusable for the configured quality threshold;
-- complex multi-column layout requires layout reconstruction;
-- complex tables cannot be represented adequately by the cheaper path;
-- an explicit project rule requests high-fidelity processing for a known document class;
-- cheaper extractors failed and Docling supports the detected input.
+`src/chongzu/semantic.py` defines a provider-neutral configuration and
+`SemanticEnrichmentProvider` protocol. The expected first model is
+Qwen3.6-35B-A3B, but the model is a config value, not a hard-coded exclusive
+choice. `config/llm.example.json` contains no credential. Real LLM config files
+are ignored by Git.
 
-The registry stores a stable reason code such as `pdf_image_only`, `pdf_low_text_coverage`, `complex_layout`, `complex_table`, `policy_override`, or `primary_extract_failed`, plus supporting metrics. Docling concurrency and memory budgets are independent and normally much lower than fast-path concurrency. Required artifacts must be pre-provisioned under project-local model/cache directories; processing cannot download them.
+No network client is implemented in this refactor. A future adapter may contact
+only the base URL the user explicitly configures, with no automatic public
+fallback. It must record model, prompt version, confidence, generation time,
+request/result status, and enough non-secret evidence for audit. API keys must
+never enter logs, DuckDB, prompt captures, or Git.
 
-## 6. Canonical representation
+## Embedded data catalog
 
-All extractors emit a shared logical model rather than format-specific downstream objects.
+ChongZu uses the embedded file
+`workspace/state/registry.duckdb`; it does not need MySQL or a database service
+process. DuckDB stores catalog metadata, provenance, policy and run state, and
+future query state. It directly queries large Parquet table artifacts.
 
-### Document record
+Schema v2 preserves Phase 2 `files`, `contents`, `scan_runs`, `file_attempts`,
+and `run_errors`, adds processing-policy fields to `files`, and creates empty
+contract tables:
 
-- stable document/content identifiers and source observation;
-- source path, size, timestamps, SHA-256, detected MIME, and extension mismatch;
-- selected route, attempted extractors, version information, and escalation reason;
-- processing status, warnings/errors, stage timings, and output references;
-- aggregate quality metrics such as text coverage, OCR use, and table counts.
+- `extraction_runs`
+- `table_assets`
+- `text_assets`
+- `text_chunks`
+- `semantic_metadata`
+- `quality_issues`
 
-### Text segment
+The migration writes no synthetic asset rows. It deterministically backfills
+policy status for existing file rows. See [REGISTRY.md](REGISTRY.md).
 
-- document identifier, segment identifier, and deterministic order;
-- text, page/sheet/slide/section locator, block type, and optional coordinates;
-- language/encoding evidence where measured;
-- extractor, confidence/quality indicators, and provenance.
+## Resilience and bounded work
 
-### Table and cell data
+- One corrupt, unsupported, or failed file produces a local outcome and does
+  not terminate the batch.
+- File/run state is durable; interrupted nonterminal work is retryable.
+- Unchanged checks incorporate stable content identity plus pipeline/config
+  versions before an extractor result may be reused.
+- Cheap structured/document parsing, OCR, visual processing, and future heavy
+  benchmark workers have separate bounded queues and concurrency.
+- Heavy libraries/models are imported and initialized only in workers that
+  need them. Processing never downloads missing artifacts.
+- Arbitrarily large inputs are streamed or processed in bounded pages/batches.
 
-- document/table identifiers and source locator;
-- table title/caption where available;
-- stable row/column order, normalized column names, inferred logical types, and raw values;
-- optional cell coordinates, formula/format/merged-cell metadata only when requested;
-- extraction method, warnings, and confidence/quality indicators.
+## Future search boundary
 
-Large normalized records are written as Parquet datasets. DuckDB holds the processing registry and queries Parquet; large document bodies should not be duplicated unnecessarily inside the registry database. Schemas are versioned and migrations are explicit.
+Structured search will locate candidate table assets in the catalog, ask the
+configured model for restricted read-only SQL, validate it, and execute it in
+DuckDB against catalog/Parquet data.
 
-## 7. Profiling and cleaning
+Text search will locate `TextChunk` candidates through deterministic keyword
+retrieval and, later, an injected vector-retrieval implementation before Qwen
+synthesis. `src/chongzu/search.py` reserves `TextRetriever` and
+`EmbeddingProvider` interfaces only. No embedding endpoint, local model, vector
+database, or embedding field is assumed.
 
-Profiling follows canonicalization and records, without changing raw evidence:
+## Removed and benchmark-only routes
 
-- null/blank rates, row and distinct counts, type consistency, numeric ranges, and date distributions;
-- encoding/language indicators and abnormal text/control characters;
-- duplicate and near-duplicate candidates;
-- column-name similarity and candidate entity/value matches using RapidFuzz or deterministic rules;
-- extraction-quality and route-specific warnings.
+Apache Tika and Java are no longer planned default detector/parser paths.
+Unstructured, Data Prep Kit, NiFi, NeMo Curator, OpenRefine runtime/server,
+WSL, Docker, Kubernetes, Spark, and Ray are outside the product architecture.
+HTML/CSS/XML remain discoverable but have no business extractor.
 
-Cleaning produces a new derived layer with a transformation log. It never overwrites the source or uncleaned canonical representation. Tier one is exact deterministic normalization; tier two is bounded fuzzy/rule-based matching; a future tier-three LLM step is optional, separately enabled, fully auditable, and never required for the core pipeline.
-
-## 8. Persistence, recovery, and idempotency
-
-DuckDB stores run, file observation, content identity, attempt, stage timing, route decision, error, and artifact metadata. Parquet stores bulk canonical/profiling/cleaned datasets. Writes use staging paths followed by atomic publication where Windows filesystem semantics permit.
-
-Each file is an isolation boundary. An exception is categorized, recorded, and the batch continues. Retry policies are bounded and distinguish deterministic parse errors from transient process failures. Re-running after interruption reconciles staged artifacts with registry state and never assumes a partially written output is complete.
-
-## 9. Concurrency and resource control
-
-The coordinator uses bounded queues and backpressure. Configuration exposes separate limits for:
-
-- filesystem hashing and cheap parsing;
-- PyMuPDF workers;
-- the Tika/Java service or client requests;
-- OCR workers and page batching;
-- Docling workers;
-- persistence writers.
-
-Defaults must be conservative on unknown hardware. Never submit all files or pages to an unbounded executor. Enforce per-file size/page limits, bounded in-memory batches, timeouts, and graceful worker termination. Heavy components are initialized lazily only in their assigned workers.
-
-## 10. Observability and explainability
-
-For every run and file, capture:
-
-- discovery, hashing, detection, extraction, canonicalization, profiling, cleaning, and persistence durations;
-- selected tier/adapter and all attempted fallbacks;
-- escalation reason code and evidence metrics;
-- input/output counts such as bytes, pages, sheets, rows, text characters, tables, and OCR pages;
-- success, skip, unsupported, warning, and categorized failure outcomes;
-- peak-resource measurements where practical and component versions.
-
-Logs are structured and stored under `workspace/logs/`; operational state belongs under `workspace/state/`. User-facing summaries must distinguish extraction failure from low-quality success.
-
-## 11. Runtime and cache containment
-
-Production launchers invoke the standalone
-`runtime/python/cpython-3.11.15-windows-x86_64-none/python.exe` and expose only
-`src/` plus the target-installed `runtime/packages/` on `PYTHONPATH`. They
-derive every path from the launcher location, so a copied project does not
-retain an origin-root dependency. `runtime/venv/` is development-only (pytest
-and provisioning), not part of the portable runtime contract; ordinary
-Windows venv metadata may require rebuilding after a move. Python user-site
-loading is disabled. Java/Tika temporary state is redirected locally when
-those phases are provisioned. Hugging Face, Docling, OCR, uv, and pip caches
-are explicitly configured and tested with a clean user profile and an
-intentionally restricted global `PATH`.
-
-Offline acceptance testing must prove that a prepared copy can process fixtures with network access disabled and without system Python or Java. Any component that attempts an implicit download fails the acceptance test.
-
-## 12. Security and data governance
-
-- Do not execute macros, embedded programs, or active document content.
-- Use safe XML parsing and bounded archive expansion; defend against zip bombs and path traversal.
-- Treat filenames and document content as untrusted input.
-- Do not send research data to remote services.
-- Do not place secrets, real inputs, derived research outputs, runtime binaries, or models in Git.
-- Record tool/model licenses and verified artifact hashes during future provisioning.
+GMFT and Docling are future complex-table benchmark candidates only. They are
+not default dependencies and will be retained only if representative corpus
+evidence demonstrates a material advantage that lighter paths cannot provide.

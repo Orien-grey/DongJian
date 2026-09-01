@@ -383,12 +383,12 @@ def _check_optional_tools(report: DoctorReport) -> None:
 
     java = shutil.which("java")
     if java:
-        report.add("Java/Tika", "INFO", f"Java present at {java}; NOT REQUIRED IN PHASE 2.5")
+        report.add("Java/Tika", "INFO", f"host Java present at {java}; NOT USED / NOT A DEFAULT DEPENDENCY")
     else:
-        report.add("Java/Tika", "INFO", "NOT INSTALLED / NOT REQUIRED IN PHASE 2.5")
+        report.add("Java/Tika", "INFO", "NOT INSTALLED / NOT A DEFAULT DEPENDENCY")
 
-    report.add("Docling", "INFO", "NOT INSTALLED / NOT REQUIRED IN PHASE 2.5")
-    report.add("OCR/RapidOCR", "INFO", "NOT INSTALLED / NOT REQUIRED IN PHASE 2.5")
+    report.add("Docling", "INFO", "NOT INSTALLED / FUTURE BENCHMARK CANDIDATE ONLY")
+    report.add("OCR/RapidOCR", "INFO", "NOT INSTALLED / DEFERRED TO PHASE 5 BENCHMARK")
 
 
 def run_checks() -> DoctorReport:
