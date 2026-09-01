@@ -10,8 +10,9 @@ from pathlib import Path
 
 from . import __version__
 from .doctor import main as doctor_main
-from .registry import Registry, canonical_source_root
+from .registry import Registry, RegistryError, canonical_source_root
 from .scan import ScanError, benchmark_metrics, scan_source
+from .extract import StructuredExtractionError, extract_structured
 
 
 def _print_summary(summary) -> None:
@@ -40,6 +41,13 @@ def _build_parser() -> argparse.ArgumentParser:
     scan_parser.add_argument("--workers", type=int, default=None)
     scan_parser.add_argument("--rehash", action="store_true")
 
+    extract_parser = sub.add_parser("extract", help="extract assets from registry-backed source files")
+    extract_sub = extract_parser.add_subparsers(dest="extract_command", required=True)
+    extract_structured_parser = extract_sub.add_parser("structured", help="extract CSV/TSV/XLS/XLSX tables")
+    extract_structured_parser.add_argument("source", type=Path)
+    extract_structured_parser.add_argument("--workers", type=int, default=None)
+    extract_structured_parser.add_argument("--force", action="store_true")
+
     registry_parser = sub.add_parser("registry", help="inspect the local DuckDB registry")
     registry_sub = registry_parser.add_subparsers(dest="registry_command", required=True)
     summary_parser = registry_sub.add_parser("summary")
@@ -55,7 +63,25 @@ def _build_parser() -> argparse.ArgumentParser:
     benchmark_scan.add_argument("source", type=Path)
     benchmark_scan.add_argument("--workers", type=int, default=None)
     benchmark_scan.add_argument("--rehash", action="store_true")
+    benchmark_structured = benchmark_sub.add_parser("structured", help="measure structured extraction throughput")
+    benchmark_structured.add_argument("source", type=Path)
+    benchmark_structured.add_argument("--workers", type=int, default=None)
+    benchmark_structured.add_argument("--force", action="store_true")
     return parser
+
+
+def _print_structured_summary(summary) -> None:
+    print(f"Source: {summary.source_root}")
+    print(f"Files considered: {summary.files_considered}")
+    print(f"Structured supported: {summary.structured_supported}")
+    print(f"Extracted: {summary.extracted}")
+    print(f"Reused: {summary.reused}")
+    print(f"Tables produced: {summary.tables_produced}")
+    print(f"Quality issues: {summary.quality_issues}")
+    print(f"Failed: {summary.failed}")
+    print(f"Total rows: {summary.total_rows}")
+    print(f"Total bytes: {summary.total_bytes}")
+    print(f"Elapsed: {summary.wall_time_ms:.2f} ms")
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -71,6 +97,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             summary = scan_source(parsed.source, workers=parsed.workers, rehash=parsed.rehash)
             _print_summary(summary)
             return 0 if summary.status == "complete" else 1
+        if parsed.command == "extract" and parsed.extract_command == "structured":
+            summary = extract_structured(parsed.source, workers=parsed.workers, force=parsed.force)
+            _print_structured_summary(summary)
+            return 0
         if parsed.command == "benchmark" and parsed.benchmark_command == "scan":
             summary = scan_source(parsed.source, workers=parsed.workers, rehash=parsed.rehash)
             _print_summary(summary)
@@ -78,12 +108,21 @@ def main(argv: Sequence[str] | None = None) -> int:
             for key, value in benchmark_metrics(summary).items():
                 print(f"{key}: {value:.3f}" if isinstance(value, float) else f"{key}: {value}")
             return 0 if summary.status == "complete" else 1
+        if parsed.command == "benchmark" and parsed.benchmark_command == "structured":
+            summary = extract_structured(parsed.source, workers=parsed.workers, force=parsed.force)
+            _print_structured_summary(summary)
+            print("Benchmark:")
+            for key, value in summary.benchmark_metrics().items():
+                print(f"{key}: {value:.3f}" if isinstance(value, float) else f"{key}: {value}")
+            return 0
         if parsed.command == "registry":
             registry = Registry.open()
             try:
                 source = canonical_source_root(parsed.source) if parsed.source is not None else None
                 if parsed.registry_command == "summary":
                     result = registry.latest_run(source)
+                    if result is not None:
+                        result["catalog"] = registry.catalog_summary(source)
                     print(json.dumps(result or {}, ensure_ascii=False, default=str, indent=2))
                 else:
                     rows = registry.list_files(source, parsed.state, parsed.limit)
@@ -93,7 +132,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 registry.close()
         parser.print_help()
         return 0
-    except (ScanError, ValueError, OSError) as exc:
+    except (ScanError, StructuredExtractionError, RegistryError, ValueError, OSError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
 

@@ -10,11 +10,12 @@ summaries, and complex quality suggestions without overwriting extracted data.
 The fixed development root is `E:\Desktop\ChongZu`; launchers derive the root
 from their own location, so a prepared bundle can be moved as a directory.
 
-Phase 2.5 established and verified the standalone CPython 3.11.15 portable
-runtime. The current Architecture Refactor adds the data contracts, processing
-policy, schema v2 catalog boundary, and future LLM/search interfaces. It does
-not yet install or run business extractors, call an LLM, create embeddings, or
-provide a frontend.
+Phase 3 now implements the first business extraction path: strict CSV/TSV and
+native XLS/XLSX extraction into traceable `TableAsset` records plus separate
+raw and normalized Parquet. It uses bounded workers, a central DuckDB writer,
+content/version-based reuse, and atomic publication below `workspace/`. It does
+not extract PDF/images/Office text, call an LLM, create embeddings, or provide
+a frontend.
 
 ## Product flow
 
@@ -80,7 +81,8 @@ See [Architecture](docs/ARCHITECTURE.md), [Data model](docs/DATA_MODEL.md),
 | `models/`, `cache/` | Future model artifacts and all controlled caches; ignored |
 | `workspace/input/` | Immutable real source evidence; ignored |
 | `workspace/staging/` | Recoverable intermediate work; ignored |
-| `workspace/output/` | Raw/normalized artifacts, Parquet, and reports; ignored |
+| `workspace/artifacts/` | Stable raw/normalized Parquet and provenance metadata; ignored |
+| `workspace/output/` | Future reports and exports; ignored |
 | `workspace/state/` | `registry.duckdb`, checkpoints, and query state; ignored |
 | `workspace/quarantine/`, `workspace/logs/` | Isolated failure metadata and structured logs; ignored |
 
@@ -94,6 +96,8 @@ Formal portable launchers require no activation:
 ```text
 .\doctor.cmd
 .\chongzu.cmd scan "D:\Research Data\Project"
+.\chongzu.cmd extract structured "D:\Research Data\Project" --workers 4
+.\chongzu.cmd benchmark structured "D:\Research Data\Project"
 .\chongzu.cmd registry summary
 ```
 
@@ -107,7 +111,12 @@ the same temporary bypass used by the `.cmd` launchers.
 & $env:CHONGZU_PROJECT_UV lock --check
 ```
 
-The registry is `workspace\state\registry.duckdb`; run logs are below
-`workspace\logs\`. DuckDB 1.5.5 remains the only production Python dependency.
-No Calamine, Polars, PyMuPDF, RapidOCR, img2table, GMFT, Docling, Torch, Java,
-or Tika dependency is installed in this refactor.
+`extract structured` automatically performs an incremental registry scan, so
+operators do not need a separate scan step. `--force` republishes an otherwise
+reusable extraction. The registry is `workspace\state\registry.duckdb`.
+
+Pinned production packages are DuckDB 1.5.5, Polars 1.44.1 (with its
+`polars-runtime-32` 1.44.1 Windows wheel), and python-calamine 0.8.2. They live
+in `runtime\packages`; PyArrow, Pandas, NumPy, OpenPyXL, PyMuPDF, OCR, Docling,
+Torch, Java, and Tika are not installed. See
+[Structured extraction](docs/STRUCTURED_EXTRACTION.md).

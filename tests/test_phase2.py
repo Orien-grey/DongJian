@@ -200,7 +200,7 @@ def test_worker_bound_and_schema_version(tmp_path: Path) -> None:
         normalize_workers(MAX_WORKERS + 1)
     registry = Registry.open(_registry(tmp_path))
     try:
-        assert registry.schema_version() == 2
+        assert registry.schema_version() == 3
         tables = {row[0] for row in registry.connection.execute("SHOW TABLES").fetchall()}
         assert {
             "scan_runs",
@@ -268,7 +268,7 @@ def test_schema_v1_registry_migrates_policy_and_empty_catalog(tmp_path: Path) ->
 
     registry = Registry.open(database)
     try:
-        assert registry.schema_version() == 2
+        assert registry.schema_version() == 3
         row = registry.list_files()[0]
         assert row["support_status"] == "unsupported"
         assert row["policy_reason"] == "unsupported_business_format"

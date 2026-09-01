@@ -117,13 +117,13 @@ def plan_processing(info: RegistryFileInfo) -> ProcessingPlan:
         return _supported(info, BusinessFormat.JPEG, table=True, text=True, ocr=True, visual=True)
     if detected == "png":
         return _supported(info, BusinessFormat.PNG, table=True, text=True, ocr=True, visual=True)
-    if detected == "xlsx":
+    if extension == ".xlsx" and detected in {"xlsx", "zip", "unknown"}:
         return _supported(info, BusinessFormat.XLSX, table=True, text=False)
     if detected == "docx":
         return _supported(info, BusinessFormat.DOCX, table=True, text=True)
     if detected == "pptx":
         return _supported(info, BusinessFormat.PPTX, table=True, text=True)
-    if detected == "delimited_text" and extension in {".csv", ".tsv"}:
+    if extension in {".csv", ".tsv"} and detected in {"delimited_text", "plain_text", "unknown"}:
         business_format = BusinessFormat.TSV if extension == ".tsv" else BusinessFormat.CSV
         return _supported(info, business_format, table=True, text=False)
     if detected == "ole_compound":
@@ -137,6 +137,8 @@ def plan_processing(info: RegistryFileInfo) -> ProcessingPlan:
         if legacy_format in {BusinessFormat.DOC, BusinessFormat.PPT}:
             return _supported(info, legacy_format, table=True, text=True)
         return _unsupported(info, "unsupported_ambiguous_ole_container")
+    if extension == ".xls" and detected in {"ole_compound", "unknown", "plain_text", "zip"}:
+        return _supported(info, BusinessFormat.XLS, table=True, text=False)
     if detected == "plain_text":
         if extension in _UNSUPPORTED_TEXT_EXTENSIONS:
             return _unsupported(info, "unsupported_business_format")

@@ -8,6 +8,7 @@ import subprocess
 from pathlib import Path
 
 from chongzu import paths
+from tests.xlsx_factory import write_xlsx
 
 
 def _portable_env(root: Path, *, clean_host: bool = False) -> dict[str, str]:
@@ -92,6 +93,7 @@ def _run_cmd(script: Path, args: list[str], cwd: Path, env: dict[str, str]) -> s
         env=env,
         capture_output=True,
         text=True,
+        encoding="utf-8",
         check=False,
         timeout=180,
     )
@@ -108,9 +110,10 @@ def _sha256(path: Path) -> str:
 def test_standalone_runtime_and_target_package_imports() -> None:
     env = _portable_env(paths.PROJECT_ROOT)
     code = (
-        "import json,site,sys,duckdb,chongzu; "
+        "import json,site,sys,duckdb,polars,python_calamine,chongzu; "
         "print(json.dumps({'exe':sys.executable,'prefix':sys.prefix,'base':sys.base_prefix,"
-        "'duckdb':duckdb.__file__,'chongzu':chongzu.__file__,'user_site':site.ENABLE_USER_SITE}))"
+        "'duckdb':duckdb.__file__,'polars':polars.__file__,'calamine':python_calamine.__file__,"
+        "'chongzu':chongzu.__file__,'user_site':site.ENABLE_USER_SITE}))"
     )
     completed = subprocess.run(
         [str(paths.PYTHON_EXE), "-c", code],
@@ -125,6 +128,8 @@ def test_standalone_runtime_and_target_package_imports() -> None:
     assert Path(result["exe"]).resolve() == paths.PYTHON_EXE.resolve()
     assert result["prefix"] == result["base"]
     assert paths.PACKAGES_ROOT.resolve() in Path(result["duckdb"]).resolve().parents
+    assert paths.PACKAGES_ROOT.resolve() in Path(result["polars"]).resolve().parents
+    assert paths.PACKAGES_ROOT.resolve() in Path(result["calamine"]).resolve().parents
     assert paths.SRC_ROOT.resolve() in Path(result["chongzu"]).resolve().parents
     assert result["user_site"] is False
 
@@ -178,6 +183,7 @@ def _build_relocated_copy(root: Path, destination: Path) -> None:
         "models/docling",
         "workspace/input",
         "workspace/staging",
+        "workspace/artifacts",
         "workspace/output",
         "workspace/quarantine",
         "workspace/state",
@@ -228,20 +234,60 @@ def test_relocated_copy_reanchors_runtime_registry_and_cache() -> None:
         assert (destination / "cache" / "temp").is_dir()
         assert any((destination / "cache").rglob("*"))
 
+        structured_source = destination / "workspace" / "structured fixtures 中文"
+        structured_source.mkdir(parents=True)
+        (structured_source / "sample.csv").write_text("name,value\n北京,12\n上海,8\n", encoding="utf-8")
+        write_xlsx(
+            structured_source / "book.xlsx",
+            [("数据", [["name", "value"], ["alpha", 1], ["beta", 2]], None)],
+        )
+        structured_hashes = {_sha256(path) for path in structured_source.iterdir()}
+        extraction = _run_cmd(
+            destination / "chongzu.cmd",
+            ["extract", "structured", str(structured_source), "--workers", "2"],
+            destination,
+            clean_env,
+        )
+        assert extraction.returncode == 0, extraction.stdout + extraction.stderr
+        assert "Structured supported: 2" in extraction.stdout
+        assert "Tables produced: 2" in extraction.stdout
+        assert structured_hashes == {_sha256(path) for path in structured_source.iterdir()}
+        catalog = _run_cmd(
+            destination / "chongzu.cmd",
+            ["registry", "summary", "--source", str(structured_source)],
+            destination,
+            clean_env,
+        )
+        assert catalog.returncode == 0, catalog.stdout + catalog.stderr
+        catalog_data = json.loads(catalog.stdout)
+        assert catalog_data["catalog"]["table_assets"] == 2
+        assert catalog_data["catalog"]["table_rows"] == 4
+
+        probe_code = (
+            "import duckdb,json,polars,python_calamine,sys,pathlib; "
+            "c=duckdb.connect('workspace/state/registry.duckdb'); "
+            "p=c.execute(\"select normalized_artifact_path from table_assets where is_current=true limit 1\").fetchone()[0]; "
+            "f=polars.read_parquet(pathlib.Path('workspace')/p); "
+            "print(json.dumps({'exe':sys.executable,'duckdb':duckdb.__file__,'polars':polars.__file__,"
+            "'calamine':python_calamine.__file__,'rows':f.height}))"
+        )
         probe = subprocess.run(
-            [str(destination / "runtime" / "python" / paths.PYTHON_RUNTIME_DIRNAME / "python.exe"), "-c", "import duckdb,sys; print(sys.executable); print(duckdb.__file__)"],
+            [str(destination / "runtime" / "python" / paths.PYTHON_RUNTIME_DIRNAME / "python.exe"), "-c", probe_code],
             cwd=str(destination),
             env=clean_env,
             capture_output=True,
             text=True,
+            encoding="utf-8",
             check=False,
         )
         assert probe.returncode == 0, probe.stdout + probe.stderr
-        probe_lines = probe.stdout.strip().splitlines()
-        assert str(destination).lower() in probe_lines[0].lower()
-        assert str(destination / "runtime" / "packages").lower() in probe_lines[1].lower()
-        assert Path(probe_lines[0]).resolve() == destination / "runtime" / "python" / paths.PYTHON_RUNTIME_DIRNAME / "python.exe"
-        assert Path(probe_lines[1]).resolve().is_relative_to((destination / "runtime" / "packages").resolve())
+        probe_result = json.loads(probe.stdout.strip().splitlines()[-1])
+        assert probe_result["rows"] == 2
+        assert Path(probe_result["exe"]).resolve() == destination / "runtime" / "python" / paths.PYTHON_RUNTIME_DIRNAME / "python.exe"
+        for module_name in ("duckdb", "polars", "calamine"):
+            module_path = Path(probe_result[module_name]).resolve()
+            assert module_path.is_relative_to((destination / "runtime" / "packages").resolve())
+            assert "appdata" not in str(module_path).casefold()
     finally:
         if destination.exists():
             shutil.rmtree(destination)

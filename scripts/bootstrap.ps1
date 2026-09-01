@@ -50,12 +50,22 @@ if ($LASTEXITCODE -ne 0) {
 
 $packagesRoot = $env:CHONGZU_PACKAGES
 New-Item -ItemType Directory -Path $packagesRoot -Force | Out-Null
-& $env:CHONGZU_PROJECT_UV pip install --target $packagesRoot --python $pythonRuntime --no-deps --only-binary=:all: --exact duckdb==1.5.5
+$runtimeRequirements = @(
+    'duckdb==1.5.5'
+    'polars==1.44.1'
+    'python-calamine==0.8.2'
+)
+& $env:CHONGZU_PROJECT_UV pip install `
+    --target $packagesRoot `
+    --python $pythonRuntime `
+    --only-binary=:all: `
+    --exact `
+    @runtimeRequirements
 if ($LASTEXITCODE -ne 0) {
     throw "Portable runtime package installation failed with exit code $LASTEXITCODE"
 }
 
 Write-Output "Bootstrap complete. Development venv Python: $env:CHONGZU_DEV_PYTHON"
 Write-Output "Production standalone Python: $env:CHONGZU_PYTHON"
-Write-Output "Production packages: $env:CHONGZU_PACKAGES (duckdb==1.5.5)"
+Write-Output "Production packages: $env:CHONGZU_PACKAGES ($($runtimeRequirements -join ', '))"
 Write-Output "No Java, Tika, Docling, Torch, OCR, or model artifacts are installed by this script."

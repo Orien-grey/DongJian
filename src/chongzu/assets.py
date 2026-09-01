@@ -192,20 +192,35 @@ class TableAsset:
     extractor: str
     extractor_version: str
     source_kind: SourceKind
+    source_relative_path: str
     sheet_name: str | None
     page_number: int | None
     bbox: BoundingBox | None
+    source_row_start: int
+    source_row_end: int
+    source_column_start: int
+    source_column_end: int
     row_count: int
     column_count: int
     columns: tuple[str, ...]
     raw_artifact_path: str
     normalized_artifact_path: str | None
+    metadata_artifact_path: str
     extraction_confidence: float | None
     quality_status: AssetQualityStatus
     created_at: datetime
 
     def __post_init__(self) -> None:
-        for name in ("table_id", "file_id", "extraction_run_id", "extractor", "extractor_version", "raw_artifact_path"):
+        for name in (
+            "table_id",
+            "file_id",
+            "extraction_run_id",
+            "extractor",
+            "extractor_version",
+            "source_relative_path",
+            "raw_artifact_path",
+            "metadata_artifact_path",
+        ):
             _required(getattr(self, name), name)
         _sha256(self.content_sha256)
         object.__setattr__(self, "source_kind", SourceKind(self.source_kind))
@@ -215,6 +230,10 @@ class TableAsset:
             raise ValueError("page_number must be one-based")
         if self.row_count < 0 or self.column_count < 0:
             raise ValueError("row_count and column_count must be non-negative")
+        if min(self.source_row_start, self.source_column_start) < 0:
+            raise ValueError("source ranges must be non-negative")
+        if self.source_row_end < self.source_row_start or self.source_column_end < self.source_column_start:
+            raise ValueError("source ranges must be ordered half-open intervals")
         if len(self.columns) != self.column_count:
             raise ValueError("column_count must match columns")
         if self.normalized_artifact_path is not None:

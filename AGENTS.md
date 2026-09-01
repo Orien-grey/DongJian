@@ -130,10 +130,11 @@ endpoint or install a vector database/local embedding model.
 
 ## Technology direction and exclusions
 
-Future benchmark phases may evaluate python-calamine/Polars for structured
-data, PyMuPDF/img2table for native PDFs, RapidOCR for images/scans, and GMFT or
-Docling only for difficult tables. GMFT and Docling are benchmark candidates,
-not default dependencies.
+Phase 3 uses pinned project-local python-calamine and Polars wheels for
+CSV/TSV/XLS/XLSX and Parquet. PyMuPDF/img2table remain Phase 4 candidates,
+RapidOCR is deferred to images/scans, and GMFT/Docling remain difficult-table
+benchmark candidates rather than default dependencies. Do not add Pandas,
+NumPy, PyArrow, or OpenPyXL without representative-corpus evidence.
 
 Apache Tika, a Java runtime, Unstructured, Data Prep Kit, NiFi, NeMo Curator,
 OpenRefine runtime/server, WSL, Docker, Kubernetes, Spark, and Ray are not part

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+from importlib.metadata import version as distribution_version
 import os
 import shutil
 import site
@@ -308,6 +309,47 @@ def _check_portable_imports(report: DoctorReport) -> None:
             )
             failures.append("portable DuckDB version")
 
+    structured_dependencies = (
+        ("Polars", "polars", paths.POLARS_VERSION),
+        ("python-calamine", "python_calamine", paths.PYTHON_CALAMINE_VERSION),
+    )
+    for display_name, module_name, required_version in structured_dependencies:
+        try:
+            module = __import__(module_name)
+            module_file = Path(module.__file__).resolve()
+            installed_version = distribution_version(display_name.casefold())
+        except Exception as exc:  # pragma: no cover - depends on broken runtime payload
+            report.add(f"portable {display_name} import", "FAIL", str(exc), fatal=strict)
+            failures.append(f"portable {display_name} import")
+            continue
+        location_ok = module_file.is_relative_to(paths.PACKAGES_ROOT.resolve())
+        if is_portable and location_ok:
+            report.add(f"portable {display_name} import", "PASS", str(module_file))
+        elif is_development:
+            report.add(
+                f"portable {display_name} import",
+                "FAIL",
+                f"development import is {module_file}; production must import from {paths.PACKAGES_ROOT}",
+            )
+            failures.append(f"portable {display_name} import")
+        else:
+            report.add(
+                f"portable {display_name} import",
+                "FAIL",
+                f"imported from {module_file}; expected below {paths.PACKAGES_ROOT}",
+                fatal=True,
+            )
+            failures.append(f"portable {display_name} import")
+        if installed_version == required_version:
+            report.add(f"portable {display_name} version", "PASS", installed_version)
+        else:
+            report.add(
+                f"portable {display_name} version",
+                "FAIL",
+                f"{installed_version}; required {required_version}",
+                fatal=strict,
+            )
+            failures.append(f"portable {display_name} version")
     source_file = Path(__file__).resolve()
     if paths.is_within_project(source_file) and source_file.is_relative_to(paths.SRC_ROOT.resolve()):
         report.add("portable chongzu source import", "PASS", str(source_file))

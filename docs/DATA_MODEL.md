@@ -43,21 +43,26 @@ or both. `file_id` is not unique in either catalog asset table.
 | `extractor` | `str` | Extractor implementation name. |
 | `extractor_version` | `str` | Exact extractor version/config family. |
 | `source_kind` | `SourceKind` | File, sheet, page, image, slide, or section. |
+| `source_relative_path` | `str` | Original path relative to the scanned source root. |
 | `sheet_name` | `str | None` | Workbook sheet when applicable. |
 | `page_number` | `int | None` | One-based page/slide page when applicable. |
 | `bbox` | `BoundingBox | None` | Source region when available. |
+| `source_row_start`, `source_row_end` | `int` | Zero-based half-open source row range. |
+| `source_column_start`, `source_column_end` | `int` | Zero-based half-open source column range. |
 | `row_count` | `int` | Non-negative extracted row count. |
 | `column_count` | `int` | Non-negative count matching `columns`. |
 | `columns` | `tuple[str, ...]` | Mechanical/raw column labels at this layer. |
 | `raw_artifact_path` | `str` | Repository-relative raw payload reference below `workspace/`. |
 | `normalized_artifact_path` | `str | None` | Separate normalized payload; never replaces raw. |
+| `metadata_artifact_path` | `str` | JSON column/row mapping and extraction provenance. |
 | `extraction_confidence` | `float | None` | Extractor confidence in `[0, 1]` when available. |
 | `quality_status` | `AssetQualityStatus` | `not_assessed`, `pass`, `review`, or `fail`. |
 | `created_at` | `datetime` | Asset creation time. |
 
-Large table rows are Parquet-first. `TableAsset` is catalog metadata and points
-to raw/normalized artifacts rather than embedding an unbounded matrix in every
-Python object or DuckDB catalog row.
+Large table rows are Parquet-first. Phase 3 metadata maps Parquet row zero to a
+source logical CSV record or Sheet row and maps every normalized column to its
+original coordinate/header. CSV quoted multiline cells count as one logical
+record. Full raw Sheet snapshots are retained separately from region assets.
 
 ## TextAsset
 
@@ -149,11 +154,11 @@ parent text asset plus deterministic index and offsets.
 
 ## Persistence mapping
 
-DuckDB schema v2 maps tuples/mappings/bounding boxes to JSON catalog columns
-and stores text directly in the initial contract. Table payload paths reference
-Parquet/other raw artifacts below `workspace/output/`. Catalog writes will be
-implemented with extractor phases; the current empty tables assert names,
-cardinality, and provenance without fake data.
+DuckDB schema v3 maps tuples/mappings/bounding boxes to JSON catalog columns
+and stores text directly in the initial contract. Phase 3 writes real table
+catalog rows whose payload paths reference Parquet and metadata below
+`workspace/artifacts/`. Text/semantic tables remain empty until their phases;
+no demo business data is generated.
 
 The immutable layer sequence is:
 

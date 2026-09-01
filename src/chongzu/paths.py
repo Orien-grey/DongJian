@@ -14,9 +14,12 @@ PYTHON_RUNTIME_DIRNAME = f"cpython-{PYTHON_VERSION}-windows-x86_64-none"
 PROJECT_UV_VERSION = "0.11.21"
 PROJECT_UV_SHA256 = "5a7ec85884c2ccb1be560cb8fac3eb890df1adf49bfcc070a270ba70401bdd68"
 DUCKDB_VERSION = "1.5.5"
-PIPELINE_VERSION = "phase2-discovery"
+POLARS_VERSION = "1.44.1"
+PYTHON_CALAMINE_VERSION = "0.8.2"
+PIPELINE_VERSION = "phase3-structured-extraction"
+STRUCTURED_CONFIG_VERSION = "structured-v1"
 REGISTRY_SCHEMA_NAME = "chongzu_file_registry"
-REGISTRY_SCHEMA_VERSION = 2
+REGISTRY_SCHEMA_VERSION = 3
 
 
 def _discover_project_root() -> Path:
@@ -70,6 +73,9 @@ OCR_MODELS_ROOT = MODELS_ROOT / "ocr"
 DOCLING_MODELS_ROOT = MODELS_ROOT / "docling"
 
 WORKSPACE_ROOT = PROJECT_ROOT / "workspace"
+ARTIFACTS_ROOT = WORKSPACE_ROOT / "artifacts"
+TABLE_ARTIFACTS_ROOT = ARTIFACTS_ROOT / "tables"
+SHEET_ARTIFACTS_ROOT = ARTIFACTS_ROOT / "sheets"
 INPUT_ROOT = WORKSPACE_ROOT / "input"
 STAGING_ROOT = WORKSPACE_ROOT / "staging"
 OUTPUT_ROOT = WORKSPACE_ROOT / "output"
@@ -100,6 +106,7 @@ CORE_DIRECTORIES = {
     "models_ocr": OCR_MODELS_ROOT,
     "models_docling": DOCLING_MODELS_ROOT,
     "workspace": WORKSPACE_ROOT,
+    "workspace_artifacts": ARTIFACTS_ROOT,
     "workspace_input": INPUT_ROOT,
     "workspace_staging": STAGING_ROOT,
     "workspace_output": OUTPUT_ROOT,

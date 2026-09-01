@@ -5,10 +5,10 @@ The source of truth is the embedded DuckDB file
 a database service process. Scans write only below `workspace/state/` and
 `workspace/logs/`; source directories are read-only.
 
-## Schema version 2
+## Schema version 3
 
-`registry_meta` stores `chongzu_file_registry = 2`. Opening a valid schema v1
-database performs an explicit resumable v1-to-v2 migration. A database
+`registry_meta` stores `chongzu_file_registry = 3`. Opening schema v1 or v2
+performs the ordered, restartable v1-to-v2 and v2-to-v3 migrations. A database
 newer than the supported version is rejected. No silent destructive rebuild is
 allowed.
 
@@ -56,12 +56,12 @@ These are independent booleans. PDF/image/DOC/DOCX/PPT/PPTX can be both table
 and text candidates. Unsupported files stay present with their SHA-256 and
 detection evidence; they are not moved/deleted and do not fail the scan.
 
-## Empty catalog contract tables
+## Catalog and structured extraction state
 
 | Table | Purpose |
 | --- | --- |
-| `extraction_runs` | File/content identity, route and reason, config/pipeline versions, timings, warnings, extractor versions, outcome, and structured error. |
-| `table_assets` | TableAsset metadata, source location, extractor, run, dimensions, artifact paths, confidence, and quality state. |
+| `extraction_runs` | Content/extraction identity, source, force flag, route/config, timings, extractor versions, counts, outcome, and structured error. |
+| `table_assets` | Current/historical TableAsset metadata, source row/column range, extractor/run, dimensions, artifact paths, confidence, and quality state. |
 | `text_assets` | TextAsset content and source/extractor/run provenance. |
 | `text_chunks` | Searchable deterministic chunks with offsets and provenance JSON. |
 | `semantic_metadata` | Separate model-generated names/categories/descriptions/fields/summaries with model/prompt/time/confidence. |
@@ -89,9 +89,12 @@ still have isolated failed file attempts. An interrupted open run is marked
 `interrupted` on the next scan of that source. Registry write failure is the
 condition that can fail a whole run.
 
-Future extraction reuse additionally requires matching content SHA-256 plus
-pipeline/configuration/extractor versions. It must never reuse by filename or
-AI-generated display name.
+Structured extraction reuse requires exact path-instance `file_id`, content
+SHA-256, extractor name and version, structured configuration version, schema
+version, and business format.
+Missing artifacts invalidate reuse. `--force` bypasses reuse. A changed file or
+changed extractor/config version creates another run; reuse never depends on a
+filename or AI-generated display name.
 
 ## Lightweight detection versus business support
 

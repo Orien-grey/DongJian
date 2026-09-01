@@ -48,25 +48,29 @@ Status: completed, verified, and committed 2026-09-01 as
 
 ## Architecture Refactor - Asset and policy foundation
 
-Status: current working phase; intentionally not committed in this round.
+Status: completed and committed 2026-09-01 as
+`f5a929b53854669f887729ebf13ee1cf952348a1`.
 
 - Reframes the product around independent table and text extraction.
 - Defines `TableAsset`, `TextAsset`, `TextChunk`, `SemanticMetadata`,
   `QualityIssue`, stable IDs, and provenance.
 - Adds deterministic business-format policy and retained `unsupported` state.
-- Adds schema v1-to-v2 migration, policy fields, and empty catalog contract
-  tables without fake extraction data.
+- Adds ordered schema v1-to-v3 migrations, policy fields, and empty catalog
+  contract tables without fake extraction data.
 - Defines provider-neutral Qwen and future search/embedding interface positions.
 - Replaces the default Tika/Java/general-parser roadmap with benchmark-driven
   extraction phases.
 
 ## Phase 3 - Native structured extraction benchmark
 
+Status: implementation and synthetic/relocation acceptance complete; awaiting
+the user-selected representative real corpus benchmark before final tuning.
+
 - Benchmark CSV/TSV ingestion, encoding/error behavior, and bounded streaming.
 - Benchmark XLS/XLSX with `python-calamine` as the primary reader.
 - Use Polars for normalization/profiling and publish raw/normalized Parquet.
-- Preserve sheets as independent table sources; one workbook may yield many
-  `TableAsset` records.
+- Preserve complete Sheet evidence and conservatively detect 0..N table
+  regions; one workbook may yield many `TableAsset` records.
 - Defer `openpyxl` until representative files prove that formatting, formulas,
   comments, merged cells, or similar details are required.
 

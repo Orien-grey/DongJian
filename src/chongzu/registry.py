@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import json
 import os
 from pathlib import Path
 from typing import Any, Iterable
@@ -158,9 +159,13 @@ CATALOG_SCHEMA_STATEMENTS = (
         extraction_run_id VARCHAR PRIMARY KEY,
         file_id VARCHAR NOT NULL,
         content_sha256 VARCHAR NOT NULL,
+        extraction_identity VARCHAR NOT NULL,
+        source_root VARCHAR NOT NULL,
+        source_relative_path VARCHAR NOT NULL,
         started_at TIMESTAMP NOT NULL,
         finished_at TIMESTAMP,
         status VARCHAR NOT NULL,
+        force BOOLEAN NOT NULL DEFAULT FALSE,
         pipeline_version VARCHAR NOT NULL,
         configuration_version VARCHAR NOT NULL,
         attempted_route VARCHAR NOT NULL,
@@ -168,6 +173,11 @@ CATALOG_SCHEMA_STATEMENTS = (
         timings_json JSON,
         warnings_json JSON,
         extractor_versions_json JSON,
+        table_count BIGINT NOT NULL DEFAULT 0,
+        sheet_count BIGINT NOT NULL DEFAULT 0,
+        quality_issue_count BIGINT NOT NULL DEFAULT 0,
+        total_rows BIGINT NOT NULL DEFAULT 0,
+        total_bytes BIGINT NOT NULL DEFAULT 0,
         error_category VARCHAR,
         error_message VARCHAR
     )
@@ -181,17 +191,24 @@ CATALOG_SCHEMA_STATEMENTS = (
         extractor VARCHAR NOT NULL,
         extractor_version VARCHAR NOT NULL,
         source_kind VARCHAR NOT NULL,
+        source_relative_path VARCHAR NOT NULL,
         sheet_name VARCHAR,
         page_number INTEGER,
         bbox_json JSON,
+        source_row_start BIGINT NOT NULL,
+        source_row_end BIGINT NOT NULL,
+        source_column_start BIGINT NOT NULL,
+        source_column_end BIGINT NOT NULL,
         row_count BIGINT NOT NULL,
         column_count BIGINT NOT NULL,
         columns_json JSON NOT NULL,
         raw_artifact_path VARCHAR NOT NULL,
         normalized_artifact_path VARCHAR,
+        metadata_artifact_path VARCHAR NOT NULL,
         extraction_confidence DOUBLE,
         quality_status VARCHAR NOT NULL,
         created_at TIMESTAMP NOT NULL
+        ,is_current BOOLEAN NOT NULL DEFAULT TRUE
     )
     """,
     """
@@ -243,6 +260,7 @@ CATALOG_SCHEMA_STATEMENTS = (
     """
     CREATE TABLE IF NOT EXISTS quality_issues (
         issue_id VARCHAR PRIMARY KEY,
+        extraction_run_id VARCHAR,
         asset_id VARCHAR NOT NULL,
         severity VARCHAR NOT NULL,
         issue_type VARCHAR NOT NULL,
@@ -250,7 +268,8 @@ CATALOG_SCHEMA_STATEMENTS = (
         evidence_json JSON NOT NULL,
         detected_by VARCHAR NOT NULL,
         suggested_action VARCHAR NOT NULL,
-        status VARCHAR NOT NULL CHECK (status IN ('open', 'accepted', 'ignored', 'resolved'))
+        status VARCHAR NOT NULL CHECK (status IN ('open', 'accepted', 'ignored', 'resolved')),
+        created_at TIMESTAMP NOT NULL
     )
     """,
     "CREATE INDEX IF NOT EXISTS idx_table_assets_file ON table_assets(file_id, content_sha256)",
@@ -259,6 +278,7 @@ CATALOG_SCHEMA_STATEMENTS = (
     "CREATE INDEX IF NOT EXISTS idx_semantic_metadata_asset ON semantic_metadata(asset_id, asset_type)",
     "CREATE INDEX IF NOT EXISTS idx_quality_issues_asset ON quality_issues(asset_id, status)",
     "CREATE INDEX IF NOT EXISTS idx_extraction_runs_file ON extraction_runs(file_id, content_sha256)",
+    "CREATE INDEX IF NOT EXISTS idx_extraction_identity ON extraction_runs(extraction_identity, status)",
 )
 
 
@@ -283,7 +303,7 @@ def _migrate_v1_to_v2(connection: duckdb.DuckDBPyConnection) -> None:
     # DuckDB does not support mixing ALTER TABLE and later updates to that table
     # in one explicit transaction. Column/table creation is therefore
     # idempotent and restartable; the policy backfill and metadata version bump
-    # remain atomic so a partial migration never advertises schema v2.
+    # remain atomic so a partial migration never advertises completion of v2.
     columns = {row[1] for row in connection.execute("PRAGMA table_info('files')").fetchall()}
     additions = {
         "support_status": "ALTER TABLE files ADD COLUMN support_status VARCHAR DEFAULT 'unsupported'",
@@ -332,12 +352,51 @@ def _migrate_v1_to_v2(connection: duckdb.DuckDBPyConnection) -> None:
             )
         connection.execute(
             "UPDATE registry_meta SET meta_value=?, updated_at=? WHERE meta_key=?",
-            [str(paths.REGISTRY_SCHEMA_VERSION), utc_now(), paths.REGISTRY_SCHEMA_NAME],
+            ["2", utc_now(), paths.REGISTRY_SCHEMA_NAME],
         )
         connection.execute("COMMIT")
     except Exception:
         connection.execute("ROLLBACK")
         raise
+
+
+def _migrate_v2_to_v3(connection: duckdb.DuckDBPyConnection) -> None:
+    additions: dict[str, dict[str, str]] = {
+        "extraction_runs": {
+            "extraction_identity": "ALTER TABLE extraction_runs ADD COLUMN extraction_identity VARCHAR DEFAULT ''",
+            "source_root": "ALTER TABLE extraction_runs ADD COLUMN source_root VARCHAR DEFAULT ''",
+            "source_relative_path": "ALTER TABLE extraction_runs ADD COLUMN source_relative_path VARCHAR DEFAULT ''",
+            "force": "ALTER TABLE extraction_runs ADD COLUMN force BOOLEAN DEFAULT FALSE",
+            "table_count": "ALTER TABLE extraction_runs ADD COLUMN table_count BIGINT DEFAULT 0",
+            "sheet_count": "ALTER TABLE extraction_runs ADD COLUMN sheet_count BIGINT DEFAULT 0",
+            "quality_issue_count": "ALTER TABLE extraction_runs ADD COLUMN quality_issue_count BIGINT DEFAULT 0",
+            "total_rows": "ALTER TABLE extraction_runs ADD COLUMN total_rows BIGINT DEFAULT 0",
+            "total_bytes": "ALTER TABLE extraction_runs ADD COLUMN total_bytes BIGINT DEFAULT 0",
+        },
+        "table_assets": {
+            "source_relative_path": "ALTER TABLE table_assets ADD COLUMN source_relative_path VARCHAR DEFAULT ''",
+            "source_row_start": "ALTER TABLE table_assets ADD COLUMN source_row_start BIGINT DEFAULT 0",
+            "source_row_end": "ALTER TABLE table_assets ADD COLUMN source_row_end BIGINT DEFAULT 0",
+            "source_column_start": "ALTER TABLE table_assets ADD COLUMN source_column_start BIGINT DEFAULT 0",
+            "source_column_end": "ALTER TABLE table_assets ADD COLUMN source_column_end BIGINT DEFAULT 0",
+            "metadata_artifact_path": "ALTER TABLE table_assets ADD COLUMN metadata_artifact_path VARCHAR DEFAULT ''",
+            "is_current": "ALTER TABLE table_assets ADD COLUMN is_current BOOLEAN DEFAULT TRUE",
+        },
+        "quality_issues": {
+            "extraction_run_id": "ALTER TABLE quality_issues ADD COLUMN extraction_run_id VARCHAR",
+            "created_at": "ALTER TABLE quality_issues ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+        },
+    }
+    for table, table_additions in additions.items():
+        columns = {row[1] for row in connection.execute(f"PRAGMA table_info('{table}')").fetchall()}
+        for name, statement in table_additions.items():
+            if name not in columns:
+                connection.execute(statement)
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_extraction_identity ON extraction_runs(extraction_identity, status)")
+    connection.execute(
+        "UPDATE registry_meta SET meta_value=?, updated_at=? WHERE meta_key=?",
+        ["3", utc_now(), paths.REGISTRY_SCHEMA_NAME],
+    )
 
 
 def initialize_schema(connection: duckdb.DuckDBPyConnection) -> None:
@@ -365,9 +424,17 @@ def initialize_schema(connection: duckdb.DuckDBPyConnection) -> None:
     version = int(row[0])
     if version > paths.REGISTRY_SCHEMA_VERSION:
         raise RegistryError(f"Registry schema {version} is newer than supported {paths.REGISTRY_SCHEMA_VERSION}")
-    if version == 1 and paths.REGISTRY_SCHEMA_VERSION == 2:
+    if version == 1 and paths.REGISTRY_SCHEMA_VERSION >= 2:
         _migrate_v1_to_v2(connection)
-    elif version < paths.REGISTRY_SCHEMA_VERSION:
+        version = 2
+    if version == 2 and paths.REGISTRY_SCHEMA_VERSION >= 3:
+        _migrate_v2_to_v3(connection)
+        version = 3
+    if version == 3 and paths.REGISTRY_SCHEMA_VERSION == 3:
+        # The v2->v3 DDL is idempotent. Rechecking v3 also makes an interrupted
+        # ALTER sequence restartable before any coordinator uses the catalog.
+        _migrate_v2_to_v3(connection)
+    if version < paths.REGISTRY_SCHEMA_VERSION:
         raise RegistryError(f"Registry schema migration from {version} to {paths.REGISTRY_SCHEMA_VERSION} is not implemented")
 
 
@@ -454,6 +521,245 @@ class Registry:
             )
             for row in rows
         }
+
+    def count_present_files(self, source_root: str) -> int:
+        row = self.connection.execute(
+            "SELECT COUNT(*) FROM files WHERE source_root=? AND current_presence_state='present'",
+            [source_root],
+        ).fetchone()
+        return int(row[0] or 0)
+
+    def structured_candidates(self, source_root: str) -> list[dict[str, Any]]:
+        cursor = self.connection.execute(
+            """
+            SELECT file_id, sha256, source_root, relative_path, business_format, size_bytes, mtime_ns
+            FROM files
+            WHERE source_root=? AND current_presence_state='present' AND support_status='supported'
+              AND table_candidate=TRUE AND business_format IN ('csv', 'tsv', 'xls', 'xlsx')
+              AND sha256 IS NOT NULL
+            ORDER BY relative_path
+            """,
+            [source_root],
+        )
+        columns = [item[0] for item in cursor.description]
+        return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+    def recover_incomplete_extractions(self, source_root: str) -> int:
+        row = self.connection.execute(
+            "SELECT COUNT(*) FROM extraction_runs WHERE source_root=? AND status='running'",
+            [source_root],
+        ).fetchone()
+        count = int(row[0] or 0)
+        self.connection.execute(
+            "UPDATE extraction_runs SET status='interrupted', finished_at=? WHERE source_root=? AND status='running'",
+            [utc_now(), source_root],
+        )
+        return count
+
+    def reusable_extraction(self, extraction_identity: str) -> dict[str, Any] | None:
+        cursor = self.connection.execute(
+            """
+            SELECT extraction_run_id, file_id, content_sha256, status, table_count, sheet_count,
+                   quality_issue_count, total_rows, total_bytes, timings_json
+            FROM extraction_runs
+            WHERE extraction_identity=? AND status IN ('successful', 'partial')
+            ORDER BY finished_at DESC LIMIT 1
+            """,
+            [extraction_identity],
+        )
+        row = cursor.fetchone()
+        if row is None:
+            return None
+        columns = [item[0] for item in cursor.description]
+        result = dict(zip(columns, row))
+        paths_cursor = self.connection.execute(
+            """
+            SELECT raw_artifact_path, normalized_artifact_path, metadata_artifact_path
+            FROM table_assets WHERE extraction_run_id=? AND is_current=TRUE
+            """,
+            [result["extraction_run_id"]],
+        )
+        result["artifacts"] = [item for row_paths in paths_cursor.fetchall() for item in row_paths if item]
+        return result
+
+    def start_structured_extraction(
+        self,
+        *,
+        extraction_run_id: str,
+        extraction_identity: str,
+        source: Any,
+        extractor: str,
+        extractor_version: str,
+        started_at: datetime,
+        force: bool,
+    ) -> None:
+        self.connection.execute(
+            """
+            INSERT INTO extraction_runs(
+                extraction_run_id, file_id, content_sha256, extraction_identity,
+                source_root, source_relative_path, started_at, status, force,
+                pipeline_version, configuration_version, attempted_route,
+                route_reason, extractor_versions_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'running', ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                extraction_run_id,
+                source.file_id,
+                source.content_sha256,
+                extraction_identity,
+                source.source_root,
+                source.relative_path,
+                started_at,
+                force,
+                paths.PIPELINE_VERSION,
+                paths.STRUCTURED_CONFIG_VERSION,
+                "structured_native",
+                f"supported_{source.business_format}_table",
+                json.dumps({extractor: extractor_version}),
+            ],
+        )
+
+    def record_structured_result(
+        self,
+        result: Any,
+        *,
+        started_at: datetime,
+        finished_at: datetime,
+        force: bool,
+    ) -> None:
+        """Persist one isolated file result; callers remain the single writer."""
+
+        connection = self.connection
+        connection.execute("BEGIN TRANSACTION")
+        try:
+            if result.status in {"successful", "partial"}:
+                connection.execute(
+                    """
+                    UPDATE table_assets SET is_current=FALSE
+                    WHERE file_id=? AND extractor=? AND is_current=TRUE
+                    """,
+                    [result.source.file_id, result.extractor],
+                )
+            elif result.status == "failed":
+                # Preserve a prior same-content result during a transient
+                # failure, but never present an old-content asset as current
+                # after the source itself changed.
+                connection.execute(
+                    """
+                    UPDATE table_assets SET is_current=FALSE
+                    WHERE file_id=? AND extractor=? AND content_sha256<>? AND is_current=TRUE
+                    """,
+                    [result.source.file_id, result.extractor, result.source.content_sha256],
+                )
+            connection.execute(
+                """
+                INSERT OR REPLACE INTO extraction_runs(
+                    extraction_run_id, file_id, content_sha256, extraction_identity,
+                    source_root, source_relative_path, started_at, finished_at, status,
+                    force, pipeline_version, configuration_version, attempted_route,
+                    route_reason, timings_json, warnings_json, extractor_versions_json,
+                    table_count, sheet_count, quality_issue_count, total_rows, total_bytes,
+                    error_category, error_message
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    result.extraction_run_id,
+                    result.source.file_id,
+                    result.source.content_sha256,
+                    result.extraction_identity,
+                    result.source.source_root,
+                    result.source.relative_path,
+                    started_at,
+                    finished_at,
+                    result.status,
+                    force,
+                    paths.PIPELINE_VERSION,
+                    paths.STRUCTURED_CONFIG_VERSION,
+                    "structured_native",
+                    f"supported_{result.source.business_format}_table",
+                    json.dumps(result.timings.as_dict()),
+                    json.dumps(result.warnings, ensure_ascii=False, default=str),
+                    json.dumps({result.extractor: result.extractor_version}),
+                    len(result.assets),
+                    result.sheet_count,
+                    len(result.issues),
+                    result.total_rows,
+                    result.source.size_bytes,
+                    result.error_category,
+                    result.error_message,
+                ],
+            )
+            for asset in result.assets:
+                connection.execute(
+                    """
+                    INSERT OR REPLACE INTO table_assets(
+                        table_id, file_id, content_sha256, extraction_run_id, extractor,
+                        extractor_version, source_kind, source_relative_path, sheet_name,
+                        page_number, bbox_json, source_row_start, source_row_end,
+                        source_column_start, source_column_end, row_count, column_count,
+                        columns_json, raw_artifact_path, normalized_artifact_path,
+                        metadata_artifact_path, extraction_confidence, quality_status,
+                        created_at, is_current
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE)
+                    """,
+                    [
+                        asset.table_id,
+                        asset.file_id,
+                        asset.content_sha256,
+                        asset.extraction_run_id,
+                        asset.extractor,
+                        asset.extractor_version,
+                        asset.source_kind.value,
+                        asset.source_relative_path,
+                        asset.sheet_name,
+                        asset.page_number,
+                        json.dumps(asset.bbox.__dict__) if asset.bbox else None,
+                        asset.source_row_start,
+                        asset.source_row_end,
+                        asset.source_column_start,
+                        asset.source_column_end,
+                        asset.row_count,
+                        asset.column_count,
+                        json.dumps(asset.columns, ensure_ascii=False),
+                        asset.raw_artifact_path,
+                        asset.normalized_artifact_path,
+                        asset.metadata_artifact_path,
+                        asset.extraction_confidence,
+                        asset.quality_status.value,
+                        asset.created_at.replace(tzinfo=None),
+                    ],
+                )
+            for issue in result.issues:
+                connection.execute(
+                    """
+                    INSERT INTO quality_issues(
+                        issue_id, extraction_run_id, asset_id, severity, issue_type,
+                        description, evidence_json, detected_by, suggested_action,
+                        status, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(issue_id) DO UPDATE SET
+                        extraction_run_id=excluded.extraction_run_id,
+                        evidence_json=excluded.evidence_json,
+                        description=excluded.description
+                    """,
+                    [
+                        issue.issue_id,
+                        result.extraction_run_id,
+                        issue.asset_id,
+                        issue.severity.value,
+                        issue.issue_type,
+                        issue.description,
+                        json.dumps(issue.evidence, ensure_ascii=False, default=str),
+                        issue.detected_by,
+                        issue.suggested_action,
+                        issue.status.value,
+                        finished_at,
+                    ],
+                )
+            connection.execute("COMMIT")
+        except Exception:
+            connection.execute("ROLLBACK")
+            raise
 
     def record_run_error(self, run_id: str, path: str | None, error_code: str, message: str) -> None:
         self.connection.execute(
@@ -747,6 +1053,41 @@ class Registry:
             return None
         columns = [item[0] for item in cursor.description]
         return dict(zip(columns, row))
+
+    def catalog_summary(self, source_root: str | None = None) -> dict[str, int]:
+        run_where = "WHERE source_root=?" if source_root is not None else ""
+        params = [source_root] if source_root is not None else []
+        run_rows = self.connection.execute(
+            f"SELECT status, COUNT(*) FROM extraction_runs {run_where} GROUP BY status",
+            params,
+        ).fetchall()
+        asset_where = "AND f.source_root=?" if source_root is not None else ""
+        asset_params = [source_root] if source_root is not None else []
+        assets = self.connection.execute(
+            f"""
+            SELECT COUNT(*), COALESCE(SUM(t.row_count), 0)
+            FROM table_assets t JOIN files f ON f.file_id=t.file_id
+            WHERE t.is_current=TRUE {asset_where}
+            """,
+            asset_params,
+        ).fetchone()
+        issues = self.connection.execute(
+            f"""
+            SELECT COUNT(*) FROM quality_issues q
+            JOIN extraction_runs r ON r.extraction_run_id=q.extraction_run_id
+            {run_where}
+            """,
+            params,
+        ).fetchone()
+        result = {f"extraction_{status}": int(count) for status, count in run_rows}
+        result.update(
+            {
+                "table_assets": int(assets[0] or 0),
+                "table_rows": int(assets[1] or 0),
+                "quality_issues": int(issues[0] or 0),
+            }
+        )
+        return result
 
     def list_files(self, source_root: str | None = None, state: str | None = None, limit: int = 1000) -> list[dict[str, Any]]:
         if limit < 1 or limit > 100_000:

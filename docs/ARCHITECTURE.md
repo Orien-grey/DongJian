@@ -99,10 +99,17 @@ its real type is an image, not HTML.
 The canonical Python models live in `src/chongzu/assets.py`; the schema mapping
 is documented in [DATA_MODEL.md](DATA_MODEL.md).
 
-`TableAsset` records provenance, source location, dimensions and columns, raw
-and optional normalized artifact paths, extraction confidence, and quality
-status. Large row data is not forced into the catalog row: raw/normalized table
-payloads will normally be stored in Parquet below `workspace/output/`.
+`TableAsset` records provenance, a zero-based half-open source row/column
+range, dimensions and columns, raw/normalized/metadata artifact paths,
+extraction confidence, and quality status. Large row data is not copied into
+the catalog: Phase 3 stores it in Parquet below `workspace/artifacts/`.
+
+Phase 3 adapters are separated under `src/chongzu/extract/`: strict delimited
+validation, Calamine workbook access, conservative table-region detection,
+atomic artifact publication, and the bounded registry-backed coordinator.
+`extract structured` first performs an incremental scan, then submits at most
+twice the bounded worker count. Workers never write DuckDB; the coordinator is
+the single catalog writer.
 
 `TextAsset` records provenance, page/section/bounding box, extracted text,
 language, and creation time. `TextChunk` is a deterministic searchable slice
@@ -131,10 +138,11 @@ TableAsset/TextAsset
   -> extractor + extractor_version
 ```
 
-Raw output is immutable evidence. New extractor/config versions create new
-run evidence and publish new derived artifacts; they do not overwrite prior raw
-assets. Publication uses staging plus an atomic replace/rename where Windows
-filesystem semantics permit.
+Raw and normalized paths are stable IDs rather than display names. Each file
+is written to a unique temporary sibling and atomically replaced only after a
+complete Parquet/JSON write. A failed rerun therefore does not pre-delete the
+previous successful artifact. Historical extraction runs remain in DuckDB;
+only successfully published assets become current catalog rows.
 
 ## Raw, normalized, and semantic layers
 
@@ -177,9 +185,10 @@ ChongZu uses the embedded file
 process. DuckDB stores catalog metadata, provenance, policy and run state, and
 future query state. It directly queries large Parquet table artifacts.
 
-Schema v2 preserves Phase 2 `files`, `contents`, `scan_runs`, `file_attempts`,
-and `run_errors`, adds processing-policy fields to `files`, and creates empty
-contract tables:
+Schema v3 preserves Phase 2 `files`, `contents`, `scan_runs`, `file_attempts`,
+and `run_errors`, plus the v2 policy/catalog foundation. It adds structured
+extraction identity, source ranges, metadata paths, current-asset state, and
+real run/table/issue metrics to:
 
 - `extraction_runs`
 - `table_assets`

@@ -89,16 +89,19 @@ and invoke the standalone executable directly. They never activate or invoke
 `runtime\venv`. In the standalone process `sys.prefix == sys.base_prefix` is
 expected; that is a normal, non-venv interpreter.
 
-The Phase 2 runtime dependency is installed into `runtime\packages` with the
-project-private uv and the locked version/hash:
+Phase 3 production dependencies are installed into `runtime\packages` with
+project-private uv, the locked versions/hashes, and a wheel-only constraint:
 
 ```text
-runtime\uv\uv.exe pip install --target runtime\packages --python runtime\python\cpython-3.11.15-windows-x86_64-none\python.exe --no-deps --only-binary=:all: --exact duckdb==1.5.5
+runtime\uv\uv.exe pip install --target runtime\packages --python runtime\python\cpython-3.11.15-windows-x86_64-none\python.exe --only-binary=:all: --exact duckdb==1.5.5 polars==1.44.1 python-calamine==0.8.2
 ```
 
 | Package | Version | Source/constraint |
 | --- | --- | --- |
 | `duckdb` | `1.5.5` | `uv.lock`, Windows x64 wheel hash `sha256:9f4287f97ccf0c1f3d471e7115be2b067cbf99627e2d34bffd462dd64703cddc` |
+| `polars` | `1.44.1` | Pure Python wheel; hash `sha256:1fa62fc1c88fba77a68b28291b5aabdd69e5f38b34e59721a064ae3169b59bb5`. |
+| `polars-runtime-32` | `1.44.1` | Required CPython ABI3 Windows x64 wheel; hash `sha256:159334184e6fbb074c9f4692221ea19970a5e2bed2a479f9d7bdb00b7f3eedb9`. |
+| `python-calamine` | `0.8.2` | CPython 3.11 Windows x64 wheel; hash `sha256:c94abc66f8b544e5fc126dfaa6b41b77a394adfe09dac95e20679823e41e38be`. |
 
 The package payload is ignored by Git; only `runtime\packages\.gitkeep` is
 intended to be tracked. Future production dependencies must follow the same rule and be
@@ -137,7 +140,7 @@ PIP_CONFIG_FILE          E:\Desktop\ChongZu\cache\pip\pip.ini
 
 Always load `scripts\env.ps1` before invoking uv. During this preparation, two initial bare uv probes demonstrated why: without the project variables uv attempted to initialize/open its default user paths under `%LOCALAPPDATA%\uv\cache` and `%APPDATA%\uv\python`; both probes failed before creating anything. Every successful download, lock, sync, and verification command then used the project-local variables.
 
-## Phase 1/2 Python packages
+## Phase 1-3 Python packages
 
 The lock file is [`uv.lock`](../uv.lock). `uv sync --locked` installs the
 development/test set into `runtime\venv`; the production subset is installed
@@ -147,6 +150,9 @@ as a target into `runtime\packages` with the same pinned versions:
 | --- | --- | --- |
 | `chongzu` | `0.1.0.dev0` | Local editable project package |
 | `duckdb` | `1.5.5` | Phase 2 local registry database |
+| `polars` | `1.44.1` | Phase 3 CSV/TSV and Parquet engine |
+| `polars-runtime-32` | `1.44.1` | Polars native Windows x64 runtime |
+| `python-calamine` | `0.8.2` | Native XLS/XLSX reader |
 | `pytest` | `8.4.2` | Test runner |
 | `colorama` | `0.4.6` | pytest Windows dependency |
 | `iniconfig` | `2.3.0` | pytest dependency |
@@ -154,15 +160,15 @@ as a target into `runtime\packages` with the same pinned versions:
 | `pluggy` | `1.6.0` | pytest dependency |
 | `pygments` | `2.21.0` | pytest dependency |
 
-No Calamine/python-calamine, Polars, PyArrow, PyMuPDF, RapidOCR, ONNX
-Runtime, img2table, GMFT, Docling, Torch, openpyxl, Java, or Tika client was
-installed. DuckDB 1.5.5 remains the only production runtime dependency; its
-Windows x64 wheel hash is recorded in `uv.lock`.
+The resolved Phase 3 runtime tree adds only Polars, its matching runtime wheel,
+and python-calamine. The wheel-only dry run and provisioning required no local
+compiler or source build. PyArrow, Pandas, NumPy, OpenPyXL, PyMuPDF, RapidOCR,
+ONNX Runtime, img2table, GMFT, Docling, Torch, Java, and Tika remain absent.
+Polars writes and reads Parquet using its bundled native runtime.
 
-The Architecture Refactor adds only standard-library contracts and empty
-DuckDB catalog tables. It makes no network request and does not call the
-configured LLM. Java/Tika is no longer a planned default route; GMFT and
-Docling remain future benchmark candidates rather than portable-bundle
-requirements.
+Phase 3 processing makes no network request and does not call the configured
+LLM. Provisioning is the only network-enabled step. Java/Tika is not a default
+route; GMFT and Docling remain future benchmark candidates rather than
+portable-bundle requirements.
 
 The standalone CPython image also contains its own project-local bootstrap tools `pip==26.1.2` and `setuptools==82.0.1` under `runtime\python`; they are not system packages and are not exposed through the venv because the venv does not use system site-packages. The package build isolation uses the exact `setuptools==80.10.2` requirement declared in `pyproject.toml`.
