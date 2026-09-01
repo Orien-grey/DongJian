@@ -91,12 +91,14 @@ Deterministic cleaning is local code: Unicode normalization, trimming, empty
 rows/columns, duplicates, null handling, numeric/date inference, obvious
 encoding repair, and mechanical column-name normalization.
 
-Semantic cleaning is future Qwen-assisted review: multi-row headers, actual
+Semantic cleaning is future provider-assisted review: multi-row headers, actual
 field meaning, dataset names/categories, synonymous fields, unit semantics,
 related-table judgments, anomaly explanation, and difficult OCR/visual review.
-The expected initial model is `Qwen3.6-35B-A3B`, but model selection must be
-configuration-driven. The LLM may create `SemanticMetadata`, `QualityIssue`,
-or suggested actions only. It cannot directly mutate extracted data.
+DeepSeek may be used with an explicitly configured OpenAI-compatible endpoint
+during development; the expected company service is `Qwen3.6-35B-A3B`. Model
+selection must remain configuration-driven. The LLM may create
+`SemanticMetadata`, `QualityIssue`, or suggested actions only. It cannot
+directly mutate extracted data.
 
 Do not add embedding fields to core asset contracts. Embedding and vector
 retrieval remain future injected interfaces; do not assume an embedding
@@ -133,10 +135,14 @@ endpoint or install a vector database/local embedding model.
 Phase 3 uses pinned project-local python-calamine and Polars wheels for
 CSV/TSV/XLS/XLSX and Parquet. Phase 4A uses the pinned PyMuPDF wheel only for
 native PDF page/text facts and profiling; it does not perform table extraction
-or OCR. img2table remains a Phase 4B candidate, RapidOCR is deferred to
-images/scans, and GMFT/Docling remain difficult-table benchmark candidates
-rather than default dependencies. Do not add Pandas, NumPy, PyArrow, or
-OpenPyXL without representative-corpus evidence.
+or OCR. Phase 4B provisions `img2table==2.0.0` as a native-text candidate with
+its locked NumPy, OpenCV-contrib, pypdfium2, BeautifulSoup, soupsieve,
+typing-extensions, and XlsxWriter transitive wheels; OCR extras remain
+disabled. RapidOCR is deferred to images/scans, and GMFT/Docling remain
+difficult-table benchmark candidates rather than default dependencies. Do not
+add Pandas, PyArrow, or OpenPyXL, and do not add direct NumPy/OpenCV
+dependencies outside the candidate tree, without representative-corpus
+evidence.
 
 Apache Tika, a Java runtime, Unstructured, Data Prep Kit, NiFi, NeMo Curator,
 OpenRefine runtime/server, WSL, Docker, Kubernetes, Spark, and Ray are not part

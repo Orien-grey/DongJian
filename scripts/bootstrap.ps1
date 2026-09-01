@@ -55,6 +55,7 @@ $runtimeRequirements = @(
     'polars==1.44.1'
     'python-calamine==0.8.2'
     'PyMuPDF==1.28.2'
+    'img2table==2.0.0'
 )
 & $env:CHONGZU_PROJECT_UV pip install `
     --target $packagesRoot `
@@ -69,4 +70,4 @@ if ($LASTEXITCODE -ne 0) {
 Write-Output "Bootstrap complete. Development venv Python: $env:CHONGZU_DEV_PYTHON"
 Write-Output "Production standalone Python: $env:CHONGZU_PYTHON"
 Write-Output "Production packages: $env:CHONGZU_PACKAGES ($($runtimeRequirements -join ', '))"
-Write-Output "No Java, Tika, Docling, Torch, OCR, img2table, or model artifacts are installed by this script."
+Write-Output "No Java, Tika, Docling, Torch, OCR engines, or model artifacts are installed by this script. img2table is installed only as the Phase 4B native-PDF candidate; OCR extras are intentionally excluded."

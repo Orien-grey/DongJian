@@ -351,6 +351,54 @@ def _check_portable_imports(report: DoctorReport) -> None:
                 fatal=strict,
             )
             failures.append(f"portable {display_name} version")
+
+    candidate_dependencies = (
+        ("img2table candidate", "img2table", "img2table", paths.IMG2TABLE_VERSION),
+        ("NumPy candidate", "numpy", "numpy", paths.NUMPY_VERSION),
+        ("OpenCV contrib candidate", "cv2", "opencv-contrib-python", paths.OPENCV_CONTRIB_VERSION),
+        ("pypdfium2 candidate", "pypdfium2", "pypdfium2", paths.PYPDFIUM2_VERSION),
+        ("BeautifulSoup candidate", "bs4", "beautifulsoup4", paths.BEAUTIFULSOUP4_VERSION),
+        ("soupsieve candidate", "soupsieve", "soupsieve", paths.SOUPSIEVE_VERSION),
+        ("typing-extensions candidate", "typing_extensions", "typing-extensions", paths.TYPING_EXTENSIONS_VERSION),
+        ("XlsxWriter candidate", "xlsxwriter", "xlsxwriter", paths.XLSXWRITER_VERSION),
+    )
+    for display_name, module_name, distribution_name, required_version in candidate_dependencies:
+        try:
+            module = __import__(module_name)
+            module_file = Path(module.__file__).resolve()
+            installed_version = distribution_version(distribution_name)
+        except Exception as exc:  # pragma: no cover - depends on optional candidate payload
+            report.add(f"portable {display_name} import", "FAIL", str(exc), fatal=strict)
+            failures.append(f"portable {display_name} import")
+            continue
+        location_ok = module_file.is_relative_to(paths.PACKAGES_ROOT.resolve())
+        if is_portable and location_ok:
+            report.add(f"portable {display_name} import", "PASS", str(module_file))
+        elif is_development:
+            report.add(
+                f"portable {display_name} import",
+                "FAIL",
+                f"development import is {module_file}; production must import from {paths.PACKAGES_ROOT}",
+            )
+            failures.append(f"portable {display_name} import")
+        else:
+            report.add(
+                f"portable {display_name} import",
+                "FAIL",
+                f"imported from {module_file}; expected below {paths.PACKAGES_ROOT}",
+                fatal=True,
+            )
+            failures.append(f"portable {display_name} import")
+        if installed_version == required_version:
+            report.add(f"portable {display_name} version", "PASS", installed_version)
+        else:
+            report.add(
+                f"portable {display_name} version",
+                "FAIL",
+                f"{installed_version}; required {required_version}",
+                fatal=strict,
+            )
+            failures.append(f"portable {display_name} version")
     source_file = Path(__file__).resolve()
     if paths.is_within_project(source_file) and source_file.is_relative_to(paths.SRC_ROOT.resolve()):
         report.add("portable chongzu source import", "PASS", str(source_file))

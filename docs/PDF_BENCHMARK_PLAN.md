@@ -1,10 +1,10 @@
 # PDF table benchmark plan (Phase 4B)
 
 Phase 4A is the control path: PyMuPDF supplies page inventory, native text
-blocks, coordinates, image/drawing signals, and a reproducible profile. It does
-not claim to recognize tables. Phase 4B will use those facts to select a small,
-user-approved corpus and measure a candidate table extractor rather than
-installing a heavy stack speculatively.
+blocks, coordinates, image/drawing signals, and a reproducible profile. Phase
+4B now provides a wheel-provisioned `img2table==2.0.0` candidate for native-text
+pages only. It is not a permanent default and is never invoked with an OCR
+engine.
 
 ## Corpus and protocol
 
@@ -13,8 +13,10 @@ installing a heavy stack speculatively.
    borderless tables, ruled tables, multi-row headers, merged cells, rotated
    pages, and image-only/mixed pages.
 2. Freeze the source SHA-256 list and record the Phase 4A profile for each page.
-3. Run the candidate on only pages with a measured table hint or an explicitly
-   sampled negative control. Keep the original PDFs read-only.
+3. Run the candidate on native-text pages selected by the stored Phase 4A
+   profile, including explicitly sampled negative controls. Mixed PDFs use only
+   native-text pages; suspected-scanned pages are `deferred_to_ocr`. Keep the
+   original PDFs read-only.
 4. Store candidate output as versioned, provenance-linked artifacts and compare
    against a small human-reviewed reference. Never convert a heuristic hint
    directly into a `TableAsset`.
@@ -32,8 +34,9 @@ measured table quality and bundle-cost decision
 ```
 
 GMFT and Docling remain later complex-table benchmark candidates. RapidOCR is a
-separate Phase 5 image/scanned-document decision. No candidate is a default
-dependency until its Windows x64 wheel/runtime and corpus result are recorded.
+separate Phase 5 image/scanned-document decision. `img2table` is a candidate
+dependency until its Windows x64 wheel/runtime and real-corpus result are
+reviewed.
 
 ## Evaluation dimensions
 
@@ -50,3 +53,25 @@ The report must include the exact candidate version, Python/Windows wheel,
 dependency tree, hashes, route reason, timings, quality issues, and examples of
 both successes and false positives. A candidate may be retained only when its
 measured benefit justifies its portability and maintenance cost.
+
+## Current ground-truth machinery
+
+`chongzu benchmark pdf-table <SOURCE> --ground-truth reference.json` reports
+separate fields for expected/detected tables, true positives, false negatives,
+obvious false positives, exact shape, row-count/column-count matches, exact and
+Unicode-normalized cell matches, missing cells, and extra cells. The sidecar is
+keyed by source-relative path and one-based page/table order. Reused candidate
+runs are scored from their raw Parquet artifacts, so a benchmark can be rerun
+without reparsing unchanged PDFs.
+
+Synthetic fixtures validate this scoring and relocation machinery. They are not
+a proxy for scientific-corpus accuracy. After the user supplies a sanitized
+30--100 PDF sample, freeze source SHA-256 values, annotate a representative
+reference set, and compare candidate output against the annotations. The final
+retention decision is explicitly one of:
+
+- **KEEP** — retain img2table as the default native PDF table path;
+- **FALLBACK** — use it for simple/native tables and route difficult cases to a
+  later measured extractor;
+- **REMOVE** — the quality gain does not justify runtime footprint or
+  maintenance cost.

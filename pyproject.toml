@@ -17,6 +17,7 @@ dependencies = [
     "polars==1.44.1",
     "python-calamine==0.8.2",
     "PyMuPDF==1.28.2",
+    "img2table==2.0.0",
 ]
 
 [dependency-groups]

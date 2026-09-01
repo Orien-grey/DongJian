@@ -1,6 +1,6 @@
 {
   "base_url": "",
   "api_key": "",
-  "model": "Qwen3.6-35B-A3B",
+  "model": "",
   "timeout_seconds": 60
 }

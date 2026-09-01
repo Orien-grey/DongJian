@@ -79,8 +79,9 @@ TableAssets and Parquet with measured accuracy, speed, memory, and failures.
 
 ## Phase 4A - Native PDF text extraction and profiling
 
-Status: implementation and synthetic/relocation acceptance complete; awaiting a
-user-selected representative PDF corpus.
+Status: implementation and synthetic/relocation acceptance complete; committed
+2026-09-01 as `32df48d4a36849dda52841c23d3e4a9150e1ba82`; awaiting a user-selected
+representative PDF corpus.
 
 - Use PyMuPDF to inventory every page and extract native text blocks only.
 - Persist page/block bounding boxes, page dimensions/rotation, image counts,
@@ -94,15 +95,24 @@ are unchanged, and relocation loads PyMuPDF only from `runtime\\packages`.
 
 ## Phase 4B - Native PDF table benchmark
 
-- Compare PyMuPDF layout facts with `img2table` on 30--100 representative,
-  sanitized PDFs selected by the user.
+- Status: native-text candidate implementation, synthetic ground-truth scoring,
+  and relocation acceptance complete; real-corpus decision pending.
+- Compare the Phase 4A profile facts with `img2table==2.0.0` on 30--100
+  representative, sanitized PDFs selected by the user.
+- Keep native text and table extraction independent: one PDF may publish both
+  TextAssets and multiple page-level TableAssets.
 - Measure table detection recall, false positives, row/column correctness,
   merged-cell handling, header preservation, borderless tables, speed, memory,
   and runtime-size increase.
-- Add no OCR or heavy document stack until the measured corpus requires it.
+- Image-only/suspected-scanned pages are `deferred_to_ocr`; no OCR engine is
+  installed or called in this phase.
+- Add no heavy document stack until measured corpus evidence requires it.
 
-Acceptance: a measured native table route produces traceable TableAssets and
-explicitly records pages that need a later visual/OCR benchmark.
+Acceptance: a measured native candidate produces traceable TableAssets and
+explicitly records pages that need a later visual/OCR benchmark. The retention
+decision is KEEP (default native route), FALLBACK (simple tables only), or
+REMOVE (benefit does not justify runtime cost); no synthetic score alone makes
+that decision.
 
 ## Phase 5 - Image and scanned-document extraction
 

@@ -4,8 +4,10 @@ ChongZu is a fully relocatable, Windows x64 local research-data organization
 workbench. It inventories one scientific project directory, independently
 extracts tables and text, preserves source-level provenance, and catalogs the
 results in embedded DuckDB plus Parquet. A user-configured OpenAI-compatible
-Qwen service will later add semantic names, categories, field explanations,
-summaries, and complex quality suggestions without overwriting extracted data.
+service (DeepSeek may be used during development; Qwen3.6-35B-A3B is the
+expected company deployment) will later add semantic names, categories, field
+explanations, summaries, and complex quality suggestions without overwriting
+extracted data.
 
 The fixed development root is `E:\Desktop\ChongZu`; launchers derive the root
 from their own location, so a prepared bundle can be moved as a directory.
@@ -52,9 +54,11 @@ records. AI-generated display names never become stable asset IDs.
 The Phase 2 lightweight detector remains in place. Detection records what a
 file appears to be; the deterministic processing policy separately records
 whether the product supports it and which extraction branches are candidates.
-In the current Phase 4A implementation, the PDF table branch is only a routing
-candidate; `extract pdf` produces native `TextAsset`/`TextChunk` rows and profile
-artifacts, not PDF `TableAsset` rows.
+The Phase 4A PyMuPDF branch and Phase 4B `img2table` native-text candidate are
+independent: `extract pdf-table` preserves the Phase 4A
+`TextAsset`/`TextChunk` rows while adding zero or more PDF `TableAsset` rows.
+The candidate explicitly defers image-only/suspected-scanned pages to a future
+OCR phase and is not yet a permanent default extractor.
 
 ## Data safety and semantic boundary
 
@@ -105,6 +109,8 @@ Formal portable launchers require no activation:
 .\chongzu.cmd benchmark structured "D:\Research Data\Project"
 .\chongzu.cmd extract pdf "D:\Research Data\Project"
 .\chongzu.cmd benchmark pdf "D:\Research Data\Project"
+.\chongzu.cmd extract pdf-table "D:\Research Data\Project" --workers 2
+.\chongzu.cmd benchmark pdf-table "D:\Research Data\Project" --ground-truth reference.json
 .\chongzu.cmd registry summary
 ```
 
@@ -123,7 +129,12 @@ operators do not need a separate scan step. `--force` republishes an otherwise
 reusable extraction. The registry is `workspace\state\registry.duckdb`.
 
 Pinned production packages are DuckDB 1.5.5, Polars 1.44.1 (with its
-`polars-runtime-32` 1.44.1 Windows wheel), python-calamine 0.8.2, and PyMuPDF
-1.28.2. They live in `runtime\packages`; PyArrow, Pandas, NumPy, OpenPyXL,
-OCR, Docling, Torch, Java, and Tika are not installed. See [Structured
-extraction](docs/STRUCTURED_EXTRACTION.md) and [PDF extraction](docs/PDF_EXTRACTION.md).
+`polars-runtime-32` 1.44.1 Windows wheel), python-calamine 0.8.2, PyMuPDF
+1.28.2, and the Phase 4B candidate `img2table` 2.0.0 with its locked native
+dependencies. They live in `runtime\packages`; PyArrow, Pandas, OpenPyXL,
+OCR engines, Docling, Torch, Java, and Tika are not installed. NumPy,
+OpenCV-contrib, pypdfium2, BeautifulSoup, soupsieve, typing-extensions, and
+XlsxWriter are present only because the candidate requires them. See
+[Structured extraction](docs/STRUCTURED_EXTRACTION.md),
+[PDF extraction](docs/PDF_EXTRACTION.md), and
+[PDF table extraction](docs/PDF_TABLE_EXTRACTION.md).

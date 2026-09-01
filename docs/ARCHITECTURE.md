@@ -32,7 +32,7 @@ TableAsset              TextAsset/TextChunk
                  |
                  v
          Semantic Enrichment
-            Qwen API
+       configured OpenAI-compatible API
                  |
          +-------+---------+
          |       |         |
@@ -133,6 +133,42 @@ artifact paths. `TextChunk` is a deterministic searchable slice with character
 offsets and explicit source/extraction provenance. Embeddings are deliberately
 absent.
 
+### Phase 4B native PDF table candidate
+
+`src/chongzu/extract/pdf/table_runner.py` is a second, independent coordinator.
+It first ensures the Phase 4A PyMuPDF profile exists, then routes only pages
+with native-text evidence to the `img2table` candidate with `ocr=None` and
+`pdf_text_extraction=True`. `native_text` PDFs use all pages; `mixed` PDFs use
+only `pages_with_text`; `suspected_scanned` pages are recorded as
+`deferred_to_ocr`; unknown profiles are probed only when a page count is known.
+The profile is the single routing source of truth—no second scan heuristic is
+implemented.
+
+Every detected page/table pair becomes its own `TableAsset`. Raw and
+normalized Parquet use the same artifact contract as CSV/Excel:
+
+```text
+workspace/artifacts/tables/<table_id>/
+  raw.parquet
+  normalized.parquet
+  metadata.json
+```
+
+The candidate never consumes or replaces TextAssets. A PDF containing a title,
+body, table, and footer therefore retains both asset types linked to the same
+file/page. Candidate status, OCR-disabled configuration, table index, optional
+bbox, row/column shape, source SHA, run ID, and limitations are stored in the
+metadata artifact and catalog. `table_id` is provenance-derived and never an AI
+display name. Quality issues are emitted only when evidence warrants review;
+unmatched/empty/ambiguous tables are not silently discarded.
+
+`benchmark pdf-table` accepts an optional JSON ground truth sidecar and reports
+table detection, shape, row/column, and exact/normalized cell scores separately.
+Synthetic scores validate the machinery; retention of img2table is deferred to
+a 30--100-file sanitized real-corpus benchmark. The candidate may be KEEP,
+FALLBACK, or REMOVE after that measurement. OCR, GMFT, Docling, Qwen, and
+embedding remain outside this phase.
+
 Stable table/text/chunk IDs are derived from extraction provenance. Semantic
 display names, categories, model responses, and UI edits never participate in
 ID generation.
@@ -184,10 +220,10 @@ It cannot mutate raw or normalized data directly.
 ## Semantic provider boundary
 
 `src/chongzu/semantic.py` defines a provider-neutral configuration and
-`SemanticEnrichmentProvider` protocol. The expected first model is
-Qwen3.6-35B-A3B, but the model is a config value, not a hard-coded exclusive
-choice. `config/llm.example.json` contains no credential. Real LLM config files
-are ignored by Git.
+`SemanticEnrichmentProvider` protocol. DeepSeek may be configured for local
+development, while the expected company deployment is Qwen3.6-35B-A3B. The
+model is a config value, not a hard-coded exclusive choice. `config/llm.example.json`
+contains no credential. Real LLM config files are ignored by Git.
 
 No network client is implemented in this refactor. A future adapter may contact
 only the base URL the user explicitly configures, with no automatic public

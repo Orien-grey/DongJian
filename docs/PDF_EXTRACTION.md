@@ -10,11 +10,15 @@ The coordinator automatically performs an incremental scan, selects supported
 ```text
 .\chongzu.cmd extract pdf "D:\Research Project" [--workers 1..4] [--force]
 .\chongzu.cmd benchmark pdf "D:\Research Project" [--workers 1..4] [--force]
+.\chongzu.cmd extract pdf-table "D:\Research Project" [--workers 1..4] [--force]
+.\chongzu.cmd benchmark pdf-table "D:\Research Project" [--workers 1..4] [--force] [--ground-truth reference.json]
 ```
 
-The explicit `pdf` subcommand is intentional while the unified extractor CLI is
-being built. Unsupported files and supported-but-not-yet-implemented image or
-Office routes remain in the Registry and are not treated as PDF failures.
+The explicit `pdf` and `pdf-table` subcommands are intentional while the
+unified extractor CLI is being built. Unsupported files and
+supported-but-not-yet-implemented image or Office routes remain in the Registry
+and are not treated as PDF failures. `pdf-table` is the Phase 4B img2table
+candidate and never enables OCR.
 `--force` bypasses reuse. The default is one worker; higher values use a bounded
 process pool and retain a single DuckDB writer.
 
@@ -30,6 +34,11 @@ process pool and retain a single DuckDB writer.
 - `artifacts.py`: publishes text and profile JSON atomically below `workspace`;
 - `runner.py`: scan, identity/reuse, bounded execution, timings, and registry
   persistence.
+
+Phase 4B adds `img2table_extractor.py`, `table_quality.py`, and
+`table_runner.py`. The table runner reuses the stored Phase 4A profile and
+publishes page/table `TableAsset` records without replacing any text records.
+See [PDF table extraction](PDF_TABLE_EXTRACTION.md) for the candidate contract.
 
 One PDF may produce zero or many text assets, one for each non-empty native text
 block. Each block carries page number, source bounding box, source relative path,
@@ -92,9 +101,19 @@ profile artifact still exists. Changed content, extractor/config changes, or
 publication. A corrupt PDF is isolated as `corrupt_pdf`; prior successful
 artifacts are not pre-deleted and unrelated files continue processing.
 
+## Phase 4B boundary
+
+Native PDF text and candidate table extraction are independent cache identities.
+An unchanged PyMuPDF result can be reused while a changed img2table/config
+identity is rerun, and vice versa. `--force` applies to the selected route.
+Image-only/suspected-scanned pages are recorded as `deferred_to_ocr`; no OCR
+package or model is imported. The candidate's synthetic ground-truth scores do
+not stand in for a real-corpus quality decision.
+
 ## Known limitations
 
-- No OCR, image text recovery, or PDF table extraction is implemented.
+- No OCR or image text recovery is implemented. Native PDF table detection is a
+  separate Phase 4B candidate and is intentionally not final/default yet.
 - Built-in block text is not a semantic section/header interpretation.
 - Page coverage estimates are bounding-box signals, not pixel-accurate unions.
 - CJK/font encoding quality depends on the source PDF's embedded ToUnicode maps.

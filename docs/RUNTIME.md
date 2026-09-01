@@ -89,11 +89,12 @@ and invoke the standalone executable directly. They never activate or invoke
 `runtime\venv`. In the standalone process `sys.prefix == sys.base_prefix` is
 expected; that is a normal, non-venv interpreter.
 
-Phase 3 and Phase 4A production dependencies are installed into `runtime\packages` with
+Phase 3, Phase 4A, and the Phase 4B candidate production dependencies are
+installed into `runtime\packages` with
 project-private uv, the locked versions/hashes, and a wheel-only constraint:
 
 ```text
-runtime\uv\uv.exe pip install --target runtime\packages --python runtime\python\cpython-3.11.15-windows-x86_64-none\python.exe --only-binary=:all: --exact duckdb==1.5.5 polars==1.44.1 python-calamine==0.8.2 PyMuPDF==1.28.2
+runtime\uv\uv.exe pip install --target runtime\packages --python runtime\python\cpython-3.11.15-windows-x86_64-none\python.exe --only-binary=:all: --exact duckdb==1.5.5 polars==1.44.1 python-calamine==0.8.2 PyMuPDF==1.28.2 img2table==2.0.0
 ```
 
 | Package | Version | Source/constraint |
@@ -103,6 +104,38 @@ runtime\uv\uv.exe pip install --target runtime\packages --python runtime\python\
 | `polars-runtime-32` | `1.44.1` | Required CPython ABI3 Windows x64 wheel; hash `sha256:159334184e6fbb074c9f4692221ea19970a5e2bed2a479f9d7bdb00b7f3eedb9`. |
 | `python-calamine` | `0.8.2` | CPython 3.11 Windows x64 wheel; hash `sha256:c94abc66f8b544e5fc126dfaa6b41b77a394adfe09dac95e20679823e41e38be`. |
 | `PyMuPDF` | `1.28.2` | CPython 3.10+ ABI3 Windows x64 wheel; hash `sha256:ebd244918798502d7b4504c90410d1711a4d7675a32584ca30f1bab419ecbffe`; no mandatory Python dependencies. |
+| `img2table` | `2.0.0` | CPython 3.11 Windows x64 wheel; candidate only; OCR extras not installed. |
+| `numpy` | `2.4.6` | Windows x64 wheel; transitive candidate dependency. |
+| `opencv-contrib-python` | `5.0.0.93` | CPython 3.7+ ABI3 Windows x64 wheel; transitive native candidate dependency. |
+| `pypdfium2` | `5.13.0` | Python 3.11 Windows x64 wheel; PDF rendering dependency. |
+| `beautifulsoup4` | `4.15.0` | Pure Python transitive candidate dependency. |
+| `soupsieve` | `2.9.2` | Pure Python transitive candidate dependency. |
+| `typing-extensions` | `4.16.0` | Pure Python transitive candidate dependency. |
+| `XlsxWriter` | `3.2.9` | Pure Python transitive candidate dependency. |
+
+On 2026-09-01 the installed `runtime\packages` payload measured **479,187,499
+bytes (456.99 MiB)**. Excluding the candidate distribution directories gives a
+baseline-equivalent **281,943,223 bytes (268.88 MiB)**; the candidate tree
+accounts for **197,244,276 bytes
+(188.11 MiB)**, dominated by `cv2` (144,722,910 bytes), NumPy plus
+`numpy.libs` (43,273,316 bytes), and `pypdfium2_raw` (7,416,049 bytes). The
+measurement excludes generated `__pycache__` files and the target-install
+lock marker. The wheel-only audit resolved exactly eight candidate distributions
+(the candidate plus seven transitive packages) for CPython 3.11 Windows x64;
+every selected artifact had a compatible wheel and provisioning performed no
+source build or local compilation. This is an observed Phase 4B portability
+cost, not a release-size guarantee; final packaging must repeat it after
+cleanup/compression.
+
+The wheel-only audit selected these Windows x64 artifacts for the candidate
+tree (the remaining candidate dependencies are pure-Python wheels):
+
+| Distribution | Selected wheel | Wheel bytes | SHA-256 |
+| --- | --- | ---: | --- |
+| `img2table` | `img2table-2.0.0-cp311-cp311-win_amd64.whl` | 437,699 | `40b571764571d883e062d90e8af041abb284d361a8a15dfe3fcc0bbc001c371d` |
+| `numpy` | `numpy-2.4.6-cp311-cp311-win_amd64.whl` | 12,608,406 | `1e254a00cdf42b1e4d5b3d68d33af63268d41340d8885df2ab6470f2e1500147` |
+| `opencv-contrib-python` | `opencv_contrib_python-5.0.0.93-cp37-abi3-win_amd64.whl` | 53,822,579 | `461622db95c964652d4d8fda171034961c3de270f78a6095aaad31050771774a` |
+| `pypdfium2` | `pypdfium2-5.13.0-py3-none-win_amd64.whl` | 3,885,553 | `47dcca2a8d507b5fd24f94c3c9d48fb379430f097bc20f01beff6c963ffbcedb` |
 
 The Phase 4A Windows x64 wheel is `pymupdf-1.28.2-cp310-abi3-win_amd64.whl`
 (19,826,532 bytes). The observed installed payload is approximately 50.4 MB
@@ -145,11 +178,11 @@ UV_PROJECT_ENVIRONMENT   E:\Desktop\ChongZu\runtime\venv
 PIP_CONFIG_FILE          E:\Desktop\ChongZu\cache\pip\pip.ini
 ```
 
-`UV_NO_CONFIG=1`, `UV_LINK_MODE=copy`, `PIP_NO_INPUT=1`, and `PIP_DISABLE_PIP_VERSION_CHECK=1` are also set to reduce hidden host configuration and cache coupling. Heavy component cache/model variables will be added and verified only if a later benchmark selects the corresponding component.
+`UV_NO_CONFIG=1`, `UV_LINK_MODE=copy`, `PIP_NO_INPUT=1`, and `PIP_DISABLE_PIP_VERSION_CHECK=1` are also set to reduce hidden host configuration and cache coupling. Heavy component cache/model variables will be added and verified only if a later benchmark selects the corresponding component. The Phase 4B candidate downloads no models and does not use OCR caches.
 
 Always load `scripts\env.ps1` before invoking uv. During this preparation, two initial bare uv probes demonstrated why: without the project variables uv attempted to initialize/open its default user paths under `%LOCALAPPDATA%\uv\cache` and `%APPDATA%\uv\python`; both probes failed before creating anything. Every successful download, lock, sync, and verification command then used the project-local variables.
 
-## Phase 1-4A Python packages
+## Phase 1-4B Python packages
 
 The lock file is [`uv.lock`](../uv.lock). `uv sync --locked` installs the
 development/test set into `runtime\venv`; the production subset is installed
@@ -163,6 +196,11 @@ as a target into `runtime\packages` with the same pinned versions:
 | `polars-runtime-32` | `1.44.1` | Polars native Windows x64 runtime |
 | `python-calamine` | `0.8.2` | Native XLS/XLSX reader |
 | `PyMuPDF` | `1.28.2` | Phase 4A native PDF text/page profiling |
+| `img2table` | `2.0.0` | Phase 4B native-text PDF table candidate; OCR disabled |
+| `numpy` | `2.4.6` | img2table native candidate dependency |
+| `opencv-contrib-python` | `5.0.0.93` | img2table native candidate dependency |
+| `pypdfium2` | `5.13.0` | img2table PDF rendering dependency |
+| `beautifulsoup4`, `soupsieve`, `typing-extensions`, `XlsxWriter` | pinned above | img2table transitive dependencies |
 | `pytest` | `8.4.2` | Test runner |
 | `colorama` | `0.4.6` | pytest Windows dependency |
 | `iniconfig` | `2.3.0` | pytest dependency |
@@ -170,17 +208,19 @@ as a target into `runtime\packages` with the same pinned versions:
 | `pluggy` | `1.6.0` | pytest dependency |
 | `pygments` | `2.21.0` | pytest dependency |
 
-The resolved Phase 3/4A runtime tree adds Polars, its matching runtime wheel,
-python-calamine, and PyMuPDF. The wheel-only dry run and provisioning required
-no local compiler or source build. PyArrow, Pandas, NumPy, OpenPyXL, RapidOCR,
-ONNX Runtime, img2table, GMFT, Docling, Torch, Java, and Tika remain absent.
+The resolved Phase 3/4A/4B runtime tree adds Polars, its matching runtime
+wheel, python-calamine, PyMuPDF, and the candidate dependency tree above. The
+wheel-only dry run and provisioning required no local compiler or source build.
+PyArrow, Pandas, OpenPyXL, RapidOCR, ONNX Runtime, GMFT, Docling, Torch, Java,
+and Tika remain absent. NumPy/OpenCV/pypdfium2 are present only for the
+candidate and are not OCR engines.
 Polars writes and reads Parquet using its bundled native runtime. PyMuPDF's
 native payload is loaded from `runtime\packages\pymupdf`; the development venv
 is not a production input.
 
-Phase 3/4A processing makes no network request and does not call the configured
-LLM. Provisioning is the only network-enabled step. Java/Tika is not a default
-route; GMFT and Docling remain future benchmark candidates rather than
-portable-bundle requirements.
+Phase 3/4A/4B processing makes no network request and does not call the
+configured LLM. Provisioning is the only network-enabled step. Java/Tika is not
+a default route; GMFT and Docling remain future benchmark candidates rather than
+portable-bundle requirements. img2table's optional OCR extras are not installed.
 
 The standalone CPython image also contains its own project-local bootstrap tools `pip==26.1.2` and `setuptools==82.0.1` under `runtime\python`; they are not system packages and are not exposed through the venv because the venv does not use system site-packages. The package build isolation uses the exact `setuptools==80.10.2` requirement declared in `pyproject.toml`.

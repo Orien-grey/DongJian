@@ -12,7 +12,15 @@ from . import __version__
 from .doctor import main as doctor_main
 from .registry import Registry, RegistryError, canonical_source_root
 from .scan import ScanError, benchmark_metrics, scan_source
-from .extract import PDFExtractionError, StructuredExtractionError, extract_pdf, extract_structured
+from .extract import (
+    PDFExtractionError,
+    PDFTableExtractionError,
+    StructuredExtractionError,
+    extract_pdf,
+    extract_pdf_tables,
+    extract_structured,
+)
+from .extract.pdf.table_quality import load_ground_truth
 
 
 def _print_summary(summary) -> None:
@@ -51,6 +59,13 @@ def _build_parser() -> argparse.ArgumentParser:
     extract_pdf_parser.add_argument("source", type=Path)
     extract_pdf_parser.add_argument("--workers", type=int, default=None)
     extract_pdf_parser.add_argument("--force", action="store_true")
+    extract_pdf_table_parser = extract_sub.add_parser(
+        "pdf-table", help="extract native-text PDF table candidates (img2table)"
+    )
+    extract_pdf_table_parser.add_argument("source", type=Path)
+    extract_pdf_table_parser.add_argument("--workers", type=int, default=None)
+    extract_pdf_table_parser.add_argument("--force", action="store_true")
+    extract_pdf_table_parser.add_argument("--ground-truth", type=Path, default=None)
 
     registry_parser = sub.add_parser("registry", help="inspect the local DuckDB registry")
     registry_sub = registry_parser.add_subparsers(dest="registry_command", required=True)
@@ -61,7 +76,7 @@ def _build_parser() -> argparse.ArgumentParser:
     files_parser.add_argument("--state", default=None)
     files_parser.add_argument("--limit", type=int, default=1000)
 
-    benchmark_parser = sub.add_parser("benchmark", help="measure scan throughput")
+    benchmark_parser = sub.add_parser("benchmark", help="measure extraction throughput")
     benchmark_sub = benchmark_parser.add_subparsers(dest="benchmark_command", required=True)
     benchmark_scan = benchmark_sub.add_parser("scan")
     benchmark_scan.add_argument("source", type=Path)
@@ -75,6 +90,13 @@ def _build_parser() -> argparse.ArgumentParser:
     benchmark_pdf.add_argument("source", type=Path)
     benchmark_pdf.add_argument("--workers", type=int, default=None)
     benchmark_pdf.add_argument("--force", action="store_true")
+    benchmark_pdf_table = benchmark_sub.add_parser(
+        "pdf-table", help="benchmark native-text PDF table candidates (img2table)"
+    )
+    benchmark_pdf_table.add_argument("source", type=Path)
+    benchmark_pdf_table.add_argument("--workers", type=int, default=None)
+    benchmark_pdf_table.add_argument("--force", action="store_true")
+    benchmark_pdf_table.add_argument("--ground-truth", type=Path, default=None)
     return parser
 
 
@@ -111,6 +133,29 @@ def _print_pdf_summary(summary) -> None:
     print(f"Elapsed: {summary.wall_time_ms:.2f} ms")
 
 
+def _print_pdf_table_summary(summary) -> None:
+    print(f"Source: {summary.source_root}")
+    print("Candidate: img2table (native-text only)")
+    print("OCR: disabled")
+    print(f"PDFs considered: {summary.pdfs_considered}")
+    print(f"PDFs attempted: {summary.pdfs_attempted}")
+    print(f"Reused: {summary.reused}")
+    print(f"Deferred to OCR: {summary.deferred_to_ocr}")
+    print(f"Deferred pages: {summary.deferred_pages}")
+    print(f"Pages: {summary.pages}")
+    print(f"Tables detected: {summary.detected_tables}")
+    print(f"Table assets: {summary.table_assets}")
+    print(f"Rows: {summary.rows}")
+    print(f"Cells: {summary.cells}")
+    print(f"Quality issues: {summary.quality_issues}")
+    print(f"Extraction failures: {summary.extraction_failures}")
+    print(f"Elapsed: {summary.wall_time_ms:.2f} ms")
+
+
+def _load_ground_truth(path: Path | None):
+    return load_ground_truth(path) if path is not None else None
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Dispatch diagnostics, registry inspection, and extraction commands."""
 
@@ -131,6 +176,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         if parsed.command == "extract" and parsed.extract_command == "pdf":
             summary = extract_pdf(parsed.source, workers=parsed.workers, force=parsed.force)
             _print_pdf_summary(summary)
+            return 0
+        if parsed.command == "extract" and parsed.extract_command == "pdf-table":
+            summary = extract_pdf_tables(
+                parsed.source,
+                workers=parsed.workers,
+                force=parsed.force,
+                ground_truth=_load_ground_truth(parsed.ground_truth),
+            )
+            _print_pdf_table_summary(summary)
             return 0
         if parsed.command == "benchmark" and parsed.benchmark_command == "scan":
             summary = scan_source(parsed.source, workers=parsed.workers, rehash=parsed.rehash)
@@ -153,6 +207,18 @@ def main(argv: Sequence[str] | None = None) -> int:
             for key, value in summary.benchmark_metrics().items():
                 print(f"{key}: {value:.3f}" if isinstance(value, float) else f"{key}: {value}")
             return 0
+        if parsed.command == "benchmark" and parsed.benchmark_command == "pdf-table":
+            summary = extract_pdf_tables(
+                parsed.source,
+                workers=parsed.workers,
+                force=parsed.force,
+                ground_truth=_load_ground_truth(parsed.ground_truth),
+            )
+            _print_pdf_table_summary(summary)
+            print("Benchmark:")
+            for key, value in summary.benchmark_metrics().items():
+                print(f"{key}: {value:.3f}" if isinstance(value, float) else f"{key}: {value}")
+            return 0
         if parsed.command == "registry":
             registry = Registry.open()
             try:
@@ -170,7 +236,15 @@ def main(argv: Sequence[str] | None = None) -> int:
                 registry.close()
         parser.print_help()
         return 0
-    except (ScanError, StructuredExtractionError, PDFExtractionError, RegistryError, ValueError, OSError) as exc:
+    except (
+        ScanError,
+        StructuredExtractionError,
+        PDFExtractionError,
+        PDFTableExtractionError,
+        RegistryError,
+        ValueError,
+        OSError,
+    ) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
 

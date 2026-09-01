@@ -289,13 +289,43 @@ def test_relocated_copy_reanchors_runtime_registry_and_cache() -> None:
         assert pdf_catalog_data["catalog"]["text_assets"] == 1
         assert pdf_catalog_data["catalog"]["text_chunks"] == 1
 
+        table_source = destination / "workspace" / "pdf table fixtures"
+        table_source.mkdir(parents=True)
+        table_pdf = table_source / "native-table.pdf"
+        table_pdf_spec = {
+            "texts": [
+                (100, 150, "A"), (200, 150, "B"), (300, 150, "C"),
+                (100, 180, "1"), (200, 180, "2"), (300, 180, "3"),
+                (100, 210, "4"), (200, 210, "5"), (300, 210, "6"),
+            ],
+            "lines": [
+                (90, 120, 330, 120), (90, 160, 330, 160),
+                (90, 190, 330, 190), (90, 220, 330, 220),
+                (90, 120, 90, 220), (170, 120, 170, 220),
+                (270, 120, 270, 220), (330, 120, 330, 220),
+            ],
+        }
+        write_pdf(table_pdf, [table_pdf_spec])
+        table_hash = _sha256(table_pdf)
+        table_extraction = _run_cmd(
+            destination / "chongzu.cmd",
+            ["benchmark", "pdf-table", str(table_source), "--workers", "1", "--force"],
+            destination,
+            clean_env,
+        )
+        assert table_extraction.returncode == 0, table_extraction.stdout + table_extraction.stderr
+        assert "Table assets: 1" in table_extraction.stdout
+        assert "OCR: disabled" in table_extraction.stdout
+        assert _sha256(table_pdf) == table_hash
+
         probe_code = (
-            "import duckdb,json,polars,python_calamine,pymupdf,sys,pathlib; "
+            "import duckdb,json,polars,python_calamine,pymupdf,img2table,numpy,cv2,pypdfium2,sys,pathlib; "
             "c=duckdb.connect('workspace/state/registry.duckdb'); "
             "p=c.execute(\"select normalized_artifact_path from table_assets where is_current=true limit 1\").fetchone()[0]; "
             "f=polars.read_parquet(pathlib.Path('workspace')/p); "
             "print(json.dumps({'exe':sys.executable,'duckdb':duckdb.__file__,'polars':polars.__file__,"
             "'calamine':python_calamine.__file__,'pymupdf':pymupdf.__file__,"
+            "'img2table':img2table.__file__,'numpy':numpy.__file__,'cv2':cv2.__file__,'pypdfium2':pypdfium2.__file__,"
             "'text':c.execute(\"select normalized_artifact_path from text_assets where is_current=true and source_relative_path='native.pdf'\").fetchone()[0],"
             "'rows':f.height}))"
         )
@@ -312,7 +342,7 @@ def test_relocated_copy_reanchors_runtime_registry_and_cache() -> None:
         probe_result = json.loads(probe.stdout.strip().splitlines()[-1])
         assert probe_result["rows"] == 2
         assert Path(probe_result["exe"]).resolve() == destination / "runtime" / "python" / paths.PYTHON_RUNTIME_DIRNAME / "python.exe"
-        for module_name in ("duckdb", "polars", "calamine", "pymupdf"):
+        for module_name in ("duckdb", "polars", "calamine", "pymupdf", "img2table", "numpy", "cv2", "pypdfium2"):
             module_path = Path(probe_result[module_name]).resolve()
             assert module_path.is_relative_to((destination / "runtime" / "packages").resolve())
             assert "appdata" not in str(module_path).casefold()

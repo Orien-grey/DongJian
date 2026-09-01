@@ -646,6 +646,95 @@ class Registry:
             result["artifacts"].append(result["profile_artifact_path"])
         return result
 
+    def current_pdf_profile(self, file_id: str, content_sha256: str) -> dict[str, Any] | None:
+        """Return the most recent Phase 4A profile for one content identity."""
+
+        cursor = self.connection.execute(
+            """
+            SELECT extraction_run_id, status, warnings_json
+            FROM extraction_runs
+            WHERE file_id=? AND content_sha256=? AND attempted_route='pdf_native_text'
+              AND status IN ('successful', 'partial')
+            ORDER BY finished_at DESC NULLS LAST, started_at DESC
+            LIMIT 1
+            """,
+            [file_id, content_sha256],
+        )
+        row = cursor.fetchone()
+        if row is None:
+            return None
+        warnings = row[2]
+        if isinstance(warnings, str):
+            try:
+                warnings = json.loads(warnings)
+            except json.JSONDecodeError:
+                warnings = {}
+        if not isinstance(warnings, dict):
+            warnings = {}
+        profile = warnings.get("profile")
+        if not isinstance(profile, dict):
+            return None
+        return {
+            "extraction_run_id": row[0],
+            "status": row[1],
+            "profile": profile,
+        }
+
+    def reusable_pdf_table_extraction(self, extraction_identity: str) -> dict[str, Any] | None:
+        """Return a successful/partial/deferred candidate run with its artifacts."""
+
+        cursor = self.connection.execute(
+            """
+            SELECT extraction_run_id, file_id, content_sha256, status,
+                   table_count, quality_issue_count, total_rows, total_bytes,
+                   timings_json, warnings_json
+            FROM extraction_runs
+            WHERE extraction_identity=? AND attempted_route='pdf_table_candidate'
+              AND status IN ('successful', 'partial', 'deferred_to_ocr')
+            ORDER BY finished_at DESC NULLS LAST, started_at DESC
+            LIMIT 1
+            """,
+            [extraction_identity],
+        )
+        row = cursor.fetchone()
+        if row is None:
+            return None
+        columns = [item[0] for item in cursor.description]
+        result = dict(zip(columns, row))
+        warnings = result.get("warnings_json")
+        if isinstance(warnings, str):
+            try:
+                warnings = json.loads(warnings)
+            except json.JSONDecodeError:
+                warnings = {}
+        if not isinstance(warnings, dict):
+            warnings = {}
+        result["warnings"] = warnings
+        table_cursor = self.connection.execute(
+            """
+            SELECT table_id, page_number, row_count, column_count,
+                   raw_artifact_path, normalized_artifact_path, metadata_artifact_path
+            FROM table_assets
+            WHERE extraction_run_id=? AND is_current=TRUE
+            ORDER BY page_number NULLS LAST, table_id
+            """,
+            [result["extraction_run_id"]],
+        )
+        table_columns = [item[0] for item in table_cursor.description]
+        tables = [dict(zip(table_columns, table_row)) for table_row in table_cursor.fetchall()]
+        result["tables"] = tables
+        result["artifacts"] = [
+            artifact
+            for table in tables
+            for artifact in (
+                table.get("raw_artifact_path"),
+                table.get("normalized_artifact_path"),
+                table.get("metadata_artifact_path"),
+            )
+            if artifact
+        ]
+        return result
+
     def start_structured_extraction(
         self,
         *,
@@ -716,6 +805,43 @@ class Registry:
                 paths.PDF_CONFIG_VERSION,
                 "pdf_native_text",
                 "supported_pdf_text",
+                json.dumps({extractor: extractor_version}),
+            ],
+        )
+
+    def start_pdf_table_extraction(
+        self,
+        *,
+        extraction_run_id: str,
+        extraction_identity: str,
+        source: Any,
+        extractor: str,
+        extractor_version: str,
+        started_at: datetime,
+        force: bool,
+    ) -> None:
+        self.connection.execute(
+            """
+            INSERT INTO extraction_runs(
+                extraction_run_id, file_id, content_sha256, extraction_identity,
+                source_root, source_relative_path, started_at, status, force,
+                pipeline_version, configuration_version, attempted_route,
+                route_reason, extractor_versions_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'running', ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                extraction_run_id,
+                source.file_id,
+                source.content_sha256,
+                extraction_identity,
+                source.source_root,
+                source.relative_path,
+                started_at,
+                force,
+                paths.PDF_TABLE_PIPELINE_VERSION,
+                paths.PDF_TABLE_CONFIG_VERSION,
+                "pdf_table_candidate",
+                "img2table_candidate_native_text_only",
                 json.dumps({extractor: extractor_version}),
             ],
         )
@@ -983,6 +1109,153 @@ class Registry:
                         chunk.char_start,
                         chunk.char_end,
                         json.dumps(chunk.provenance.__dict__, ensure_ascii=False, default=str),
+                    ],
+                )
+            for issue in result.issues:
+                connection.execute(
+                    """
+                    INSERT INTO quality_issues(
+                        issue_id, extraction_run_id, asset_id, severity, issue_type,
+                        description, evidence_json, detected_by, suggested_action,
+                        status, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(issue_id) DO UPDATE SET
+                        extraction_run_id=excluded.extraction_run_id,
+                        evidence_json=excluded.evidence_json,
+                        description=excluded.description
+                    """,
+                    [
+                        issue.issue_id,
+                        result.extraction_run_id,
+                        issue.asset_id,
+                        issue.severity.value,
+                        issue.issue_type,
+                        issue.description,
+                        json.dumps(issue.evidence, ensure_ascii=False, default=str),
+                        issue.detected_by,
+                        issue.suggested_action,
+                        issue.status.value,
+                        finished_at,
+                    ],
+                )
+            connection.execute("COMMIT")
+        except Exception:
+            connection.execute("ROLLBACK")
+            raise
+
+    def record_pdf_table_result(
+        self,
+        result: Any,
+        *,
+        started_at: datetime,
+        finished_at: datetime,
+        force: bool,
+    ) -> None:
+        """Persist one candidate PDF table result through the single writer."""
+
+        connection = self.connection
+        connection.execute("BEGIN TRANSACTION")
+        try:
+            if result.status in {"successful", "partial", "deferred_to_ocr"}:
+                connection.execute(
+                    """
+                    UPDATE table_assets SET is_current=FALSE
+                    WHERE file_id=? AND extractor=? AND is_current=TRUE
+                    """,
+                    [result.source.file_id, result.extractor],
+                )
+            elif result.status == "failed":
+                connection.execute(
+                    """
+                    UPDATE table_assets SET is_current=FALSE
+                    WHERE file_id=? AND extractor=? AND content_sha256<>? AND is_current=TRUE
+                    """,
+                    [result.source.file_id, result.extractor, result.source.content_sha256],
+                )
+            warnings_payload = {
+                "warnings": result.warnings,
+                "route_reason": result.route_reason,
+                "profile_classification": result.profile_classification,
+                "pages_attempted": result.pages_attempted,
+                "pages_deferred": result.pages_deferred,
+                "ground_truth": result.ground_truth_summary,
+            }
+            connection.execute(
+                """
+                INSERT OR REPLACE INTO extraction_runs(
+                    extraction_run_id, file_id, content_sha256, extraction_identity,
+                    source_root, source_relative_path, started_at, finished_at, status,
+                    force, pipeline_version, configuration_version, attempted_route,
+                    route_reason, timings_json, warnings_json, extractor_versions_json,
+                    table_count, sheet_count, quality_issue_count, total_rows, total_bytes,
+                    error_category, error_message
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    result.extraction_run_id,
+                    result.source.file_id,
+                    result.source.content_sha256,
+                    result.extraction_identity,
+                    result.source.source_root,
+                    result.source.relative_path,
+                    started_at,
+                    finished_at,
+                    result.status,
+                    force,
+                    paths.PDF_TABLE_PIPELINE_VERSION,
+                    paths.PDF_TABLE_CONFIG_VERSION,
+                    "pdf_table_candidate",
+                    result.route_reason,
+                    json.dumps(result.timings.as_dict()),
+                    json.dumps(warnings_payload, ensure_ascii=False, default=str),
+                    json.dumps({result.extractor: result.extractor_version}),
+                    len(result.assets),
+                    result.pages_attempted,
+                    len(result.issues),
+                    result.total_rows,
+                    result.source.size_bytes,
+                    result.error_category,
+                    result.error_message,
+                ],
+            )
+            for asset in result.assets:
+                connection.execute(
+                    """
+                    INSERT OR REPLACE INTO table_assets(
+                        table_id, file_id, content_sha256, extraction_run_id, extractor,
+                        extractor_version, source_kind, source_relative_path, sheet_name,
+                        page_number, bbox_json, source_row_start, source_row_end,
+                        source_column_start, source_column_end, row_count, column_count,
+                        columns_json, raw_artifact_path, normalized_artifact_path,
+                        metadata_artifact_path, extraction_confidence, quality_status,
+                        created_at, is_current
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE)
+                    """,
+                    [
+                        asset.table_id,
+                        asset.file_id,
+                        asset.content_sha256,
+                        asset.extraction_run_id,
+                        asset.extractor,
+                        asset.extractor_version,
+                        asset.source_kind.value,
+                        asset.source_relative_path,
+                        asset.sheet_name,
+                        asset.page_number,
+                        json.dumps(asset.bbox.__dict__) if asset.bbox else None,
+                        asset.source_row_start,
+                        asset.source_row_end,
+                        asset.source_column_start,
+                        asset.source_column_end,
+                        asset.row_count,
+                        asset.column_count,
+                        json.dumps(asset.columns, ensure_ascii=False),
+                        asset.raw_artifact_path,
+                        asset.normalized_artifact_path,
+                        asset.metadata_artifact_path,
+                        asset.extraction_confidence,
+                        asset.quality_status.value,
+                        asset.created_at.replace(tzinfo=None),
                     ],
                 )
             for issue in result.issues:

@@ -59,10 +59,13 @@ or both. `file_id` is not unique in either catalog asset table.
 | `quality_status` | `AssetQualityStatus` | `not_assessed`, `pass`, `review`, or `fail`. |
 | `created_at` | `datetime` | Asset creation time. |
 
-Large table rows are Parquet-first. Phase 3 metadata maps Parquet row zero to a
-source logical CSV record or Sheet row and maps every normalized column to its
-original coordinate/header. CSV quoted multiline cells count as one logical
-record. Full raw Sheet snapshots are retained separately from region assets.
+Large table rows are Parquet-first. Phase 3 and Phase 4B metadata maps Parquet
+row zero to a source logical CSV/Sheet row or PDF table row and maps every
+normalized column to its original coordinate/header. CSV quoted multiline cells
+count as one logical record. Full raw Sheet snapshots are retained separately
+from region assets. PDF table coordinates are optional bboxes in PDF points;
+when img2table cannot provide a reliable bbox the field remains null and the
+limitation is recorded rather than guessed.
 
 ## TextAsset
 
@@ -172,3 +175,7 @@ source file -> raw asset/artifact -> normalized artifact -> semantic metadata
 ```
 
 No downstream layer replaces or deletes the upstream evidence it interprets.
+
+Phase 4B `img2table` output is a candidate only. It uses the same
+`TableAsset`/Parquet contract as CSV and Excel, while `TextAsset` and
+`TextChunk` rows from Phase 4A remain independent for the same PDF/page.

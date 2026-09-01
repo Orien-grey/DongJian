@@ -98,6 +98,14 @@ its profile JSON path and profile payload in `extraction_runs.warnings_json`;
 current TextAsset rows remain independently queryable. Missing text/profile
 artifacts invalidate reuse. A failed rerun records the error and leaves prior
 successful artifacts available for audit.
+PDF table reuse is a separate identity (`content_sha256` plus
+`img2table-candidate` version, `pdf-table-v1` configuration, and Registry
+schema). Its `phase4b-pdf-table-candidate` / `pdf_table_candidate` run can be `successful`, `partial`,
+`deferred_to_ocr`, or `failed`; table assets are current independently from
+TextAssets. The runner consumes the Phase 4A profile instead of recalculating
+PDF class heuristics. A table-version/force rerun therefore does not invalidate
+a valid PyMuPDF text run, and a failed candidate does not pre-delete prior
+artifacts.
 Missing artifacts invalidate reuse. `--force` bypasses reuse. A changed file or
 changed extractor/config version creates another run; reuse never depends on a
 filename or AI-generated display name.
