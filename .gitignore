@@ -1,0 +1,81 @@
+# Python build/test/editor artifacts
+__pycache__/
+*.py[cod]
+*.pyd
+*.so
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+build/
+dist/
+*.egg-info/
+.venv/
+venv/
+.idea/
+.vscode/
+*.swp
+*.tmp
+
+# Secrets and local overrides
+.env
+.env.*
+!.env.example
+config/local.*
+*.pem
+*.key
+
+# Project-local runtime payloads (retain directory placeholders only)
+/runtime/**
+!/runtime/**/
+!/runtime/**/.gitkeep
+
+# Caches (retain directory placeholders only)
+/cache/**
+!/cache/**/
+!/cache/**/.gitkeep
+
+# Models and ML artifacts (retain directory placeholders only)
+/models/**
+!/models/**/
+!/models/**/.gitkeep
+
+# Real inputs, generated outputs, state, quarantine, and logs
+/workspace/**
+!/workspace/**/
+!/workspace/**/.gitkeep
+/data/
+*.log
+*.jsonl.log
+
+# Generated data stores and columnar outputs
+*.duckdb
+*.duckdb.wal
+*.parquet
+*.arrow
+*.feather
+
+# Downloaded runtimes, packages, models, archives, and large binaries
+*.exe
+*.msi
+*.dll
+*.jar
+*.whl
+*.onnx
+*.pt
+*.pth
+*.safetensors
+*.model
+*.bin
+*.zip
+*.7z
+*.tar
+*.tar.gz
+*.tgz
+
+# Windows filesystem noise
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
