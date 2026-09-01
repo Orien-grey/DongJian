@@ -62,7 +62,7 @@ It was created from the project CPython with uv, without `--system-site-packages
 ```text
 sys.executable = E:\Desktop\ChongZu\runtime\venv\Scripts\python.exe
 sys.prefix     = E:\Desktop\ChongZu\runtime\venv
-sys.base_prefix= E:\Desktop\ChongZu\runtime\python\cpython-3.11-windows-x86_64-none
+sys.base_prefix= E:\Desktop\ChongZu\runtime\python\cpython-3.11.15-windows-x86_64-none
 ```
 
 This is project-contained, but an ordinary Windows venv is **not claimed to be fully relocatable**. Its launcher/metadata can retain the base interpreter path. Moving the whole project directory may therefore require rebuilding `runtime\venv` from the project CPython. A genuinely relocatable release bundle is a later release-phase concern.
@@ -91,13 +91,14 @@ PIP_CONFIG_FILE          E:\Desktop\ChongZu\cache\pip\pip.ini
 
 Always load `scripts\env.ps1` before invoking uv. During this preparation, two initial bare uv probes demonstrated why: without the project variables uv attempted to initialize/open its default user paths under `%LOCALAPPDATA%\uv\cache` and `%APPDATA%\uv\python`; both probes failed before creating anything. Every successful download, lock, sync, and verification command then used the project-local variables.
 
-## Phase 1 Python packages
+## Phase 1/2 Python packages
 
 The lock file is [`uv.lock`](../uv.lock). `uv sync --locked` installed exactly these packages into the project venv:
 
 | Package | Version | Role |
 | --- | --- | --- |
 | `chongzu` | `0.1.0.dev0` | Local editable project package |
+| `duckdb` | `1.5.5` | Phase 2 local registry database |
 | `pytest` | `8.4.2` | Test runner |
 | `colorama` | `0.4.6` | pytest Windows dependency |
 | `iniconfig` | `2.3.0` | pytest dependency |
@@ -105,6 +106,6 @@ The lock file is [`uv.lock`](../uv.lock). `uv sync --locked` installed exactly t
 | `pluggy` | `1.6.0` | pytest dependency |
 | `pygments` | `2.21.0` | pytest dependency |
 
-No Polars, DuckDB, PyArrow, PyMuPDF, Docling, Torch, RapidOCR, python-calamine, openpyxl, BeautifulSoup, or Tika client was installed.
+No Polars, PyArrow, PyMuPDF, Docling, Torch, RapidOCR, python-calamine, openpyxl, BeautifulSoup, or Tika client was installed. DuckDB 1.5.5 is the only Phase 2 runtime dependency; its Windows x64 wheel hash is recorded in `uv.lock`.
 
 The standalone CPython image also contains its own project-local bootstrap tools `pip==26.1.2` and `setuptools==82.0.1` under `runtime\python`; they are not system packages and are not exposed through the venv because the venv does not use system site-packages. The package build isolation uses the exact `setuptools==80.10.2` requirement declared in `pyproject.toml`.

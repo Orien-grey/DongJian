@@ -1,4 +1,4 @@
-"""Environment and containment diagnostics for the Phase 1 foundation."""
+"""Environment and containment diagnostics for the project-local runtime."""
 
 from __future__ import annotations
 
@@ -236,7 +236,7 @@ def _check_optional_tools(report: DoctorReport) -> None:
 
 
 def run_checks() -> DoctorReport:
-    """Run all Phase 1 checks in the current process."""
+    """Run all project-local runtime checks in the current process."""
 
     report = DoctorReport()
     if paths.PROJECT_ROOT.is_dir() and paths.is_within_project(paths.PROJECT_ROOT):
@@ -252,7 +252,7 @@ def run_checks() -> DoctorReport:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="chongzu doctor", description="Check project-local Phase 1 runtime containment")
+    parser = argparse.ArgumentParser(prog="chongzu doctor", description="Check project-local runtime containment")
     parser.parse_args(list(argv) if argv is not None else None)
     report = run_checks()
     print(f"Project root: {paths.PROJECT_ROOT}")

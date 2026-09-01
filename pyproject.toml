@@ -12,10 +12,9 @@ license = { text = "Proprietary - project-specific research tooling" }
 authors = [
   { name = "ChongZu project" },
 ]
-dependencies = []
-
-[project.scripts]
-chongzu-doctor = "chongzu.doctor:main"
+dependencies = [
+    "duckdb==1.5.5",
+]
 
 [dependency-groups]
 dev = [

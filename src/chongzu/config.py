@@ -1,4 +1,4 @@
-"""Small standard-library configuration model for Phase 1."""
+"""Small standard-library configuration model for the current pipeline."""
 
 from __future__ import annotations
 
@@ -23,8 +23,8 @@ class ProjectConfig:
     output_root: Path = paths.OUTPUT_ROOT
     state_root: Path = paths.STATE_ROOT
     logs_root: Path = paths.LOGS_ROOT
-    pipeline_version: str = "phase1-foundation"
-    schema_version: str = "0"
+    pipeline_version: str = paths.PIPELINE_VERSION
+    schema_version: str = str(paths.REGISTRY_SCHEMA_VERSION)
     fast_workers: int = max(1, min(8, os.cpu_count() or 1))
 
     def __post_init__(self) -> None:
@@ -50,11 +50,10 @@ class ProjectConfig:
 
 
 def load_config() -> ProjectConfig:
-    """Load the Phase 1 defaults.
+    """Load the deterministic project defaults.
 
     File-based configuration is intentionally deferred until the schema is
     needed by the processing pipeline.
     """
 
     return ProjectConfig()
-

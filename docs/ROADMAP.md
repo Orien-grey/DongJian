@@ -27,13 +27,16 @@ Status: foundation prepared on 2026-09-01; portable-release caveats remain inten
 
 Acceptance: a non-admin Windows x64 user can prepare and run a small `doctor` command from the project-local Python, with caches contained in the repository. No Java, OCR model, Torch, or Docling is required yet.
 
-## Phase 2 - Discovery, fingerprints, registry, and canonical contracts
+## Phase 2 - Discovery, fingerprints, registry, and lightweight detection
 
-- Implement safe recursive discovery, path normalization, source immutability checks, and input policy limits.
-- Stream SHA-256 calculation and create DuckDB schemas for runs, files, content identities, attempts, stages, routes, errors, and artifacts.
-- Implement the resumable per-file state machine, compatible-result lookup, unchanged-file skipping, and atomic artifact publication.
-- Define and version canonical document, text-segment, table/cell, provenance, and error schemas.
-- Add bounded queues, backpressure, per-stage timers, and corrupt-file isolation using synthetic fixtures.
+Status: implementation complete in the working tree; no Phase 2 commit has been made.
+
+- Implement safe recursive discovery for an arbitrary source root, path normalization, no-link traversal, and source immutability checks.
+- Stream SHA-256 calculation and create a versioned DuckDB schema for runs, path instances, content identities, attempts, errors, and timings.
+- Implement the resumable metadata fast candidate, `--rehash`, unchanged skipping, new/changed/missing states, and exact duplicate reporting.
+- Detect common magic bytes, OOXML ZIP containers, OLE, text/web assets, and conservative unknowns without Tika or archive extraction.
+- Add bounded queues, single-writer persistence, benchmark metrics, per-file isolation, and synthetic fixture tests.
+- Define the canonical extraction contracts needed by later phases; actual PDF/Office/OCR extraction remains deferred.
 
 Acceptance: interrupted runs resume, unchanged files skip, changed content reprocesses, and one failed file cannot stop a batch.
 

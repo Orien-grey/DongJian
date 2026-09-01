@@ -22,23 +22,51 @@ immutable input
 
 Each arrow is a recorded stage with start/end time, status, warnings, and structured failure details. The coordinator commits a file result only after required artifacts have been written successfully.
 
-## 3. Discovery and incremental identity
+## 3. Discovery, fingerprints, and incremental identity
 
-Discovery walks the configured input root without modifying it and records at least:
+Discovery walks an explicitly supplied source root (for example,
+`python -m chongzu scan "E:\some\data"`) without modifying it and records at least:
 
-- normalized absolute source path and input-root-relative path;
+- normalized absolute source path and source-root-relative path;
 - byte size and filesystem timestamps;
 - SHA-256 content digest;
 - observed extension and detected MIME/type;
 - pipeline version, configuration hash, and relevant extractor/model versions.
 
-Size and modification time may be used as a cheap candidate check, but SHA-256 is the authoritative content identity. A file can be skipped only when the registry shows a completed compatible result for the same digest, pipeline/schema version, and extraction-affecting configuration. Rename handling may reuse content-derived artifacts while preserving a new source-path observation.
+Size and modification time may be used as a cheap candidate check, but SHA-256 is the authoritative content identity. The Phase 2 registry reuses a
+previous digest only when the same path instance is still present and its size
+and `mtime_ns` match; `--rehash` forces a streaming hash. A stat-before/stat-
+after mismatch is recorded as `changed_during_scan` and is never accepted as a
+stable digest. Missing paths remain historical rows. Rename handling can later
+reuse content-derived artifacts while preserving a new source-path observation.
+
+Discovery does not follow directory symlinks or Windows junction/reparse
+points, keeps a visited-directory guard, and records permission, broken-link,
+and filesystem errors per entry. A single error cannot terminate the batch.
+
+The coordinator uses a bounded `ThreadPoolExecutor` for stat, streaming hash,
+and lightweight detection work. It submits only a small multiple of the worker
+count and performs all DuckDB writes on the coordinator connection. Per-file
+hash/detection timings and run-level stage timings are persisted.
 
 Suggested file state transitions are `discovered -> identified -> routed -> extracting -> canonicalized -> profiled -> cleaned -> persisted -> complete`, with terminal per-attempt states such as `unsupported`, `failed`, and `quarantined`. Interrupted nonterminal states are eligible for safe retry.
 
-## 4. Actual type identification
+## 4. Lightweight type identification (Phase 2)
 
-Extensions are hints, never ground truth. Cheap signature checks may preclassify obvious formats, while Apache Tika supplies authoritative MIME/type detection and handles ambiguous, legacy, or unknown inputs. Tika should run as a project-local Java process whose startup cost is amortized across work, with a bounded request count and explicit lifecycle management.
+Extensions are hints, never ground truth. Phase 2 uses only standard-library
+signature/header checks and ZIP central-directory inspection. It recognizes
+PDF, JPEG, PNG, ZIP, OOXML XLSX/DOCX/PPTX, OLE compound storage, basic
+HTML/XML/text, CSS, and Zone.Identifier metadata. It records the observed
+extension, detected type, MIME-like type, method, confidence, evidence, and a
+conservative provisional routing class. A `.下载` file is classified by its
+bytes when the magic/container is clear; uncertain binary remains `unknown`.
+
+Corrupt ZIP inspection is isolated as `corrupted_zip`. No archive member is
+extracted in this phase.
+
+Apache Tika is intentionally not installed yet. In Phase 5 it will be a
+project-local Java service for authoritative MIME detection and legacy/unknown
+or parser-failure fallback, with the same bounded and auditable lifecycle.
 
 Detection output includes detected MIME, confidence or evidence where available, extension mismatch, container/encryption indicators, and the selected route. A password-protected, unsupported, truncated, or suspicious file is recorded as a per-file outcome rather than aborting the batch.
 
@@ -172,4 +200,3 @@ Offline acceptance testing must prove that a prepared copy can process fixtures 
 - Do not send research data to remote services.
 - Do not place secrets, real inputs, derived research outputs, runtime binaries, or models in Git.
 - Record tool/model licenses and verified artifact hashes during future provisioning.
-
