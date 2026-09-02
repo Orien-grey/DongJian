@@ -50,6 +50,7 @@ config/llm.*.json
 /workspace/**
 !/workspace/**/
 !/workspace/**/.gitkeep
+/release/
 /data/
 *.log
 *.jsonl.log

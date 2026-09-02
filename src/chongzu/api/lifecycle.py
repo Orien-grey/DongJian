@@ -47,8 +47,37 @@ def _healthy(port: int) -> bool:
 
 
 def _port_in_use(port: int) -> bool:
+    # A connect-only probe can miss a listener during startup races.  A bind
+    # probe asks the kernel whether this product port is actually available.
+    # SO_EXCLUSIVEADDRUSE is available on Windows and prevents a permissive
+    # reuse flag from making the check report a false negative.
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
-        return probe.connect_ex((DEFAULT_HOST, port)) == 0
+        if sys.platform == "win32" and hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+            probe.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        try:
+            probe.bind((DEFAULT_HOST, port))
+        except OSError:
+            return True
+    return False
+
+
+def _terminate_started_process(pid: int) -> None:
+    """Terminate only the server process created by this start attempt."""
+
+    if sys.platform == "win32":
+        subprocess.run(
+            ["taskkill", "/PID", str(pid), "/T", "/F"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        return
+    try:  # pragma: no cover - production is Windows x64
+        import os
+
+        os.kill(pid, 15)
+    except OSError:
+        pass
 
 
 def start_server(project_root: Path, *, port: int = DEFAULT_PORT, open_browser: bool = True) -> int:
@@ -118,7 +147,12 @@ def start_server(project_root: Path, *, port: int = DEFAULT_PORT, open_browser: 
             print("ChongZu server exited before health check; see workspace/logs/server.log", file=sys.stderr)
             return 2
         time.sleep(0.2)
-    print("ChongZu server did not become healthy; see workspace/logs/server.log", file=sys.stderr)
+    _terminate_started_process(process.pid)
+    state_path.unlink(missing_ok=True)
+    if _port_in_use(port):
+        print(f"ChongZu server cannot start: {DEFAULT_HOST}:{port} became occupied during startup", file=sys.stderr)
+    else:
+        print("ChongZu server did not become healthy; see workspace/logs/server.log", file=sys.stderr)
     return 2
 
 

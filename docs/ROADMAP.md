@@ -235,8 +235,8 @@ statuses without direct database manipulation or source-file mutation.
 
 ## Phase 9 - Search, SQL, and Text Retrieval
 
-- Status: deterministic implementation complete for this round; changes remain
-  uncommitted for review.
+- Status: committed 2026-09-02 as
+  `6637911f94704b1557a78b3004e3dfdc880ae6c7`.
 - Add provider-neutral SearchQuery, SearchResult, RetrievalReference, and
   RetrievalService contracts.
 - Search current Catalog metadata and TextChunks with bounded snippets, Chinese
@@ -258,16 +258,26 @@ bundle are exercised end to end.
 
 ## Phase 10 - End-to-End Acceptance
 
-- Exercise the complete supported-format matrix on the representative project.
-- Verify incremental reruns, interruption recovery, failure isolation,
-  relocation, source immutability, network policy, license/integrity manifests,
-  and operator-facing summaries.
-- Freeze release evidence and document known limitations before packaging.
+- Status: deterministic RC acceptance complete 2026-09-02; Phase 10 changes
+  intentionally remain uncommitted for review.
+- Exercise a fresh synthetic supported-format matrix through the production
+  launcher and localhost API, including empty state, process, Catalog, review,
+  Search, SQL, restart, and stop behavior.
+- Verify incremental reruns, failure isolation, relocation, source
+  immutability, network policy, release allowlist, ZIP extraction, and
+  operator-facing summaries.
+- Record VERSION, release manifest, bundle integrity, footprint, and known
+  limitations before packaging.
 
-Acceptance: all release gates are reproducible from a clean copied bundle.
+Acceptance: all deterministic release gates are reproducible from a clean
+copied bundle and its extracted ZIP. Real LLM acceptance is not part of this
+phase.
 
 ## Release - Offline Windows Bundle
 
+- Status: Phase 10.1 clean-commit release sign-off path implemented; the RC
+  remains pending resolution of recorded legal-review items and representative
+  corpus sign-off.
 - Benchmark the representative approximately 1,500-file project and tune
   bounded queues/resource limits.
 - Build and verify the complete Windows x64 portable bundle with integrity and
@@ -278,3 +288,15 @@ Acceptance: all release gates are reproducible from a clean copied bundle.
 Acceptance: the copied bundle processes incrementally offline, contains every
 required dependency/model locally, isolates failures, preserves provenance,
 and writes all mutable state below its relocated root.
+
+## Phase 10.1 - License and clean-commit release sign-off
+
+- Status: implementation in progress in the current release commit.
+- Audit the actual standalone CPython, runtime distributions, OCR models, and
+  frontend production bundle rather than only project manifests.
+- Preserve local license/NOTICE evidence in `licenses/`, generate the
+  machine-readable component manifest, enforce a clean source tree at formal
+  build time, and rebuild the RC from the resulting commit.
+- Keep unresolved package/model redistribution evidence as explicit review
+  items. This phase does not make a legal determination and does not run
+  Phase 7B or connect a real provider.

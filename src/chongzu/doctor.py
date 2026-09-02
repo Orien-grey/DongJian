@@ -191,11 +191,16 @@ def _check_directories(report: DoctorReport) -> None:
         if not paths.is_within_project(directory):
             report.add(name, "FAIL", f"outside project root: {directory}", fatal=True)
         elif not directory.is_dir():
-            if name == "runtime_venv":
+            if name in {"runtime_venv", "runtime_uv"}:
+                detail = (
+                    "development-only venv is absent; portable runtime does not require it"
+                    if name == "runtime_venv"
+                    else "provisioning-only uv is absent; normal product execution does not require it"
+                )
                 report.add(
                     name,
                     "INFO",
-                    "development-only venv is absent; portable runtime does not require it",
+                    detail,
                 )
                 continue
             report.add(name, "FAIL", f"missing directory: {directory}", fatal=True)
@@ -434,7 +439,11 @@ def _check_portable_imports(report: DoctorReport) -> None:
 
 def _check_uv(report: DoctorReport) -> None:
     if not paths.UV_EXE.is_file() or not paths.is_within_project(paths.UV_EXE):
-        report.add("project-local uv", "FAIL", f"missing or outside project: {paths.UV_EXE}", fatal=True)
+        report.add(
+            "project-local uv",
+            "INFO",
+            "not bundled; uv is provisioning-only and not required for normal product execution",
+        )
         return
 
     try:

@@ -178,6 +178,8 @@ Formal portable launchers require no activation:
 .\chongzu.cmd benchmark pdf-consistency
 .\chongzu.cmd benchmark ocr "D:\Research Data\Project" --workers 2
 .\chongzu.cmd registry summary
+.\scripts\build_release.ps1
+runtime\venv\Scripts\python.exe scripts\run_phase10_acceptance.py
 ```
 
 Phase 8's normal user flow is `start.cmd` -> browser at
@@ -235,3 +237,15 @@ in-memory DuckDB relations because PyArrow is intentionally absent. Its
 `enable_external_access=false` setting and allowlisted temporary relations are
 verified by adversarial tests; the Registry connection is never exposed to
 user SQL.
+
+Phase 10.1 has a deterministic release-candidate path. `VERSION` remains
+`0.1.0`; the artifact name is `ChongZu-0.1.0-rc1-win-x64`.
+`scripts\build_release.ps1` requires a clean Git tree, assembles an explicit
+allowlist under `release\`, and writes the release manifest, third-party audit,
+license evidence, ZIP, and SHA-256 sidecar. The RC excludes the development
+venv, uv, Node, npm/node_modules, interpreter provisioning tools, caches,
+tests, benchmark/acceptance data, real workspace state, and secrets.
+`scripts\run_phase10_acceptance.py` creates a synthetic corpus and validates
+the copied directory and extracted ZIP via the real Windows launcher and
+localhost API. Phase 7B remains `NOT RUN` and the normal product remains fully
+usable with `LLM_STATUS=NOT_CONFIGURED`.

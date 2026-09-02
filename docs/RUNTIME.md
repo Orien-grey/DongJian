@@ -291,4 +291,38 @@ No model download, pip/uv operation, Hugging Face access, HTTP OCR, external
 SQL file function, or public endpoint is part of the product route. `LLM_STATUS
 = NOT_CONFIGURED` remains a normal optional state.
 
-The standalone CPython image also contains its own project-local bootstrap tools `pip==26.1.2` and `setuptools==82.0.1` under `runtime\python`; they are not system packages and are not exposed through the venv because the venv does not use system site-packages. The package build isolation uses the exact `setuptools==80.10.2` requirement declared in `pyproject.toml`.
+The development checkout's standalone CPython image also contains its own
+project-local bootstrap tools `pip==26.1.2` and `setuptools==82.0.1` under
+`runtime\python`; they are provisioning inputs, not product dependencies. The
+release builder removes that interpreter `site-packages` provisioning tree,
+while keeping only the pinned application packages under `runtime\packages`.
+The package build isolation uses the exact `setuptools==80.10.2` requirement
+declared in `pyproject.toml`.
+
+## Phase 10 release candidate
+
+`VERSION` currently contains `0.1.0`. `scripts\build_release.ps1` requires a
+clean Git tree and copies only the explicit production allowlist into
+`release\ChongZu-0.1.0-rc1-win-x64`, writes `release-manifest.json`,
+`THIRD_PARTY_NOTICES.txt`, `third-party-components.json`, and `licenses/`, and
+creates a ZIP and SHA-256 sidecar. The bundle
+contains the exact `runtime\python\cpython-3.11.15-windows-x86_64-none`,
+`runtime\packages`, `runtime\models`, `src`, scripts, docs, and built
+`frontend\dist`. It intentionally excludes `runtime\uv` (provisioning-only),
+`runtime\venv` (development-only), `runtime\node-dev`, Node/npm caches,
+`.git`, tests, acceptance data, real workspace data, `.env`, and generated
+cache/state. Cache and workspace directories are created under the relocated
+root on first execution.
+
+Measured RC payload from the Phase 10 build:
+
+```text
+production directory: approximately 620 MB (about 592 MiB)
+ZIP:                 approximately 229 MB (about 218 MiB)
+```
+
+The final ZIP hash is written next to the generated archive. The manifest
+contains version, source commit, build time, platform, frontend build status,
+runtime component paths, and `llm_status=NOT_CONFIGURED`; it contains no key or
+endpoint secret. PyMuPDF's applicable AGPL/commercial licensing decision
+remains a release-owner sign-off item.

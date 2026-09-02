@@ -68,3 +68,11 @@ Parquet paths, PyMuPDF, RapidOCR, or img2table. Artifact references are shown
 for provenance, but no arbitrary local-file route is provided. A quality
 button changes only the issue review status in DuckDB; it never edits source,
 raw, normalized, or semantic content.
+
+## Release asset boundary
+
+`frontend/dist` is generated and ignored by Git, but is mandatory in a product
+bundle. The Phase 10 builder copies it explicitly and the acceptance journey
+loads `/` from the production Python server after both directory relocation
+and ZIP extraction. The build is self-contained: no CDN, remote font, remote
+image, runtime Node/npm, or development source map is required.

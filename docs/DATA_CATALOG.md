@@ -135,3 +135,13 @@ semantic metadata, but no real LLM response, embedding, or vector database is
 created. Unsupported files remain registered in `files` with their source
 fingerprint but have no asset row. All source and raw/normalized hashes remain
 stable across cleaning, semantic validation, and Catalog queries.
+
+## Phase 10 release verification
+
+The release-candidate catalog is initialized empty; it is never populated
+with demo business rows during packaging. The Phase 10 journey processes a
+fresh synthetic corpus through the production API, then verifies that the
+same asset IDs, source provenance, Search results, and SQL relation mappings
+survive a stop/start and a second ZIP-extracted relocation. Corrupt supported
+files remain isolated failures and unsupported HTML remains registered as
+unsupported; neither outcome removes other Catalog assets.

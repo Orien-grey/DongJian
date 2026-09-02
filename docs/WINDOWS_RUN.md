@@ -77,3 +77,22 @@ checks after relocation.
 The product server is localhost-only and core processing is offline. Phase 7B
 is not run; an absent `.env` is normal and produces `NOT_CONFIGURED` rather
 than a doctor failure.
+
+## Build and verify a release candidate
+
+Development only, from the repository root:
+
+```powershell
+.\scripts\build_release.ps1
+runtime\venv\Scripts\python.exe scripts\run_phase10_acceptance.py
+```
+
+The builder requires a clean Git tree, uses an explicit allowlist, and writes
+`release\ChongZu-0.1.0-rc1-win-x64`, its ZIP, SHA-256 sidecar, third-party
+manifest, and local `licenses/` evidence. The bundle contains only the standalone
+runtime, production packages/models, source, scripts, docs, and built
+`frontend\dist`; it does not contain `runtime\uv`, `runtime\venv`,
+`runtime\node-dev`, Node modules, caches, tests, development workspace state,
+or `.env`. The acceptance harness copies the directory to a Chinese/space
+path, extracts the ZIP to another one, and exercises both through `start.cmd`
+and the localhost API. Release output is ignored by Git.

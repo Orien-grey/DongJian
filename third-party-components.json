@@ -1,0 +1,2082 @@
+{
+  "schema_version": "phase10.1-third-party-v1",
+  "audit_scope": "standalone CPython, runtime/packages distributions, OCR models, frontend/dist runtime code, and build-only frontend tooling",
+  "components": [
+    {
+      "name": "beautifulsoup4",
+      "version": "4.15.0",
+      "component_type": "python-package",
+      "distributed": true,
+      "license": "MIT License",
+      "license_source": [
+        "runtime/packages/beautifulsoup4-4.15.0.dist-info/METADATA",
+        "runtime/packages/beautifulsoup4-4.15.0.dist-info/licenses/AUTHORS",
+        "runtime/packages/beautifulsoup4-4.15.0.dist-info/licenses/LICENSE"
+      ],
+      "homepage/source": "https://www.crummy.com/software/BeautifulSoup/bs4/",
+      "notice_required": true,
+      "bundled_license_path": [
+        "licenses/beautifulsoup4/runtime__packages__beautifulsoup4-4.15.0.dist-info__licenses__AUTHORS",
+        "licenses/beautifulsoup4/runtime__packages__beautifulsoup4-4.15.0.dist-info__licenses__LICENSE"
+      ],
+      "review_status": "identified",
+      "redistribution_evidence": "found in local license/notice evidence",
+      "distribution_metadata": "runtime/packages/beautifulsoup4-4.15.0.dist-info",
+      "notes": "All files in this runtime distribution are included in the audit scope; native payload classification is based on local RECORD entries."
+    },
+    {
+      "name": "certifi",
+      "version": "2026.7.22",
+      "component_type": "python-package",
+      "distributed": true,
+      "license": "MPL-2.0",
+      "license_source": [
+        "runtime/packages/certifi-2026.7.22.dist-info/METADATA",
+        "runtime/packages/certifi-2026.7.22.dist-info/licenses/LICENSE"
+      ],
+      "homepage/source": "https://github.com/certifi/python-certifi",
+      "notice_required": true,
+      "bundled_license_path": [
+        "licenses/certifi/runtime__packages__certifi-2026.7.22.dist-info__licenses__LICENSE"
+      ],
+      "review_status": "identified",
+      "redistribution_evidence": "found in local license/notice evidence",
+      "distribution_metadata": "runtime/packages/certifi-2026.7.22.dist-info",
+      "notes": "All files in this runtime distribution are included in the audit scope; native payload classification is based on local RECORD entries."
+    },
+    {
+      "name": "ch_ppocr_mobile_v2.0_cls_mobile.onnx",
+      "version": "not recorded in local model manifest",
+      "component_type": "model",
+      "distributed": true,
+      "license": "RELEASE LEGAL REVIEW REQUIRED",
+      "license_source": [
+        "runtime/models/ocr/manifest.json"
+      ],
+      "homepage/source": "REVIEW_REQUIRED: upstream model project/source is not recorded locally",
+      "notice_required": true,
+      "bundled_license_path": [],
+      "review_status": "RELEASE LEGAL REVIEW REQUIRED",
+      "redistribution_evidence": "not found in local model manifest or adjacent model metadata",
+      "distribution_metadata": "runtime/models/ocr/manifest.json",
+      "model_source": "not recorded locally",
+      "upstream_project": "not recorded locally",
+      "extractor": "rapidocr 3.9.2",
+      "size_bytes": 585532,
+      "sha256": "e47acedf663230f8863ff1ab0e64dd2d82b838fceb5957146dab185a89d6215c",
+      "notes": "The Python package license is not used as a model-weight license conclusion."
+    },
+    {
+      "name": "charset-normalizer",
+      "version": "3.5.1",
+      "component_type": "native-library",
+      "distributed": true,
+      "license": "MIT",
+      "license_source": [
+        "runtime/packages/charset_normalizer-3.5.1.dist-info/METADATA",
+        "runtime/packages/charset_normalizer-3.5.1.dist-info/licenses/LICENSE"
+      ],
+      "homepage/source": "REVIEW_REQUIRED: no homepage/source in local package metadata",
+      "notice_required": true,
+      "bundled_license_path": [
+        "licenses/charset_normalizer/runtime__packages__charset_normalizer-3.5.1.dist-info__licenses__LICENSE"
+      ],
+      "review_status": "identified",
+      "redistribution_evidence": "found in local license/notice evidence",
+      "distribution_metadata": "runtime/packages/charset_normalizer-3.5.1.dist-info",
+      "notes": "All files in this runtime distribution are included in the audit scope; native payload classification is based on local RECORD entries."
+    },
+    {
+      "name": "colorama",
+      "version": "0.4.6",
+      "component_type": "python-package",
+      "distributed": true,
+      "license": "BSD-3-Clause",
+      "license_source": [
+        "runtime/packages/colorama-0.4.6.dist-info/METADATA",
+        "runtime/packages/colorama-0.4.6.dist-info/licenses/LICENSE.txt"
+      ],
+      "homepage/source": "https://github.com/tartley/colorama",
+      "notice_required": true,
+      "bundled_license_path": [
+        "licenses/colorama/runtime__packages__colorama-0.4.6.dist-info__licenses__LICENSE.txt"
+      ],
+      "review_status": "identified",
+      "redistribution_evidence": "found in local license/notice evidence",
+      "distribution_metadata": "runtime/packages/colorama-0.4.6.dist-info",
+      "notes": "All files in this runtime distribution are included in the audit scope; native payload classification is based on local RECORD entries."
+    },
+    {
+      "name": "colorlog",
+      "version": "6.12.0",
+      "component_type": "python-package",
+      "distributed": true,
+      "license": "MIT License",
+      "license_source": [
+        "runtime/packages/colorlog-6.12.0.dist-info/METADATA",
+        "runtime/packages/colorlog-6.12.0.dist-info/licenses/LICENSE"
+      ],
+      "homepage/source": "https://github.com/borntyping/python-colorlog",
+      "notice_required": true,
+      "bundled_license_path": [
+        "licenses/colorlog/runtime__packages__colorlog-6.12.0.dist-info__licenses__LICENSE"
+      ],
+      "review_status": "identified",
+      "redistribution_evidence": "found in local license/notice evidence",
+      "distribution_metadata": "runtime/packages/colorlog-6.12.0.dist-info",
+      "notes": "All files in this runtime distribution are included in the audit scope; native payload classification is based on local RECORD entries."
+    },
+    {
+      "name": "CPython",
+      "version": "3.11.15",
+      "component_type": "python-runtime",
+      "distributed": true,
+      "license": "PSF-2.0 plus bundled third-party notices",
+      "license_source": [
+        "runtime/python/cpython-3.11.15-windows-x86_64-none/LICENSE.txt",
+        "runtime/python/cpython-3.11.15-windows-x86_64-none/tcl/tk8.6/demos/license.terms",
+        "runtime/python/cpython-3.11.15-windows-x86_64-none/tcl/tk8.6/license.terms"
+      ],
+      "homepage/source": "runtime/python/cpython-3.11.15-windows-x86_64-none/LICENSE.txt",
+      "notice_required": true,
+      "bundled_license_path": [
+        "licenses/CPython.txt",
+        "licenses/CPython/tcl/tk8.6/demos/license.terms",
+        "licenses/CPython/tcl/tk8.6/license.terms"
+      ],
+      "review_status": "identified",
+      "redistribution_evidence": "found in the standalone runtime LICENSE.txt and Tcl/Tk license terms",
+      "distribution_metadata": "runtime/python/cpython-3.11.15-windows-x86_64-none",
+      "notes": "The release builder removes interpreter provisioning site-packages, Scripts, ensurepip, and venv payloads; the standalone CPython license remains included."
+    },
+    {
+      "name": "duckdb",
+      "version": "1.5.5",
+      "component_type": "native-library",
+      "distributed": true,
+      "license": "Apache-2.0",
+      "license_source": [
+        "runtime/packages/duckdb-1.5.5.dist-info/METADATA",
+        "runtime/packages/duckdb-1.5.5.dist-info/licenses/LICENSE",
+        "runtime/packages/duckdb/experimental/spark/LICENSE"
+      ],
+      "homepage/source": "https://github.com/duckdb/duckdb-python",
+      "notice_required": true,
+      "bundled_license_path": [
+        "licenses/duckdb/runtime__packages__duckdb-1.5.5.dist-info__licenses__LICENSE",
+        "licenses/duckdb/runtime__packages__duckdb__experimental__spark__LICENSE"
+      ],
+      "review_status": "identified",
+      "redistribution_evidence": "found in local license/notice evidence",
+      "distribution_metadata": "runtime/packages/duckdb-1.5.5.dist-info",
+      "notes": "All files in this runtime distribution are included in the audit scope; native payload classification is based on local RECORD entries."
+    },
+    {
+      "name": "flatbuffers",
+      "version": "25.12.19",
+      "component_type": "python-package",
+      "distributed": true,
+      "license": "Apache 2.0",
+      "license_source": [
+        "runtime/packages/flatbuffers-25.12.19.dist-info/METADATA"
+      ],
+      "homepage/source": "https://github.com/google/flatbuffers",
+      "notice_required": true,
+      "bundled_license_path": [],
+      "review_status": "REVIEW_REQUIRED",
+      "redistribution_evidence": "not found in local license/notice evidence",
+      "distribution_metadata": "runtime/packages/flatbuffers-25.12.19.dist-info",
+      "notes": "All files in this runtime distribution are included in the audit scope; native payload classification is based on local RECORD entries."
+    },
+    {
+      "name": "idna",
+      "version": "3.19",
+      "component_type": "python-package",
+      "distributed": true,
+      "license": "BSD-3-Clause",
+      "license_source": [
+        "runtime/packages/idna-3.19.dist-info/METADATA",
+        "runtime/packages/idna-3.19.dist-info/licenses/LICENSE.md"
+      ],
+      "homepage/source": "https://github.com/kjd/idna",
+      "notice_required": true,
+      "bundled_license_path": [
+        "licenses/idna/runtime__packages__idna-3.19.dist-info__licenses__LICENSE.md"
+      ],
+      "review_status": "identified",
+      "redistribution_evidence": "found in local license/notice evidence",
+      "distribution_metadata": "runtime/packages/idna-3.19.dist-info",
+      "notes": "All files in this runtime distribution are included in the audit scope; native payload classification is based on local RECORD entries."
+    },
+    {
+      "name": "img2table",
+      "version": "2.0.0",
+      "component_type": "native-library",
+      "distributed": true,
+      "license": "MIT",
+      "license_source": [
+        "runtime/packages/img2table-2.0.0.dist-info/METADATA",
+        "runtime/packages/img2table-2.0.0.dist-info/licenses/LICENSE.txt"
+      ],
+      "homepage/source": "https://github.com/xavctn/img2table",
+      "notice_required": true,
+      "bundled_license_path": [
+        "licenses/img2table/runtime__packages__img2table-2.0.0.dist-info__licenses__LICENSE.txt"
+      ],
+      "review_status": "identified",
+      "redistribution_evidence": "found in local license/notice evidence",
+      "distribution_metadata": "runtime/packages/img2table-2.0.0.dist-info",
+      "notes": "All files in this runtime distribution are included in the audit scope; native payload classification is based on local RECORD entries."
+    },
+    {
+      "name": "numpy",
+      "version": "2.4.6",
+      "component_type": "native-library",
+      "distributed": true,
+      "license": "BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0",
+      "license_source": [
+        "runtime/packages/numpy-2.4.6.dist-info/METADATA",
+        "runtime/packages/numpy-2.4.6.dist-info/licenses/LICENSE.txt",
+        "runtime/packages/numpy-2.4.6.dist-info/licenses/numpy/_core/include/numpy/libdivide/LICENSE.txt",
+        "runtime/packages/numpy-2.4.6.dist-info/licenses/numpy/_core/src/common/pythoncapi-compat/COPYING",
+        "runtime/packages/numpy-2.4.6.dist-info/licenses/numpy/_core/src/highway/LICENSE",
+        "runtime/packages/numpy-2.4.6.dist-info/licenses/numpy/_core/src/multiarray/dragon4_LICENSE.txt",
+        "runtime/packages/numpy-2.4.6.dist-info/licenses/numpy/_core/src/npysort/x86-simd-sort/LICENSE.md",
+        "runtime/packages/numpy-2.4.6.dist-info/licenses/numpy/_core/src/umath/svml/LICENSE",
+        "runtime/packages/numpy-2.4.6.dist-info/licenses/numpy/fft/pocketfft/LICENSE.md",
+        "runtime/packages/numpy-2.4.6.dist-info/licenses/numpy/linalg/lapack_lite/LICENSE.txt",
+        "runtime/packages/numpy-2.4.6.dist-info/licenses/numpy/ma/LICENSE",
+        "runtime/packages/numpy-2.4.6.dist-info/licenses/numpy/random/LICENSE.md",
+        "runtime/packages/numpy-2.4.6.dist-info/licenses/numpy/random/src/distributions/LICENSE.md",
+        "runtime/packages/numpy-2.4.6.dist-info/licenses/numpy/random/src/mt19937/LICENSE.md",
+        "runtime/packages/numpy-2.4.6.dist-info/licenses/numpy/random/src/pcg64/LICENSE.md",
+        "runtime/packages/numpy-2.4.6.dist-info/licenses/numpy/random/src/philox/LICENSE.md",
+        "runtime/packages/numpy-2.4.6.dist-info/licenses/numpy/random/src/sfc64/LICENSE.md",
+        "runtime/packages/numpy-2.4.6.dist-info/licenses/numpy/random/src/splitmix64/LICENSE.md",
+        "runtime/packages/numpy/_core/include/numpy/random/LICENSE.txt",
+        "runtime/packages/numpy/ma/LICENSE",
+        "runtime/packages/numpy/random/LICENSE.md"
+      ],
+      "homepage/source": "https://numpy.org",
+      "notice_required": true,
+      "bundled_license_path": [
+        "licenses/numpy/runtime__packages__numpy-2.4.6.dist-info__licenses__LICENSE.txt",
+        "licenses/numpy/runtime__packages__numpy-2.4.6.dist-info__licenses__numpy___core__include__numpy__libdivide__LICENSE.txt",
+        "licenses/numpy/runtime__packages__numpy-2.4.6.dist-info__licenses__numpy___core__src__common__pythoncapi-compat__COPYING",
+        "licenses/numpy/runtime__packages__numpy-2.4.6.dist-info__licenses__numpy___core__src__highway__LICENSE",
+        "licenses/numpy/runtime__packages__numpy-2.4.6.dist-info__licenses__numpy___core__src__multiarray__dragon4_LICENSE.txt",
+        "licenses/numpy/runtime__packages__numpy-2.4.6.dist-info__licenses__numpy___core__src__npysort__x86-simd-sort__LICENSE.md",
+        "licenses/numpy/runtime__packages__numpy-2.4.6.dist-info__licenses__numpy___core__src__umath__svml__LICENSE",
+        "licenses/numpy/runtime__packages__numpy-2.4.6.dist-info__licenses__numpy__fft__pocketfft__LICENSE.md",
+        "licenses/numpy/runtime__packages__numpy-2.4.6.dist-info__licenses__numpy__linalg__lapack_lite__LICENSE.txt",
+        "licenses/numpy/runtime__packages__numpy-2.4.6.dist-info__licenses__numpy__ma__LICENSE",
+        "licenses/numpy/runtime__packages__numpy-2.4.6.dist-info__licenses__numpy__random__LICENSE.md",
+        "licenses/numpy/runtime__packages__numpy-2.4.6.dist-info__licenses__numpy__random__src__distributions__LICENSE.md",
+        "licenses/numpy/runtime__packages__numpy-2.4.6.dist-info__licenses__numpy__random__src__mt19937__LICENSE.md",
+        "licenses/numpy/runtime__packages__numpy-2.4.6.dist-info__licenses__numpy__random__src__pcg64__LICENSE.md",
+        "licenses/numpy/runtime__packages__numpy-2.4.6.dist-info__licenses__numpy__random__src__philox__LICENSE.md",
+        "licenses/numpy/runtime__packages__numpy-2.4.6.dist-info__licenses__numpy__random__src__sfc64__LICENSE.md",
+        "licenses/numpy/runtime__packages__numpy-2.4.6.dist-info__licenses__numpy__random__src__splitmix64__LICENSE.md",
+        "licenses/numpy/runtime__packages__numpy___core__include__numpy__random__LICENSE.txt",
+        "licenses/numpy/runtime__packages__numpy__ma__LICENSE",
+        "licenses/numpy/runtime__packages__numpy__random__LICENSE.md"
+      ],
+      "review_status": "identified",
+      "redistribution_evidence": "found in local license/notice evidence",
+      "distribution_metadata": "runtime/packages/numpy-2.4.6.dist-info",
+      "notes": "All files in this runtime distribution are included in the audit scope; native payload classification is based on local RECORD entries."
+    },
+    {
+      "name": "omegaconf",
+      "version": "2.0.6",
+      "component_type": "python-package",
+      "distributed": true,
+      "license": "BSD-3-Clause",
+      "license_source": [
+        "runtime/packages/omegaconf-2.0.6.dist-info/METADATA",
+        "runtime/packages/omegaconf-2.0.6.dist-info/LICENSE"
+      ],
+      "homepage/source": "https://github.com/omry/omegaconf",
+      "notice_required": true,
+      "bundled_license_path": [
+        "licenses/omegaconf/runtime__packages__omegaconf-2.0.6.dist-info__LICENSE"
+      ],
+      "review_status": "identified",
+      "redistribution_evidence": "found in local license/notice evidence",
+      "distribution_metadata": "runtime/packages/omegaconf-2.0.6.dist-info",
+      "notes": "All files in this runtime distribution are included in the audit scope; native payload classification is based on local RECORD entries."
+    },
+    {
+      "name": "onnxruntime",
+      "version": "1.29.0",
+      "component_type": "native-library",
+      "distributed": true,
+      "license": "MIT License",
+      "license_source": [
+        "runtime/packages/onnxruntime-1.29.0.dist-info/METADATA",
+        "runtime/packages/onnxruntime/LICENSE"
+      ],
+      "homepage/source": "https://onnxruntime.ai",
+      "notice_required": true,
+      "bundled_license_path": [
+        "licenses/onnxruntime/runtime__packages__onnxruntime__LICENSE"
+      ],
+      "review_status": "identified",
+      "redistribution_evidence": "found in local license/notice evidence",
+      "distribution_metadata": "runtime/packages/onnxruntime-1.29.0.dist-info",
+      "notes": "All files in this runtime distribution are included in the audit scope; native payload classification is based on local RECORD entries."
+    },
+    {
+      "name": "opencv-contrib-python",
+      "version": "5.0.0.93",
+      "component_type": "native-library",
+      "distributed": true,
+      "license": "Apache 2.0",
+      "license_source": [
+        "runtime/packages/opencv_contrib_python-5.0.0.93.dist-info/METADATA",
+        "runtime/packages/cv2/LICENSE-3RD-PARTY.txt",
+        "runtime/packages/cv2/LICENSE.txt",
+        "runtime/packages/opencv_contrib_python-5.0.0.93.dist-info/LICENSE-3RD-PARTY.txt",
+        "runtime/packages/opencv_contrib_python-5.0.0.93.dist-info/LICENSE.txt"
+      ],
+      "homepage/source": "https://github.com/opencv/opencv-python",
+      "notice_required": true,
+      "bundled_license_path": [
+        "licenses/opencv_contrib_python/runtime__packages__cv2__LICENSE-3RD-PARTY.txt",
+        "licenses/opencv_contrib_python/runtime__packages__cv2__LICENSE.txt",
+        "licenses/opencv_contrib_python/runtime__packages__opencv_contrib_python-5.0.0.93.dist-info__LICENSE-3RD-PARTY.txt",
+        "licenses/opencv_contrib_python/runtime__packages__opencv_contrib_python-5.0.0.93.dist-info__LICENSE.txt"
+      ],
+      "review_status": "identified",
+      "redistribution_evidence": "found in local license/notice evidence",
+      "distribution_metadata": "runtime/packages/opencv_contrib_python-5.0.0.93.dist-info",
+      "notes": "All files in this runtime distribution are included in the audit scope; native payload classification is based on local RECORD entries."
+    },
+    {
+      "name": "opencv-python",
+      "version": "5.0.0.93",
+      "component_type": "native-library",
+      "distributed": true,
+      "license": "Apache 2.0",
+      "license_source": [
+        "runtime/packages/opencv_python-5.0.0.93.dist-info/METADATA",
+        "runtime/packages/cv2/LICENSE-3RD-PARTY.txt",
+        "runtime/packages/cv2/LICENSE.txt",
+        "runtime/packages/opencv_python-5.0.0.93.dist-info/LICENSE-3RD-PARTY.txt",
+        "runtime/packages/opencv_python-5.0.0.93.dist-info/LICENSE.txt"
+      ],
+      "homepage/source": "https://github.com/opencv/opencv-python",
+      "notice_required": true,
+      "bundled_license_path": [
+        "licenses/opencv_python/runtime__packages__cv2__LICENSE-3RD-PARTY.txt",
+        "licenses/opencv_python/runtime__packages__cv2__LICENSE.txt",
+        "licenses/opencv_python/runtime__packages__opencv_python-5.0.0.93.dist-info__LICENSE-3RD-PARTY.txt",
+        "licenses/opencv_python/runtime__packages__opencv_python-5.0.0.93.dist-info__LICENSE.txt"
+      ],
+      "review_status": "identified",
+      "redistribution_evidence": "found in local license/notice evidence",
+      "distribution_metadata": "runtime/packages/opencv_python-5.0.0.93.dist-info",
+      "notes": "All files in this runtime distribution are included in the audit scope; native payload classification is based on local RECORD entries."
+    },
+    {
+      "name": "packaging",
+      "version": "26.3",
+      "component_type": "python-package",
+      "distributed": true,
+      "license": "Apache-2.0 OR BSD-2-Clause",
+      "license_source": [
+        "runtime/packages/packaging-26.3.dist-info/METADATA",
+        "runtime/packages/packaging-26.3.dist-info/licenses/LICENSE",
+        "runtime/packages/packaging-26.3.dist-info/licenses/LICENSE.APACHE",
+        "runtime/packages/packaging-26.3.dist-info/licenses/LICENSE.BSD"
+      ],
+      "homepage/source": "https://github.com/pypa/packaging",
+      "notice_required": true,
+      "bundled_license_path": [
+        "licenses/packaging/runtime__packages__packaging-26.3.dist-info__licenses__LICENSE",
+        "licenses/packaging/runtime__packages__packaging-26.3.dist-info__licenses__LICENSE.APACHE",
+        "licenses/packaging/runtime__packages__packaging-26.3.dist-info__licenses__LICENSE.BSD"
+      ],
+      "review_status": "identified",
+      "redistribution_evidence": "found in local license/notice evidence",
+      "distribution_metadata": "runtime/packages/packaging-26.3.dist-info",
+      "notes": "All files in this runtime distribution are included in the audit scope; native payload classification is based on local RECORD entries."
+    },
+    {
+      "name": "pillow",
+      "version": "12.3.0",
+      "component_type": "native-library",
+      "distributed": true,
+      "license": "MIT-CMU",
+      "license_source": [
+        "runtime/packages/pillow-12.3.0.dist-info/METADATA",
+        "runtime/packages/pillow-12.3.0.dist-info/licenses/LICENSE"
+      ],
+      "homepage/source": "https://python-pillow.github.io",
+      "notice_required": true,
+      "bundled_license_path": [
+        "licenses/pillow/runtime__packages__pillow-12.3.0.dist-info__licenses__LICENSE"
+      ],
+      "review_status": "identified",
+      "redistribution_evidence": "found in local license/notice evidence",
+      "distribution_metadata": "runtime/packages/pillow-12.3.0.dist-info",
+      "notes": "All files in this runtime distribution are included in the audit scope; native payload classification is based on local RECORD entries."
+    },
+    {
+      "name": "polars",
+      "version": "1.44.1",
+      "component_type": "python-package",
+      "distributed": true,
+      "license": "MIT",
+      "license_source": [
+        "runtime/packages/polars-1.44.1.dist-info/METADATA",
+        "runtime/packages/polars-1.44.1.dist-info/licenses/LICENSE"
+      ],
+      "homepage/source": "https://www.pola.rs/",
+      "notice_required": true,
+      "bundled_license_path": [
+        "licenses/polars/runtime__packages__polars-1.44.1.dist-info__licenses__LICENSE"
+      ],
+      "review_status": "identified",
+      "redistribution_evidence": "found in local license/notice evidence",
+      "distribution_metadata": "runtime/packages/polars-1.44.1.dist-info",
+      "notes": "All files in this runtime distribution are included in the audit scope; native payload classification is based on local RECORD entries."
+    },
+    {
+      "name": "polars-runtime-32",
+      "version": "1.44.1",
+      "component_type": "native-library",
+      "distributed": true,
+      "license": "MIT",
+      "license_source": [
+        "runtime/packages/polars_runtime_32-1.44.1.dist-info/METADATA",
+        "runtime/packages/polars_runtime_32-1.44.1.dist-info/licenses/LICENSE"
+      ],
+      "homepage/source": "https://www.pola.rs/",
+      "notice_required": true,
+      "bundled_license_path": [
+        "licenses/polars_runtime_32/runtime__packages__polars_runtime_32-1.44.1.dist-info__licenses__LICENSE"
+      ],
+      "review_status": "identified",
+      "redistribution_evidence": "found in local license/notice evidence",
+      "distribution_metadata": "runtime/packages/polars_runtime_32-1.44.1.dist-info",
+      "notes": "All files in this runtime distribution are included in the audit scope; native payload classification is based on local RECORD entries."
+    },
+    {
+      "name": "PP-OCRv6_det_small.onnx",
+      "version": "not recorded in local model manifest",
+      "component_type": "model",
+      "distributed": true,
+      "license": "RELEASE LEGAL REVIEW REQUIRED",
+      "license_source": [
+        "runtime/models/ocr/manifest.json"
+      ],
+      "homepage/source": "REVIEW_REQUIRED: upstream model project/source is not recorded locally",
+      "notice_required": true,
+      "bundled_license_path": [],
+      "review_status": "RELEASE LEGAL REVIEW REQUIRED",
+      "redistribution_evidence": "not found in local model manifest or adjacent model metadata",
+      "distribution_metadata": "runtime/models/ocr/manifest.json",
+      "model_source": "not recorded locally",
+      "upstream_project": "not recorded locally",
+      "extractor": "rapidocr 3.9.2",
+      "size_bytes": 9929594,
+      "sha256": "090f04abcd9d9a7498bc4ebf677e4cb9bdce1fe4197ddb7e529f1ef44e1ff94f",
+      "notes": "The Python package license is not used as a model-weight license conclusion."
+    },
+    {
+      "name": "PP-OCRv6_rec_small.onnx",
+      "version": "not recorded in local model manifest",
+      "component_type": "model",
+      "distributed": true,
+      "license": "RELEASE LEGAL REVIEW REQUIRED",
+      "license_source": [
+        "runtime/models/ocr/manifest.json"
+      ],
+      "homepage/source": "REVIEW_REQUIRED: upstream model project/source is not recorded locally",
+      "notice_required": true,
+      "bundled_license_path": [],
+      "review_status": "RELEASE LEGAL REVIEW REQUIRED",
+      "redistribution_evidence": "not found in local model manifest or adjacent model metadata",
+      "distribution_metadata": "runtime/models/ocr/manifest.json",
+      "model_source": "not recorded locally",
+      "upstream_project": "not recorded locally",
+      "extractor": "rapidocr 3.9.2",
+      "size_bytes": 21234383,
+      "sha256": "6f327246b50388f3c176ae304bd95767ea6dc0c9ae92153ef8cbe210b3c14884",
+      "notes": "The Python package license is not used as a model-weight license conclusion."
+    },
+    {
+      "name": "protobuf",
+      "version": "7.36.1",
+      "component_type": "native-library",
+      "distributed": true,
+      "license": "3-Clause BSD License",
+      "license_source": [
+        "runtime/packages/protobuf-7.36.1.dist-info/METADATA",
+        "runtime/packages/protobuf-7.36.1.dist-info/LICENSE"
+      ],
+      "homepage/source": "https://developers.google.com/protocol-buffers/",
+      "notice_required": true,
+      "bundled_license_path": [
+        "licenses/protobuf/runtime__packages__protobuf-7.36.1.dist-info__LICENSE"
+      ],
+      "review_status": "identified",
+      "redistribution_evidence": "found in local license/notice evidence",
+      "distribution_metadata": "runtime/packages/protobuf-7.36.1.dist-info",
+      "notes": "All files in this runtime distribution are included in the audit scope; native payload classification is based on local RECORD entries."
+    },
+    {
+      "name": "pyclipper",
+      "version": "1.4.0",
+      "component_type": "native-library",
+      "distributed": true,
+      "license": "MIT",
+      "license_source": [
+        "runtime/packages/pyclipper-1.4.0.dist-info/METADATA",
+        "runtime/packages/pyclipper-1.4.0.dist-info/licenses/LICENSE"
+      ],
+      "homepage/source": "https://github.com/fonttools/pyclipper",
+      "notice_required": true,
+      "bundled_license_path": [
+        "licenses/pyclipper/runtime__packages__pyclipper-1.4.0.dist-info__licenses__LICENSE"
+      ],
+      "review_status": "identified",
+      "redistribution_evidence": "found in local license/notice evidence",
+      "distribution_metadata": "runtime/packages/pyclipper-1.4.0.dist-info",
+      "notes": "All files in this runtime distribution are included in the audit scope; native payload classification is based on local RECORD entries."
+    },
+    {
+      "name": "pymupdf",
+      "version": "1.28.2",
+      "component_type": "native-library",
+      "distributed": true,
+      "license": "Dual Licensed - GNU AFFERO GPL 3.0 or Artifex Commercial License",
+      "license_source": [
+        "runtime/packages/pymupdf-1.28.2.dist-info/METADATA",
+        "runtime/packages/pymupdf-1.28.2.dist-info/COPYING"
+      ],
+      "homepage/source": "https://github.com/pymupdf/pymupdf",
+      "notice_required": true,
+      "bundled_license_path": [
+        "licenses/pymupdf/runtime__packages__pymupdf-1.28.2.dist-info__COPYING"
+      ],
+      "review_status": "RELEASE LEGAL REVIEW REQUIRED",
+      "redistribution_evidence": "partial: local COPYING identifies dual licensing but does not record the applicable selection or commercial terms",
+      "distribution_metadata": "runtime/packages/pymupdf-1.28.2.dist-info",
+      "notes": "All files in this runtime distribution are included in the audit scope; native payload classification is based on local RECORD entries."
+    },
+    {
+      "name": "pypdfium2",
+      "version": "5.13.0",
+      "component_type": "native-library",
+      "distributed": true,
+      "license": "BSD-3-Clause, Apache-2.0, dependency licenses",
+      "license_source": [
+        "runtime/packages/pypdfium2-5.13.0.dist-info/METADATA",
+        "runtime/packages/pypdfium2-5.13.0.dist-info/licenses/data/windows_x64/BUILD_LICENSES/abseil.txt",
+        "runtime/packages/pypdfium2-5.13.0.dist-info/licenses/data/windows_x64/BUILD_LICENSES/agg23.txt",
+        "runtime/packages/pypdfium2-5.13.0.dist-info/licenses/data/windows_x64/BUILD_LICENSES/fast_float.txt",
+        "runtime/packages/pypdfium2-5.13.0.dist-info/licenses/data/windows_x64/BUILD_LICENSES/freetype.txt",
+        "runtime/packages/pypdfium2-5.13.0.dist-info/licenses/data/windows_x64/BUILD_LICENSES/icu.txt",
+        "runtime/packages/pypdfium2-5.13.0.dist-info/licenses/data/windows_x64/BUILD_LICENSES/lcms.txt",
+        "runtime/packages/pypdfium2-5.13.0.dist-info/licenses/data/windows_x64/BUILD_LICENSES/libjpeg_turbo.ijg",
+        "runtime/packages/pypdfium2-5.13.0.dist-info/licenses/data/windows_x64/BUILD_LICENSES/libjpeg_turbo.md",
+        "runtime/packages/pypdfium2-5.13.0.dist-info/licenses/data/windows_x64/BUILD_LICENSES/libopenjpeg.txt",
+        "runtime/packages/pypdfium2-5.13.0.dist-info/licenses/data/windows_x64/BUILD_LICENSES/libpng.txt",
+        "runtime/packages/pypdfium2-5.13.0.dist-info/licenses/data/windows_x64/BUILD_LICENSES/libtiff.txt",
+        "runtime/packages/pypdfium2-5.13.0.dist-info/licenses/data/windows_x64/BUILD_LICENSES/llvm-libc.txt",
+        "runtime/packages/pypdfium2-5.13.0.dist-info/licenses/data/windows_x64/BUILD_LICENSES/pdfium-binaries.txt",
+        "runtime/packages/pypdfium2-5.13.0.dist-info/licenses/data/windows_x64/BUILD_LICENSES/pdfium.txt",
+        "runtime/packages/pypdfium2-5.13.0.dist-info/licenses/data/windows_x64/BUILD_LICENSES/simdutf.txt",
+        "runtime/packages/pypdfium2-5.13.0.dist-info/licenses/data/windows_x64/BUILD_LICENSES/zlib.txt",
+        "runtime/packages/pypdfium2-5.13.0.dist-info/licenses/LICENSES/Apache-2.0.txt",
+        "runtime/packages/pypdfium2-5.13.0.dist-info/licenses/LICENSES/BSD-3-Clause.txt",
+        "runtime/packages/pypdfium2-5.13.0.dist-info/licenses/LICENSES/CC-BY-4.0.txt"
+      ],
+      "homepage/source": "https://github.com/pypdfium2-team/pypdfium2",
+      "notice_required": true,
+      "bundled_license_path": [
+        "licenses/pypdfium2/runtime__packages__pypdfium2-5.13.0.dist-info__licenses__data__windows_x64__BUILD_LICENSES__abseil.txt",
+        "licenses/pypdfium2/runtime__packages__pypdfium2-5.13.0.dist-info__licenses__data__windows_x64__BUILD_LICENSES__agg23.txt",
+        "licenses/pypdfium2/runtime__packages__pypdfium2-5.13.0.dist-info__licenses__data__windows_x64__BUILD_LICENSES__fast_float.txt",
+        "licenses/pypdfium2/runtime__packages__pypdfium2-5.13.0.dist-info__licenses__data__windows_x64__BUILD_LICENSES__freetype.txt",
+        "licenses/pypdfium2/runtime__packages__pypdfium2-5.13.0.dist-info__licenses__data__windows_x64__BUILD_LICENSES__icu.txt",
+        "licenses/pypdfium2/runtime__packages__pypdfium2-5.13.0.dist-info__licenses__data__windows_x64__BUILD_LICENSES__lcms.txt",
+        "licenses/pypdfium2/runtime__packages__pypdfium2-5.13.0.dist-info__licenses__data__windows_x64__BUILD_LICENSES__libjpeg_turbo.ijg",
+        "licenses/pypdfium2/runtime__packages__pypdfium2-5.13.0.dist-info__licenses__data__windows_x64__BUILD_LICENSES__libjpeg_turbo.md",
+        "licenses/pypdfium2/runtime__packages__pypdfium2-5.13.0.dist-info__licenses__data__windows_x64__BUILD_LICENSES__libopenjpeg.txt",
+        "licenses/pypdfium2/runtime__packages__pypdfium2-5.13.0.dist-info__licenses__data__windows_x64__BUILD_LICENSES__libpng.txt",
+        "licenses/pypdfium2/runtime__packages__pypdfium2-5.13.0.dist-info__licenses__data__windows_x64__BUILD_LICENSES__libtiff.txt",
+        "licenses/pypdfium2/runtime__packages__pypdfium2-5.13.0.dist-info__licenses__data__windows_x64__BUILD_LICENSES__llvm-libc.txt",
+        "licenses/pypdfium2/runtime__packages__pypdfium2-5.13.0.dist-info__licenses__data__windows_x64__BUILD_LICENSES__pdfium-binaries.txt",
+        "licenses/pypdfium2/runtime__packages__pypdfium2-5.13.0.dist-info__licenses__data__windows_x64__BUILD_LICENSES__pdfium.txt",
+        "licenses/pypdfium2/runtime__packages__pypdfium2-5.13.0.dist-info__licenses__data__windows_x64__BUILD_LICENSES__simdutf.txt",
+        "licenses/pypdfium2/runtime__packages__pypdfium2-5.13.0.dist-info__licenses__data__windows_x64__BUILD_LICENSES__zlib.txt",
+        "licenses/pypdfium2/runtime__packages__pypdfium2-5.13.0.dist-info__licenses__LICENSES__Apache-2.0.txt",
+        "licenses/pypdfium2/runtime__packages__pypdfium2-5.13.0.dist-info__licenses__LICENSES__BSD-3-Clause.txt",
+        "licenses/pypdfium2/runtime__packages__pypdfium2-5.13.0.dist-info__licenses__LICENSES__CC-BY-4.0.txt"
+      ],
+      "review_status": "identified",
+      "redistribution_evidence": "found in local license/notice evidence",
+      "distribution_metadata": "runtime/packages/pypdfium2-5.13.0.dist-info",
+      "notes": "All files in this runtime distribution are included in the audit scope; native payload classification is based on local RECORD entries."
+    },
+    {
+      "name": "python-calamine",
+      "version": "0.8.2",
+      "component_type": "native-library",
+      "distributed": true,
+      "license": "MIT",
+      "license_source": [
+        "runtime/packages/python_calamine-0.8.2.dist-info/METADATA",
+        "runtime/packages/python_calamine-0.8.2.dist-info/licenses/LICENSE"
+      ],
+      "homepage/source": "https://github.com/dimastbk/python-calamine",
+      "notice_required": true,
+      "bundled_license_path": [
+        "licenses/python_calamine/runtime__packages__python_calamine-0.8.2.dist-info__licenses__LICENSE"
+      ],
+      "review_status": "identified",
+      "redistribution_evidence": "found in local license/notice evidence",
+      "distribution_metadata": "runtime/packages/python_calamine-0.8.2.dist-info",
+      "notes": "All files in this runtime distribution are included in the audit scope; native payload classification is based on local RECORD entries."
+    },
+    {
+      "name": "PyYAML",
+      "version": "6.0.3",
+      "component_type": "native-library",
+      "distributed": true,
+      "license": "MIT",
+      "license_source": [
+        "runtime/packages/pyyaml-6.0.3.dist-info/METADATA",
+        "runtime/packages/pyyaml-6.0.3.dist-info/licenses/LICENSE"
+      ],
+      "homepage/source": "https://pyyaml.org/",
+      "notice_required": true,
+      "bundled_license_path": [
+        "licenses/pyyaml/runtime__packages__pyyaml-6.0.3.dist-info__licenses__LICENSE"
+      ],
+      "review_status": "identified",
+      "redistribution_evidence": "found in local license/notice evidence",
+      "distribution_metadata": "runtime/packages/pyyaml-6.0.3.dist-info",
+      "notes": "All files in this runtime distribution are included in the audit scope; native payload classification is based on local RECORD entries."
+    },
+    {
+      "name": "rapidocr",
+      "version": "3.9.2",
+      "component_type": "python-package",
+      "distributed": true,
+      "license": "Apache-2.0",
+      "license_source": [
+        "runtime/packages/rapidocr-3.9.2.dist-info/METADATA"
+      ],
+      "homepage/source": "REVIEW_REQUIRED: no homepage/source in local package metadata",
+      "notice_required": true,
+      "bundled_license_path": [],
+      "review_status": "REVIEW_REQUIRED",
+      "redistribution_evidence": "not found in local license/notice evidence",
+      "distribution_metadata": "runtime/packages/rapidocr-3.9.2.dist-info",
+      "notes": "All files in this runtime distribution are included in the audit scope; native payload classification is based on local RECORD entries."
+    },
+    {
+      "name": "react",
+      "version": "18.3.1",
+      "component_type": "frontend-runtime",
+      "distributed": true,
+      "license": "MIT",
+      "license_source": [
+        "frontend/node_modules/react/package.json",
+        "frontend/node_modules/react/LICENSE"
+      ],
+      "homepage/source": "https://reactjs.org/",
+      "notice_required": true,
+      "bundled_license_path": [
+        "licenses/frontend_react/frontend__node_modules__react__LICENSE"
+      ],
+      "review_status": "identified",
+      "redistribution_evidence": "found in local package metadata/license text",
+      "distribution_metadata": "frontend/node_modules/react",
+      "notes": "Code is bundled into frontend/dist; the package directory is not distributed."
+    },
+    {
+      "name": "react-dom",
+      "version": "18.3.1",
+      "component_type": "frontend-runtime",
+      "distributed": true,
+      "license": "MIT",
+      "license_source": [
+        "frontend/node_modules/react-dom/package.json",
+        "frontend/node_modules/react-dom/LICENSE"
+      ],
+      "homepage/source": "https://reactjs.org/",
+      "notice_required": true,
+      "bundled_license_path": [
+        "licenses/frontend_react_dom/frontend__node_modules__react-dom__LICENSE"
+      ],
+      "review_status": "identified",
+      "redistribution_evidence": "found in local package metadata/license text",
+      "distribution_metadata": "frontend/node_modules/react-dom",
+      "notes": "Code is bundled into frontend/dist; the package directory is not distributed."
+    },
+    {
+      "name": "requests",
+      "version": "2.34.2",
+      "component_type": "python-package",
+      "distributed": true,
+      "license": "Apache-2.0",
+      "license_source": [
+        "runtime/packages/requests-2.34.2.dist-info/METADATA",
+        "runtime/packages/requests-2.34.2.dist-info/licenses/LICENSE",
+        "runtime/packages/requests-2.34.2.dist-info/licenses/NOTICE"
+      ],
+      "homepage/source": "https://github.com/psf/requests",
+      "notice_required": true,
+      "bundled_license_path": [
+        "licenses/requests/runtime__packages__requests-2.34.2.dist-info__licenses__LICENSE",
+        "licenses/requests/runtime__packages__requests-2.34.2.dist-info__licenses__NOTICE"
+      ],
+      "review_status": "identified",
+      "redistribution_evidence": "found in local license/notice evidence",
+      "distribution_metadata": "runtime/packages/requests-2.34.2.dist-info",
+      "notes": "All files in this runtime distribution are included in the audit scope; native payload classification is based on local RECORD entries."
+    },
+    {
+      "name": "scheduler",
+      "version": "0.23.2",
+      "component_type": "frontend-runtime",
+      "distributed": true,
+      "license": "MIT",
+      "license_source": [
+        "frontend/node_modules/scheduler/package.json",
+        "frontend/node_modules/scheduler/LICENSE"
+      ],
+      "homepage/source": "https://reactjs.org/",
+      "notice_required": true,
+      "bundled_license_path": [
+        "licenses/frontend_scheduler/frontend__node_modules__scheduler__LICENSE"
+      ],
+      "review_status": "identified",
+      "redistribution_evidence": "found in local package metadata/license text",
+      "distribution_metadata": "frontend/node_modules/scheduler",
+      "notes": "Code is bundled into frontend/dist; the package directory is not distributed."
+    },
+    {
+      "name": "shapely",
+      "version": "2.1.2",
+      "component_type": "native-library",
+      "distributed": true,
+      "license": "BSD 3-Clause",
+      "license_source": [
+        "runtime/packages/shapely-2.1.2.dist-info/METADATA",
+        "runtime/packages/shapely-2.1.2.dist-info/licenses/LICENSE.txt",
+        "runtime/packages/shapely-2.1.2.dist-info/licenses/LICENSE_GEOS",
+        "runtime/packages/shapely-2.1.2.dist-info/licenses/LICENSE_win32"
+      ],
+      "homepage/source": "https://github.com/shapely/shapely",
+      "notice_required": true,
+      "bundled_license_path": [
+        "licenses/shapely/runtime__packages__shapely-2.1.2.dist-info__licenses__LICENSE.txt",
+        "licenses/shapely/runtime__packages__shapely-2.1.2.dist-info__licenses__LICENSE_GEOS",
+        "licenses/shapely/runtime__packages__shapely-2.1.2.dist-info__licenses__LICENSE_win32"
+      ],
+      "review_status": "identified",
+      "redistribution_evidence": "found in local license/notice evidence",
+      "distribution_metadata": "runtime/packages/shapely-2.1.2.dist-info",
+      "notes": "All files in this runtime distribution are included in the audit scope; native payload classification is based on local RECORD entries."
+    },
+    {
+      "name": "six",
+      "version": "1.17.0",
+      "component_type": "python-package",
+      "distributed": true,
+      "license": "MIT",
+      "license_source": [
+        "runtime/packages/six-1.17.0.dist-info/METADATA",
+        "runtime/packages/six-1.17.0.dist-info/LICENSE"
+      ],
+      "homepage/source": "https://github.com/benjaminp/six",
+      "notice_required": true,
+      "bundled_license_path": [
+        "licenses/six/runtime__packages__six-1.17.0.dist-info__LICENSE"
+      ],
+      "review_status": "identified",
+      "redistribution_evidence": "found in local license/notice evidence",
+      "distribution_metadata": "runtime/packages/six-1.17.0.dist-info",
+      "notes": "All files in this runtime distribution are included in the audit scope; native payload classification is based on local RECORD entries."
+    },
+    {
+      "name": "soupsieve",
+      "version": "2.9.2",
+      "component_type": "python-package",
+      "distributed": true,
+      "license": "MIT",
+      "license_source": [
+        "runtime/packages/soupsieve-2.9.2.dist-info/METADATA",
+        "runtime/packages/soupsieve-2.9.2.dist-info/licenses/LICENSE.md"
+      ],
+      "homepage/source": "https://github.com/facelessuser/soupsieve",
+      "notice_required": true,
+      "bundled_license_path": [
+        "licenses/soupsieve/runtime__packages__soupsieve-2.9.2.dist-info__licenses__LICENSE.md"
+      ],
+      "review_status": "identified",
+      "redistribution_evidence": "found in local license/notice evidence",
+      "distribution_metadata": "runtime/packages/soupsieve-2.9.2.dist-info",
+      "notes": "All files in this runtime distribution are included in the audit scope; native payload classification is based on local RECORD entries."
+    },
+    {
+      "name": "tqdm",
+      "version": "4.70.0",
+      "component_type": "python-package",
+      "distributed": true,
+      "license": "MPL-2.0 AND MIT",
+      "license_source": [
+        "runtime/packages/tqdm-4.70.0.dist-info/METADATA",
+        "runtime/packages/tqdm-4.70.0.dist-info/licenses/LICENCE"
+      ],
+      "homepage/source": "https://tqdm.github.io",
+      "notice_required": true,
+      "bundled_license_path": [
+        "licenses/tqdm/runtime__packages__tqdm-4.70.0.dist-info__licenses__LICENCE"
+      ],
+      "review_status": "identified",
+      "redistribution_evidence": "found in local license/notice evidence",
+      "distribution_metadata": "runtime/packages/tqdm-4.70.0.dist-info",
+      "notes": "All files in this runtime distribution are included in the audit scope; native payload classification is based on local RECORD entries."
+    },
+    {
+      "name": "typing_extensions",
+      "version": "4.16.0",
+      "component_type": "python-package",
+      "distributed": true,
+      "license": "PSF-2.0",
+      "license_source": [
+        "runtime/packages/typing_extensions-4.16.0.dist-info/METADATA",
+        "runtime/packages/typing_extensions-4.16.0.dist-info/licenses/LICENSE"
+      ],
+      "homepage/source": "https://github.com/python/typing_extensions",
+      "notice_required": true,
+      "bundled_license_path": [
+        "licenses/typing_extensions/runtime__packages__typing_extensions-4.16.0.dist-info__licenses__LICENSE"
+      ],
+      "review_status": "identified",
+      "redistribution_evidence": "found in local license/notice evidence",
+      "distribution_metadata": "runtime/packages/typing_extensions-4.16.0.dist-info",
+      "notes": "All files in this runtime distribution are included in the audit scope; native payload classification is based on local RECORD entries."
+    },
+    {
+      "name": "urllib3",
+      "version": "2.7.0",
+      "component_type": "python-package",
+      "distributed": true,
+      "license": "MIT",
+      "license_source": [
+        "runtime/packages/urllib3-2.7.0.dist-info/METADATA",
+        "runtime/packages/urllib3-2.7.0.dist-info/licenses/LICENSE.txt"
+      ],
+      "homepage/source": "REVIEW_REQUIRED: no homepage/source in local package metadata",
+      "notice_required": true,
+      "bundled_license_path": [
+        "licenses/urllib3/runtime__packages__urllib3-2.7.0.dist-info__licenses__LICENSE.txt"
+      ],
+      "review_status": "identified",
+      "redistribution_evidence": "found in local license/notice evidence",
+      "distribution_metadata": "runtime/packages/urllib3-2.7.0.dist-info",
+      "notes": "All files in this runtime distribution are included in the audit scope; native payload classification is based on local RECORD entries."
+    },
+    {
+      "name": "xlsxwriter",
+      "version": "3.2.9",
+      "component_type": "python-package",
+      "distributed": true,
+      "license": "BSD-2-Clause",
+      "license_source": [
+        "runtime/packages/xlsxwriter-3.2.9.dist-info/METADATA",
+        "runtime/packages/xlsxwriter-3.2.9.dist-info/LICENSE.txt"
+      ],
+      "homepage/source": "https://github.com/jmcnamara/XlsxWriter",
+      "notice_required": true,
+      "bundled_license_path": [
+        "licenses/xlsxwriter/runtime__packages__xlsxwriter-3.2.9.dist-info__LICENSE.txt"
+      ],
+      "review_status": "identified",
+      "redistribution_evidence": "found in local license/notice evidence",
+      "distribution_metadata": "runtime/packages/xlsxwriter-3.2.9.dist-info",
+      "notes": "All files in this runtime distribution are included in the audit scope; native payload classification is based on local RECORD entries."
+    },
+    {
+      "name": "@babel/code-frame",
+      "version": "7.29.7",
+      "component_type": "build-tool",
+      "distributed": false,
+      "license": "MIT",
+      "license_source": [
+        "frontend/node_modules/@babel/code-frame/package.json",
+        "frontend/node_modules/@babel/code-frame/LICENSE"
+      ],
+      "homepage/source": "https://babel.dev/docs/en/next/babel-code-frame",
+      "notice_required": false,
+      "bundled_license_path": [],
+      "review_status": "identified",
+      "redistribution_evidence": "not applicable: build-only package is not distributed",
+      "distribution_metadata": "frontend/node_modules/@babel/code-frame",
+      "notes": "Build-only package; no package files are copied into frontend/dist as a standalone dependency."
+    },
+    {
+      "name": "@babel/compat-data",
+      "version": "7.29.7",
+      "component_type": "build-tool",
+      "distributed": false,
+      "license": "MIT",
+      "license_source": [
+        "frontend/node_modules/@babel/compat-data/package.json",
+        "frontend/node_modules/@babel/compat-data/LICENSE"
+      ],
+      "homepage/source": "https://github.com/babel/babel.git",
+      "notice_required": false,
+      "bundled_license_path": [],
+      "review_status": "identified",
+      "redistribution_evidence": "not applicable: build-only package is not distributed",
+      "distribution_metadata": "frontend/node_modules/@babel/compat-data",
+      "notes": "Build-only package; no package files are copied into frontend/dist as a standalone dependency."
+    },
+    {
+      "name": "@babel/core",
+      "version": "7.29.7",
+      "component_type": "build-tool",
+      "distributed": false,
+      "license": "MIT",
+      "license_source": [
+        "frontend/node_modules/@babel/core/package.json",
+        "frontend/node_modules/@babel/core/LICENSE"
+      ],
+      "homepage/source": "https://babel.dev/docs/en/next/babel-core",
+      "notice_required": false,
+      "bundled_license_path": [],
+      "review_status": "identified",
+      "redistribution_evidence": "not applicable: build-only package is not distributed",
+      "distribution_metadata": "frontend/node_modules/@babel/core",
+      "notes": "Build-only package; no package files are copied into frontend/dist as a standalone dependency."
+    },
+    {
+      "name": "@babel/generator",
+      "version": "7.29.8",
+      "component_type": "build-tool",
+      "distributed": false,
+      "license": "MIT",
+      "license_source": [
+        "frontend/node_modules/@babel/generator/package.json",
+        "frontend/node_modules/@babel/generator/LICENSE"
+      ],
+      "homepage/source": "https://babel.dev/docs/en/next/babel-generator",
+      "notice_required": false,
+      "bundled_license_path": [],
+      "review_status": "identified",
+      "redistribution_evidence": "not applicable: build-only package is not distributed",
+      "distribution_metadata": "frontend/node_modules/@babel/generator",
+      "notes": "Build-only package; no package files are copied into frontend/dist as a standalone dependency."
+    },
+    {
+      "name": "@babel/helper-compilation-targets",
+      "version": "7.29.7",
+      "component_type": "build-tool",
+      "distributed": false,
+      "license": "MIT",
+      "license_source": [
+        "frontend/node_modules/@babel/helper-compilation-targets/package.json",
+        "frontend/node_modules/@babel/helper-compilation-targets/LICENSE"
+      ],
+      "homepage/source": "https://github.com/babel/babel.git",
+      "notice_required": false,
+      "bundled_license_path": [],
+      "review_status": "identified",
+      "redistribution_evidence": "not applicable: build-only package is not distributed",
+      "distribution_metadata": "frontend/node_modules/@babel/helper-compilation-targets",
+      "notes": "Build-only package; no package files are copied into frontend/dist as a standalone dependency."
+    },
+    {
+      "name": "@babel/helper-globals",
+      "version": "7.29.7",
+      "component_type": "build-tool",
+      "distributed": false,
+      "license": "MIT",
+      "license_source": [
+        "frontend/node_modules/@babel/helper-globals/package.json",
+        "frontend/node_modules/@babel/helper-globals/LICENSE"
+      ],
+      "homepage/source": "https://github.com/babel/babel.git",
+      "notice_required": false,
+      "bundled_license_path": [],
+      "review_status": "identified",
+      "redistribution_evidence": "not applicable: build-only package is not distributed",
+      "distribution_metadata": "frontend/node_modules/@babel/helper-globals",
+      "notes": "Build-only package; no package files are copied into frontend/dist as a standalone dependency."
+    },
+    {
+      "name": "@babel/helper-module-imports",
+      "version": "7.29.7",
+      "component_type": "build-tool",
+      "distributed": false,
+      "license": "MIT",
+      "license_source": [
+        "frontend/node_modules/@babel/helper-module-imports/package.json",
+        "frontend/node_modules/@babel/helper-module-imports/LICENSE"
+      ],
+      "homepage/source": "https://babel.dev/docs/en/next/babel-helper-module-imports",
+      "notice_required": false,
+      "bundled_license_path": [],
+      "review_status": "identified",
+      "redistribution_evidence": "not applicable: build-only package is not distributed",
+      "distribution_metadata": "frontend/node_modules/@babel/helper-module-imports",
+      "notes": "Build-only package; no package files are copied into frontend/dist as a standalone dependency."
+    },
+    {
+      "name": "@babel/helper-module-transforms",
+      "version": "7.29.7",
+      "component_type": "build-tool",
+      "distributed": false,
+      "license": "MIT",
+      "license_source": [
+        "frontend/node_modules/@babel/helper-module-transforms/package.json",
+        "frontend/node_modules/@babel/helper-module-transforms/LICENSE"
+      ],
+      "homepage/source": "https://babel.dev/docs/en/next/babel-helper-module-transforms",
+      "notice_required": false,
+      "bundled_license_path": [],
+      "review_status": "identified",
+      "redistribution_evidence": "not applicable: build-only package is not distributed",
+      "distribution_metadata": "frontend/node_modules/@babel/helper-module-transforms",
+      "notes": "Build-only package; no package files are copied into frontend/dist as a standalone dependency."
+    },
+    {
+      "name": "@babel/helper-plugin-utils",
+      "version": "7.29.7",
+      "component_type": "build-tool",
+      "distributed": false,
+      "license": "MIT",
+      "license_source": [
+        "frontend/node_modules/@babel/helper-plugin-utils/package.json",
+        "frontend/node_modules/@babel/helper-plugin-utils/LICENSE"
+      ],
+      "homepage/source": "https://babel.dev/docs/en/next/babel-helper-plugin-utils",
+      "notice_required": false,
+      "bundled_license_path": [],
+      "review_status": "identified",
+      "redistribution_evidence": "not applicable: build-only package is not distributed",
+      "distribution_metadata": "frontend/node_modules/@babel/helper-plugin-utils",
+      "notes": "Build-only package; no package files are copied into frontend/dist as a standalone dependency."
+    },
+    {
+      "name": "@babel/helper-string-parser",
+      "version": "7.29.7",
+      "component_type": "build-tool",
+      "distributed": false,
+      "license": "MIT",
+      "license_source": [
+        "frontend/node_modules/@babel/helper-string-parser/package.json",
+        "frontend/node_modules/@babel/helper-string-parser/LICENSE"
+      ],
+      "homepage/source": "https://babel.dev/docs/en/next/babel-helper-string-parser",
+      "notice_required": false,
+      "bundled_license_path": [],
+      "review_status": "identified",
+      "redistribution_evidence": "not applicable: build-only package is not distributed",
+      "distribution_metadata": "frontend/node_modules/@babel/helper-string-parser",
+      "notes": "Build-only package; no package files are copied into frontend/dist as a standalone dependency."
+    },
+    {
+      "name": "@babel/helper-validator-identifier",
+      "version": "7.29.7",
+      "component_type": "build-tool",
+      "distributed": false,
+      "license": "MIT",
+      "license_source": [
+        "frontend/node_modules/@babel/helper-validator-identifier/package.json",
+        "frontend/node_modules/@babel/helper-validator-identifier/LICENSE"
+      ],
+      "homepage/source": "https://github.com/babel/babel.git",
+      "notice_required": false,
+      "bundled_license_path": [],
+      "review_status": "identified",
+      "redistribution_evidence": "not applicable: build-only package is not distributed",
+      "distribution_metadata": "frontend/node_modules/@babel/helper-validator-identifier",
+      "notes": "Build-only package; no package files are copied into frontend/dist as a standalone dependency."
+    },
+    {
+      "name": "@babel/helper-validator-option",
+      "version": "7.29.7",
+      "component_type": "build-tool",
+      "distributed": false,
+      "license": "MIT",
+      "license_source": [
+        "frontend/node_modules/@babel/helper-validator-option/package.json",
+        "frontend/node_modules/@babel/helper-validator-option/LICENSE"
+      ],
+      "homepage/source": "https://github.com/babel/babel.git",
+      "notice_required": false,
+      "bundled_license_path": [],
+      "review_status": "identified",
+      "redistribution_evidence": "not applicable: build-only package is not distributed",
+      "distribution_metadata": "frontend/node_modules/@babel/helper-validator-option",
+      "notes": "Build-only package; no package files are copied into frontend/dist as a standalone dependency."
+    },
+    {
+      "name": "@babel/helpers",
+      "version": "7.29.7",
+      "component_type": "build-tool",
+      "distributed": false,
+      "license": "MIT",
+      "license_source": [
+        "frontend/node_modules/@babel/helpers/package.json",
+        "frontend/node_modules/@babel/helpers/LICENSE"
+      ],
+      "homepage/source": "https://babel.dev/docs/en/next/babel-helpers",
+      "notice_required": false,
+      "bundled_license_path": [],
+      "review_status": "identified",
+      "redistribution_evidence": "not applicable: build-only package is not distributed",
+      "distribution_metadata": "frontend/node_modules/@babel/helpers",
+      "notes": "Build-only package; no package files are copied into frontend/dist as a standalone dependency."
+    },
+    {
+      "name": "@babel/parser",
+      "version": "7.29.8",
+      "component_type": "build-tool",
+      "distributed": false,
+      "license": "MIT",
+      "license_source": [
+        "frontend/node_modules/@babel/parser/package.json",
+        "frontend/node_modules/@babel/parser/LICENSE"
+      ],
+      "homepage/source": "https://babel.dev/docs/en/next/babel-parser",
+      "notice_required": false,
+      "bundled_license_path": [],
+      "review_status": "identified",
+      "redistribution_evidence": "not applicable: build-only package is not distributed",
+      "distribution_metadata": "frontend/node_modules/@babel/parser",
+      "notes": "Build-only package; no package files are copied into frontend/dist as a standalone dependency."
+    },
+    {
+      "name": "@babel/plugin-transform-react-jsx-self",
+      "version": "7.29.7",
+      "component_type": "build-tool",
+      "distributed": false,
+      "license": "MIT",
+      "license_source": [
+        "frontend/node_modules/@babel/plugin-transform-react-jsx-self/package.json",
+        "frontend/node_modules/@babel/plugin-transform-react-jsx-self/LICENSE"
+      ],
+      "homepage/source": "https://babel.dev/docs/en/next/babel-plugin-transform-react-jsx-self",
+      "notice_required": false,
+      "bundled_license_path": [],
+      "review_status": "identified",
+      "redistribution_evidence": "not applicable: build-only package is not distributed",
+      "distribution_metadata": "frontend/node_modules/@babel/plugin-transform-react-jsx-self",
+      "notes": "Build-only package; no package files are copied into frontend/dist as a standalone dependency."
+    },
+    {
+      "name": "@babel/plugin-transform-react-jsx-source",
+      "version": "7.29.7",
+      "component_type": "build-tool",
+      "distributed": false,
+      "license": "MIT",
+      "license_source": [
+        "frontend/node_modules/@babel/plugin-transform-react-jsx-source/package.json",
+        "frontend/node_modules/@babel/plugin-transform-react-jsx-source/LICENSE"
+      ],
+      "homepage/source": "https://babel.dev/docs/en/next/babel-plugin-transform-react-jsx-source",
+      "notice_required": false,
+      "bundled_license_path": [],
+      "review_status": "identified",
+      "redistribution_evidence": "not applicable: build-only package is not distributed",
+      "distribution_metadata": "frontend/node_modules/@babel/plugin-transform-react-jsx-source",
+      "notes": "Build-only package; no package files are copied into frontend/dist as a standalone dependency."
+    },
+    {
+      "name": "@babel/template",
+      "version": "7.29.7",
+      "component_type": "build-tool",
+      "distributed": false,
+      "license": "MIT",
+      "license_source": [
+        "frontend/node_modules/@babel/template/package.json",
+        "frontend/node_modules/@babel/template/LICENSE"
+      ],
+      "homepage/source": "https://babel.dev/docs/en/next/babel-template",
+      "notice_required": false,
+      "bundled_license_path": [],
+      "review_status": "identified",
+      "redistribution_evidence": "not applicable: build-only package is not distributed",
+      "distribution_metadata": "frontend/node_modules/@babel/template",
+      "notes": "Build-only package; no package files are copied into frontend/dist as a standalone dependency."
+    },
+    {
+      "name": "@babel/traverse",
+      "version": "7.29.8",
+      "component_type": "build-tool",
+      "distributed": false,
+      "license": "MIT",
+      "license_source": [
+        "frontend/node_modules/@babel/traverse/package.json",
+        "frontend/node_modules/@babel/traverse/LICENSE"
+      ],
+      "homepage/source": "https://babel.dev/docs/en/next/babel-traverse",
+      "notice_required": false,
+      "bundled_license_path": [],
+      "review_status": "identified",
+      "redistribution_evidence": "not applicable: build-only package is not distributed",
+      "distribution_metadata": "frontend/node_modules/@babel/traverse",
+      "notes": "Build-only package; no package files are copied into frontend/dist as a standalone dependency."
+    },
+    {
+      "name": "@babel/types",
+      "version": "7.29.8",
+      "component_type": "build-tool",
+      "distributed": false,
+      "license": "MIT",
+      "license_source": [
+        "frontend/node_modules/@babel/types/package.json",
+        "frontend/node_modules/@babel/types/LICENSE"
+      ],
+      "homepage/source": "https://babel.dev/docs/en/next/babel-types",
+      "notice_required": false,
+      "bundled_license_path": [],
+      "review_status": "identified",
+      "redistribution_evidence": "not applicable: build-only package is not distributed",
+      "distribution_metadata": "frontend/node_modules/@babel/types",
+      "notes": "Build-only package; no package files are copied into frontend/dist as a standalone dependency."
+    },
+    {
+      "name": "@esbuild/win32-x64",
+      "version": "0.24.2",
+      "component_type": "build-tool",
+      "distributed": false,
+      "license": "MIT",
+      "license_source": [
+        "frontend/node_modules/@esbuild/win32-x64/package.json"
+      ],
+      "homepage/source": "git+https://github.com/evanw/esbuild.git",
+      "notice_required": false,
+      "bundled_license_path": [],
+      "review_status": "identified",
+      "redistribution_evidence": "not applicable: build-only package is not distributed",
+      "distribution_metadata": "frontend/node_modules/@esbuild/win32-x64",
+      "notes": "Build-only package; no package files are copied into frontend/dist as a standalone dependency."
+    },
+    {
+      "name": "@jridgewell/gen-mapping",
+      "version": "0.3.13",
+      "component_type": "build-tool",
+      "distributed": false,
+      "license": "MIT",
+      "license_source": [
+        "frontend/node_modules/@jridgewell/gen-mapping/package.json",
+        "frontend/node_modules/@jridgewell/gen-mapping/LICENSE"
+      ],
+      "homepage/source": "https://github.com/jridgewell/sourcemaps/tree/main/packages/gen-mapping",
+      "notice_required": false,
+      "bundled_license_path": [],
+      "review_status": "identified",
+      "redistribution_evidence": "not applicable: build-only package is not distributed",
+      "distribution_metadata": "frontend/node_modules/@jridgewell/gen-mapping",
+      "notes": "Build-only package; no package files are copied into frontend/dist as a standalone dependency."
+    },
+    {
+      "name": "@jridgewell/remapping",
+      "version": "2.3.5",
+      "component_type": "build-tool",
+      "distributed": false,
+      "license": "MIT",
+      "license_source": [
+        "frontend/node_modules/@jridgewell/remapping/package.json",
+        "frontend/node_modules/@jridgewell/remapping/LICENSE"
+      ],
+      "homepage/source": "https://github.com/jridgewell/sourcemaps/tree/main/packages/remapping",
+      "notice_required": false,
+      "bundled_license_path": [],
+      "review_status": "identified",
+      "redistribution_evidence": "not applicable: build-only package is not distributed",
+      "distribution_metadata": "frontend/node_modules/@jridgewell/remapping",
+      "notes": "Build-only package; no package files are copied into frontend/dist as a standalone dependency."
+    },
+    {
+      "name": "@jridgewell/resolve-uri",
+      "version": "3.1.2",
+      "component_type": "build-tool",
+      "distributed": false,
+      "license": "MIT",
+      "license_source": [
+        "frontend/node_modules/@jridgewell/resolve-uri/package.json",
+        "frontend/node_modules/@jridgewell/resolve-uri/LICENSE"
+      ],
+      "homepage/source": "https://github.com/jridgewell/resolve-uri",
+      "notice_required": false,
+      "bundled_license_path": [],
+      "review_status": "identified",
+      "redistribution_evidence": "not applicable: build-only package is not distributed",
+      "distribution_metadata": "frontend/node_modules/@jridgewell/resolve-uri",
+      "notes": "Build-only package; no package files are copied into frontend/dist as a standalone dependency."
+    },
+    {
+      "name": "@jridgewell/sourcemap-codec",
+      "version": "1.6.0",
+      "component_type": "build-tool",
+      "distributed": false,
+      "license": "MIT",
+      "license_source": [
+        "frontend/node_modules/@jridgewell/sourcemap-codec/package.json",
+        "frontend/node_modules/@jridgewell/sourcemap-codec/LICENSE"
+      ],
+      "homepage/source": "https://github.com/jridgewell/sourcemaps/tree/main/packages/sourcemap-codec",
+      "notice_required": false,
+      "bundled_license_path": [],
+      "review_status": "identified",
+      "redistribution_evidence": "not applicable: build-only package is not distributed",
+      "distribution_metadata": "frontend/node_modules/@jridgewell/sourcemap-codec",
+      "notes": "Build-only package; no package files are copied into frontend/dist as a standalone dependency."
+    },
+    {
+      "name": "@jridgewell/trace-mapping",
+      "version": "0.3.31",
+      "component_type": "build-tool",
+      "distributed": false,
+      "license": "MIT",
+      "license_source": [
+        "frontend/node_modules/@jridgewell/trace-mapping/package.json",
+        "frontend/node_modules/@jridgewell/trace-mapping/LICENSE"
+      ],
+      "homepage/source": "https://github.com/jridgewell/sourcemaps/tree/main/packages/trace-mapping",
+      "notice_required": false,
+      "bundled_license_path": [],
+      "review_status": "identified",
+      "redistribution_evidence": "not applicable: build-only package is not distributed",
+      "distribution_metadata": "frontend/node_modules/@jridgewell/trace-mapping",
+      "notes": "Build-only package; no package files are copied into frontend/dist as a standalone dependency."
+    },
+    {
+      "name": "@rollup/rollup-win32-x64-gnu",
+      "version": "4.63.1",
+      "component_type": "build-tool",
+      "distributed": false,
+      "license": "MIT",
+      "license_source": [
+        "frontend/node_modules/@rollup/rollup-win32-x64-gnu/package.json"
+      ],
+      "homepage/source": "https://rollupjs.org/",
+      "notice_required": false,
+      "bundled_license_path": [],
+      "review_status": "identified",
+      "redistribution_evidence": "not applicable: build-only package is not distributed",
+      "distribution_metadata": "frontend/node_modules/@rollup/rollup-win32-x64-gnu",
+      "notes": "Build-only package; no package files are copied into frontend/dist as a standalone dependency."
+    },
+    {
+      "name": "@rollup/rollup-win32-x64-msvc",
+      "version": "4.63.1",
+      "component_type": "build-tool",
+      "distributed": false,
+      "license": "MIT",
+      "license_source": [
+        "frontend/node_modules/@rollup/rollup-win32-x64-msvc/package.json"
+      ],
+      "homepage/source": "https://rollupjs.org/",
+      "notice_required": false,
+      "bundled_license_path": [],
+      "review_status": "identified",
+      "redistribution_evidence": "not applicable: build-only package is not distributed",
+      "distribution_metadata": "frontend/node_modules/@rollup/rollup-win32-x64-msvc",
+      "notes": "Build-only package; no package files are copied into frontend/dist as a standalone dependency."
+    },
+    {
+      "name": "@types/babel__core",
+      "version": "7.20.5",
+      "component_type": "build-tool",
+      "distributed": false,
+      "license": "MIT",
+      "license_source": [
+        "frontend/node_modules/@types/babel__core/package.json",
+        "frontend/node_modules/@types/babel__core/LICENSE"
+      ],
+      "homepage/source": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/babel__core",
+      "notice_required": false,
+      "bundled_license_path": [],
+      "review_status": "identified",
+      "redistribution_evidence": "not applicable: build-only package is not distributed",
+      "distribution_metadata": "frontend/node_modules/@types/babel__core",
+      "notes": "Build-only package; no package files are copied into frontend/dist as a standalone dependency."
+    },
+    {
+      "name": "@types/babel__generator",
+      "version": "7.27.0",
+      "component_type": "build-tool",
+      "distributed": false,
+      "license": "MIT",
+      "license_source": [
+        "frontend/node_modules/@types/babel__generator/package.json",
+        "frontend/node_modules/@types/babel__generator/LICENSE"
+      ],
+      "homepage/source": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/babel__generator",
+      "notice_required": false,
+      "bundled_license_path": [],
+      "review_status": "identified",
+      "redistribution_evidence": "not applicable: build-only package is not distributed",
+      "distribution_metadata": "frontend/node_modules/@types/babel__generator",
+      "notes": "Build-only package; no package files are copied into frontend/dist as a standalone dependency."
+    },
+    {
+      "name": "@types/babel__template",
+      "version": "7.4.4",
+      "component_type": "build-tool",
+      "distributed": false,
+      "license": "MIT",
+      "license_source": [
+        "frontend/node_modules/@types/babel__template/package.json",
+        "frontend/node_modules/@types/babel__template/LICENSE"
+      ],
+      "homepage/source": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/babel__template",
+      "notice_required": false,
+      "bundled_license_path": [],
+      "review_status": "identified",
+      "redistribution_evidence": "not applicable: build-only package is not distributed",
+      "distribution_metadata": "frontend/node_modules/@types/babel__template",
+      "notes": "Build-only package; no package files are copied into frontend/dist as a standalone dependency."
+    },
+    {
+      "name": "@types/babel__traverse",
+      "version": "7.28.0",
+      "component_type": "build-tool",
+      "distributed": false,
+      "license": "MIT",
+      "license_source": [
+        "frontend/node_modules/@types/babel__traverse/package.json",
+        "frontend/node_modules/@types/babel__traverse/LICENSE"
+      ],
+      "homepage/source": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/babel__traverse",
+      "notice_required": false,
+      "bundled_license_path": [],
+      "review_status": "identified",
+      "redistribution_evidence": "not applicable: build-only package is not distributed",
+      "distribution_metadata": "frontend/node_modules/@types/babel__traverse",
+      "notes": "Build-only package; no package files are copied into frontend/dist as a standalone dependency."
+    },
+    {
+      "name": "@types/estree",
+      "version": "1.0.9",
+      "component_type": "build-tool",
+      "distributed": false,
+      "license": "MIT",
+      "license_source": [
+        "frontend/node_modules/@types/estree/package.json",
+        "frontend/node_modules/@types/estree/LICENSE"
+      ],
+      "homepage/source": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/estree",
+      "notice_required": false,
+      "bundled_license_path": [],
+      "review_status": "identified",
+      "redistribution_evidence": "not applicable: build-only package is not distributed",
+      "distribution_metadata": "frontend/node_modules/@types/estree",
+      "notes": "Build-only package; no package files are copied into frontend/dist as a standalone dependency."
+    },
+    {
+      "name": "@types/prop-types",
+      "version": "15.7.15",
+      "component_type": "build-tool",
+      "distributed": false,
+      "license": "MIT",
+      "license_source": [
+        "frontend/node_modules/@types/prop-types/package.json",
+        "frontend/node_modules/@types/prop-types/LICENSE"
+      ],
+      "homepage/source": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/prop-types",
+      "notice_required": false,
+      "bundled_license_path": [],
+      "review_status": "identified",
+      "redistribution_evidence": "not applicable: build-only package is not distributed",
+      "distribution_metadata": "frontend/node_modules/@types/prop-types",
+      "notes": "Build-only package; no package files are copied into frontend/dist as a standalone dependency."
+    },
+    {
+      "name": "@types/react",
+      "version": "18.3.12",
+      "component_type": "build-tool",
+      "distributed": false,
+      "license": "MIT",
+      "license_source": [
+        "frontend/node_modules/@types/react/package.json",
+        "frontend/node_modules/@types/react/LICENSE"
+      ],
+      "homepage/source": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/react",
+      "notice_required": false,
+      "bundled_license_path": [],
+      "review_status": "identified",
+      "redistribution_evidence": "not applicable: build-only package is not distributed",
+      "distribution_metadata": "frontend/node_modules/@types/react",
+      "notes": "Build-only package; no package files are copied into frontend/dist as a standalone dependency."
+    },
+    {
+      "name": "@types/react-dom",
+      "version": "18.3.1",
+      "component_type": "build-tool",
+      "distributed": false,
+      "license": "MIT",
+      "license_source": [
+        "frontend/node_modules/@types/react-dom/package.json",
+        "frontend/node_modules/@types/react-dom/LICENSE"
+      ],
+      "homepage/source": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/react-dom",
+      "notice_required": false,
+      "bundled_license_path": [],
+      "review_status": "identified",
+      "redistribution_evidence": "not applicable: build-only package is not distributed",
+      "distribution_metadata": "frontend/node_modules/@types/react-dom",
+      "notes": "Build-only package; no package files are copied into frontend/dist as a standalone dependency."
+    },
+    {
+      "name": "@vitejs/plugin-react",
+      "version": "4.3.4",
+      "component_type": "build-tool",
+      "distributed": false,
+      "license": "MIT",
+      "license_source": [
+        "frontend/node_modules/@vitejs/plugin-react/package.json",
+        "frontend/node_modules/@vitejs/plugin-react/LICENSE"
+      ],
+      "homepage/source": "https://github.com/vitejs/vite-plugin-react/tree/main/packages/plugin-react#readme",
+      "notice_required": false,
+      "bundled_license_path": [],
+      "review_status": "identified",
+      "redistribution_evidence": "not applicable: build-only package is not distributed",
+      "distribution_metadata": "frontend/node_modules/@vitejs/plugin-react",
+      "notes": "Build-only package; no package files are copied into frontend/dist as a standalone dependency."
+    },
+    {
+      "name": "baseline-browser-mapping",
+      "version": "2.11.20",
+      "component_type": "build-tool",
+      "distributed": false,
+      "license": "Apache-2.0",
+      "license_source": [
+        "frontend/node_modules/baseline-browser-mapping/package.json",
+        "frontend/node_modules/baseline-browser-mapping/LICENSE.txt"
+      ],
+      "homepage/source": "git+https://github.com/web-platform-dx/baseline-browser-mapping.git",
+      "notice_required": false,
+      "bundled_license_path": [],
+      "review_status": "identified",
+      "redistribution_evidence": "not applicable: build-only package is not distributed",
+      "distribution_metadata": "frontend/node_modules/baseline-browser-mapping",
+      "notes": "Build-only package; no package files are copied into frontend/dist as a standalone dependency."
+    },
+    {
+      "name": "browserslist",
+      "version": "4.28.8",
+      "component_type": "build-tool",
+      "distributed": false,
+      "license": "MIT",
+      "license_source": [
+        "frontend/node_modules/browserslist/package.json",
+        "frontend/node_modules/browserslist/LICENSE"
+      ],
+      "homepage/source": "browserslist/browserslist",
+      "notice_required": false,
+      "bundled_license_path": [],
+      "review_status": "identified",
+      "redistribution_evidence": "not applicable: build-only package is not distributed",
+      "distribution_metadata": "frontend/node_modules/browserslist",
+      "notes": "Build-only package; no package files are copied into frontend/dist as a standalone dependency."
+    },
+    {
+      "name": "caniuse-lite",
+      "version": "1.0.30001810",
+      "component_type": "build-tool",
+      "distributed": false,
+      "license": "CC-BY-4.0",
+      "license_source": [
+        "frontend/node_modules/caniuse-lite/package.json",
+        "frontend/node_modules/caniuse-lite/LICENSE"
+      ],
+      "homepage/source": "browserslist/caniuse-lite",
+      "notice_required": false,
+      "bundled_license_path": [],
+      "review_status": "identified",
+      "redistribution_evidence": "not applicable: build-only package is not distributed",
+      "distribution_metadata": "frontend/node_modules/caniuse-lite",
+      "notes": "Build-only package; no package files are copied into frontend/dist as a standalone dependency."
+    },
+    {
+      "name": "convert-source-map",
+      "version": "2.0.0",
+      "component_type": "build-tool",
+      "distributed": false,
+      "license": "MIT",
+      "license_source": [
+        "frontend/node_modules/convert-source-map/package.json",
+        "frontend/node_modules/convert-source-map/LICENSE"
+      ],
+      "homepage/source": "https://github.com/thlorenz/convert-source-map",
+      "notice_required": false,
+      "bundled_license_path": [],
+      "review_status": "identified",
+      "redistribution_evidence": "not applicable: build-only package is not distributed",
+      "distribution_metadata": "frontend/node_modules/convert-source-map",
+      "notes": "Build-only package; no package files are copied into frontend/dist as a standalone dependency."
+    },
+    {
+      "name": "csstype",
+      "version": "3.2.3",
+      "component_type": "build-tool",
+      "distributed": false,
+      "license": "MIT",
+      "license_source": [
+        "frontend/node_modules/csstype/package.json",
+        "frontend/node_modules/csstype/LICENSE"
+      ],
+      "homepage/source": "https://github.com/frenic/csstype",
+      "notice_required": false,
+      "bundled_license_path": [],
+      "review_status": "identified",
+      "redistribution_evidence": "not applicable: build-only package is not distributed",
+      "distribution_metadata": "frontend/node_modules/csstype",
+      "notes": "Build-only package; no package files are copied into frontend/dist as a standalone dependency."
+    },
+    {
+      "name": "debug",
+      "version": "4.4.3",
+      "component_type": "build-tool",
+      "distributed": false,
+      "license": "MIT",
+      "license_source": [
+        "frontend/node_modules/debug/package.json",
+        "frontend/node_modules/debug/LICENSE"
+      ],
+      "homepage/source": "git://github.com/debug-js/debug.git",
+      "notice_required": false,
+      "bundled_license_path": [],
+      "review_status": "identified",
+      "redistribution_evidence": "not applicable: build-only package is not distributed",
+      "distribution_metadata": "frontend/node_modules/debug",
+      "notes": "Build-only package; no package files are copied into frontend/dist as a standalone dependency."
+    },
+    {
+      "name": "electron-to-chromium",
+      "version": "1.5.420",
+      "component_type": "build-tool",
+      "distributed": false,
+      "license": "ISC",
+      "license_source": [
+        "frontend/node_modules/electron-to-chromium/package.json",
+        "frontend/node_modules/electron-to-chromium/LICENSE"
+      ],
+      "homepage/source": "git+https://github.com/Kilian/electron-to-chromium.git",
+      "notice_required": false,
+      "bundled_license_path": [],
+      "review_status": "identified",
+      "redistribution_evidence": "not applicable: build-only package is not distributed",
+      "distribution_metadata": "frontend/node_modules/electron-to-chromium",
+      "notes": "Build-only package; no package files are copied into frontend/dist as a standalone dependency."
+    },
+    {
+      "name": "esbuild",
+      "version": "0.24.2",
+      "component_type": "build-tool",
+      "distributed": false,
+      "license": "MIT",
+      "license_source": [
+        "frontend/node_modules/esbuild/package.json",
+        "frontend/node_modules/esbuild/LICENSE.md"
+      ],
+      "homepage/source": "git+https://github.com/evanw/esbuild.git",
+      "notice_required": false,
+      "bundled_license_path": [],
+      "review_status": "identified",
+      "redistribution_evidence": "not applicable: build-only package is not distributed",
+      "distribution_metadata": "frontend/node_modules/esbuild",
+      "notes": "Build-only package; no package files are copied into frontend/dist as a standalone dependency."
+    },
+    {
+      "name": "escalade",
+      "version": "3.2.0",
+      "component_type": "build-tool",
+      "distributed": false,
+      "license": "MIT",
+      "license_source": [
+        "frontend/node_modules/escalade/package.json",
+        "frontend/node_modules/escalade/license"
+      ],
+      "homepage/source": "lukeed/escalade",
+      "notice_required": false,
+      "bundled_license_path": [],
+      "review_status": "identified",
+      "redistribution_evidence": "not applicable: build-only package is not distributed",
+      "distribution_metadata": "frontend/node_modules/escalade",
+      "notes": "Build-only package; no package files are copied into frontend/dist as a standalone dependency."
+    },
+    {
+      "name": "gensync",
+      "version": "1.0.0-beta.2",
+      "component_type": "build-tool",
+      "distributed": false,
+      "license": "MIT",
+      "license_source": [
+        "frontend/node_modules/gensync/package.json",
+        "frontend/node_modules/gensync/LICENSE"
+      ],
+      "homepage/source": "https://github.com/loganfsmyth/gensync",
+      "notice_required": false,
+      "bundled_license_path": [],
+      "review_status": "identified",
+      "redistribution_evidence": "not applicable: build-only package is not distributed",
+      "distribution_metadata": "frontend/node_modules/gensync",
+      "notes": "Build-only package; no package files are copied into frontend/dist as a standalone dependency."
+    },
+    {
+      "name": "js-tokens",
+      "version": "4.0.0",
+      "component_type": "build-tool",
+      "distributed": false,
+      "license": "MIT",
+      "license_source": [
+        "frontend/node_modules/js-tokens/package.json",
+        "frontend/node_modules/js-tokens/LICENSE"
+      ],
+      "homepage/source": "lydell/js-tokens",
+      "notice_required": false,
+      "bundled_license_path": [],
+      "review_status": "identified",
+      "redistribution_evidence": "not applicable: build-only package is not distributed",
+      "distribution_metadata": "frontend/node_modules/js-tokens",
+      "notes": "Build-only package; no package files are copied into frontend/dist as a standalone dependency."
+    },
+    {
+      "name": "jsesc",
+      "version": "3.1.0",
+      "component_type": "build-tool",
+      "distributed": false,
+      "license": "MIT",
+      "license_source": [
+        "frontend/node_modules/jsesc/package.json",
+        "frontend/node_modules/jsesc/LICENSE-MIT.txt"
+      ],
+      "homepage/source": "https://mths.be/jsesc",
+      "notice_required": false,
+      "bundled_license_path": [],
+      "review_status": "identified",
+      "redistribution_evidence": "not applicable: build-only package is not distributed",
+      "distribution_metadata": "frontend/node_modules/jsesc",
+      "notes": "Build-only package; no package files are copied into frontend/dist as a standalone dependency."
+    },
+    {
+      "name": "json5",
+      "version": "2.2.3",
+      "component_type": "build-tool",
+      "distributed": false,
+      "license": "MIT",
+      "license_source": [
+        "frontend/node_modules/json5/package.json",
+        "frontend/node_modules/json5/LICENSE.md"
+      ],
+      "homepage/source": "http://json5.org/",
+      "notice_required": false,
+      "bundled_license_path": [],
+      "review_status": "identified",
+      "redistribution_evidence": "not applicable: build-only package is not distributed",
+      "distribution_metadata": "frontend/node_modules/json5",
+      "notes": "Build-only package; no package files are copied into frontend/dist as a standalone dependency."
+    },
+    {
+      "name": "loose-envify",
+      "version": "1.4.0",
+      "component_type": "build-tool",
+      "distributed": false,
+      "license": "MIT",
+      "license_source": [
+        "frontend/node_modules/loose-envify/package.json",
+        "frontend/node_modules/loose-envify/LICENSE"
+      ],
+      "homepage/source": "https://github.com/zertosh/loose-envify",
+      "notice_required": false,
+      "bundled_license_path": [],
+      "review_status": "identified",
+      "redistribution_evidence": "not applicable: build-only package is not distributed",
+      "distribution_metadata": "frontend/node_modules/loose-envify",
+      "notes": "Build-only package; no package files are copied into frontend/dist as a standalone dependency."
+    },
+    {
+      "name": "lru-cache",
+      "version": "5.1.1",
+      "component_type": "build-tool",
+      "distributed": false,
+      "license": "ISC",
+      "license_source": [
+        "frontend/node_modules/lru-cache/package.json",
+        "frontend/node_modules/lru-cache/LICENSE"
+      ],
+      "homepage/source": "git://github.com/isaacs/node-lru-cache.git",
+      "notice_required": false,
+      "bundled_license_path": [],
+      "review_status": "identified",
+      "redistribution_evidence": "not applicable: build-only package is not distributed",
+      "distribution_metadata": "frontend/node_modules/lru-cache",
+      "notes": "Build-only package; no package files are copied into frontend/dist as a standalone dependency."
+    },
+    {
+      "name": "ms",
+      "version": "2.1.3",
+      "component_type": "build-tool",
+      "distributed": false,
+      "license": "MIT",
+      "license_source": [
+        "frontend/node_modules/ms/package.json",
+        "frontend/node_modules/ms/license.md"
+      ],
+      "homepage/source": "vercel/ms",
+      "notice_required": false,
+      "bundled_license_path": [],
+      "review_status": "identified",
+      "redistribution_evidence": "not applicable: build-only package is not distributed",
+      "distribution_metadata": "frontend/node_modules/ms",
+      "notes": "Build-only package; no package files are copied into frontend/dist as a standalone dependency."
+    },
+    {
+      "name": "nanoid",
+      "version": "3.3.18",
+      "component_type": "build-tool",
+      "distributed": false,
+      "license": "MIT",
+      "license_source": [
+        "frontend/node_modules/nanoid/package.json",
+        "frontend/node_modules/nanoid/LICENSE"
+      ],
+      "homepage/source": "ai/nanoid",
+      "notice_required": false,
+      "bundled_license_path": [],
+      "review_status": "identified",
+      "redistribution_evidence": "not applicable: build-only package is not distributed",
+      "distribution_metadata": "frontend/node_modules/nanoid",
+      "notes": "Build-only package; no package files are copied into frontend/dist as a standalone dependency."
+    },
+    {
+      "name": "node-releases",
+      "version": "2.0.54",
+      "component_type": "build-tool",
+      "distributed": false,
+      "license": "MIT",
+      "license_source": [
+        "frontend/node_modules/node-releases/package.json",
+        "frontend/node_modules/node-releases/LICENSE"
+      ],
+      "homepage/source": "https://github.com/chicoxyzzy/node-releases.git",
+      "notice_required": false,
+      "bundled_license_path": [],
+      "review_status": "identified",
+      "redistribution_evidence": "not applicable: build-only package is not distributed",
+      "distribution_metadata": "frontend/node_modules/node-releases",
+      "notes": "Build-only package; no package files are copied into frontend/dist as a standalone dependency."
+    },
+    {
+      "name": "Node.js",
+      "version": "22.14.0",
+      "component_type": "build-tool",
+      "distributed": false,
+      "license": "MIT plus bundled third-party notices",
+      "license_source": [
+        "runtime/node-dev/LICENSE"
+      ],
+      "homepage/source": "runtime/node-dev/README.md",
+      "notice_required": false,
+      "bundled_license_path": [],
+      "review_status": "identified",
+      "redistribution_evidence": "not applicable: build-only runtime is not distributed",
+      "distribution_metadata": "runtime/node-dev",
+      "notes": "Node/npm are build-only and are intentionally excluded from the release bundle."
+    },
+    {
+      "name": "picocolors",
+      "version": "1.1.1",
+      "component_type": "build-tool",
+      "distributed": false,
+      "license": "ISC",
+      "license_source": [
+        "frontend/node_modules/picocolors/package.json",
+        "frontend/node_modules/picocolors/LICENSE"
+      ],
+      "homepage/source": "alexeyraspopov/picocolors",
+      "notice_required": false,
+      "bundled_license_path": [],
+      "review_status": "identified",
+      "redistribution_evidence": "not applicable: build-only package is not distributed",
+      "distribution_metadata": "frontend/node_modules/picocolors",
+      "notes": "Build-only package; no package files are copied into frontend/dist as a standalone dependency."
+    },
+    {
+      "name": "postcss",
+      "version": "8.5.26",
+      "component_type": "build-tool",
+      "distributed": false,
+      "license": "MIT",
+      "license_source": [
+        "frontend/node_modules/postcss/package.json",
+        "frontend/node_modules/postcss/LICENSE"
+      ],
+      "homepage/source": "https://postcss.org/",
+      "notice_required": false,
+      "bundled_license_path": [],
+      "review_status": "identified",
+      "redistribution_evidence": "not applicable: build-only package is not distributed",
+      "distribution_metadata": "frontend/node_modules/postcss",
+      "notes": "Build-only package; no package files are copied into frontend/dist as a standalone dependency."
+    },
+    {
+      "name": "react-refresh",
+      "version": "0.14.2",
+      "component_type": "build-tool",
+      "distributed": false,
+      "license": "MIT",
+      "license_source": [
+        "frontend/node_modules/react-refresh/package.json",
+        "frontend/node_modules/react-refresh/LICENSE"
+      ],
+      "homepage/source": "https://reactjs.org/",
+      "notice_required": false,
+      "bundled_license_path": [],
+      "review_status": "identified",
+      "redistribution_evidence": "not applicable: build-only package is not distributed",
+      "distribution_metadata": "frontend/node_modules/react-refresh",
+      "notes": "Build-only package; no package files are copied into frontend/dist as a standalone dependency."
+    },
+    {
+      "name": "rollup",
+      "version": "4.63.1",
+      "component_type": "build-tool",
+      "distributed": false,
+      "license": "MIT",
+      "license_source": [
+        "frontend/node_modules/rollup/package.json",
+        "frontend/node_modules/rollup/LICENSE.md"
+      ],
+      "homepage/source": "https://rollupjs.org/",
+      "notice_required": false,
+      "bundled_license_path": [],
+      "review_status": "identified",
+      "redistribution_evidence": "not applicable: build-only package is not distributed",
+      "distribution_metadata": "frontend/node_modules/rollup",
+      "notes": "Build-only package; no package files are copied into frontend/dist as a standalone dependency."
+    },
+    {
+      "name": "semver",
+      "version": "6.3.1",
+      "component_type": "build-tool",
+      "distributed": false,
+      "license": "ISC",
+      "license_source": [
+        "frontend/node_modules/semver/package.json",
+        "frontend/node_modules/semver/LICENSE"
+      ],
+      "homepage/source": "https://github.com/npm/node-semver.git",
+      "notice_required": false,
+      "bundled_license_path": [],
+      "review_status": "identified",
+      "redistribution_evidence": "not applicable: build-only package is not distributed",
+      "distribution_metadata": "frontend/node_modules/semver",
+      "notes": "Build-only package; no package files are copied into frontend/dist as a standalone dependency."
+    },
+    {
+      "name": "source-map-js",
+      "version": "1.2.1",
+      "component_type": "build-tool",
+      "distributed": false,
+      "license": "BSD-3-Clause",
+      "license_source": [
+        "frontend/node_modules/source-map-js/package.json",
+        "frontend/node_modules/source-map-js/LICENSE"
+      ],
+      "homepage/source": "https://github.com/7rulnik/source-map-js",
+      "notice_required": false,
+      "bundled_license_path": [],
+      "review_status": "identified",
+      "redistribution_evidence": "not applicable: build-only package is not distributed",
+      "distribution_metadata": "frontend/node_modules/source-map-js",
+      "notes": "Build-only package; no package files are copied into frontend/dist as a standalone dependency."
+    },
+    {
+      "name": "typescript",
+      "version": "5.7.3",
+      "component_type": "build-tool",
+      "distributed": false,
+      "license": "Apache-2.0",
+      "license_source": [
+        "frontend/node_modules/typescript/package.json",
+        "frontend/node_modules/typescript/LICENSE.txt"
+      ],
+      "homepage/source": "https://www.typescriptlang.org/",
+      "notice_required": false,
+      "bundled_license_path": [],
+      "review_status": "identified",
+      "redistribution_evidence": "not applicable: build-only package is not distributed",
+      "distribution_metadata": "frontend/node_modules/typescript",
+      "notes": "Build-only package; no package files are copied into frontend/dist as a standalone dependency."
+    },
+    {
+      "name": "update-browserslist-db",
+      "version": "1.3.2",
+      "component_type": "build-tool",
+      "distributed": false,
+      "license": "MIT",
+      "license_source": [
+        "frontend/node_modules/update-browserslist-db/package.json",
+        "frontend/node_modules/update-browserslist-db/LICENSE"
+      ],
+      "homepage/source": "browserslist/update-db",
+      "notice_required": false,
+      "bundled_license_path": [],
+      "review_status": "identified",
+      "redistribution_evidence": "not applicable: build-only package is not distributed",
+      "distribution_metadata": "frontend/node_modules/update-browserslist-db",
+      "notes": "Build-only package; no package files are copied into frontend/dist as a standalone dependency."
+    },
+    {
+      "name": "vite",
+      "version": "6.0.7",
+      "component_type": "build-tool",
+      "distributed": false,
+      "license": "MIT",
+      "license_source": [
+        "frontend/node_modules/vite/package.json",
+        "frontend/node_modules/vite/LICENSE.md"
+      ],
+      "homepage/source": "https://vite.dev",
+      "notice_required": false,
+      "bundled_license_path": [],
+      "review_status": "identified",
+      "redistribution_evidence": "not applicable: build-only package is not distributed",
+      "distribution_metadata": "frontend/node_modules/vite",
+      "notes": "Build-only package; no package files are copied into frontend/dist as a standalone dependency."
+    },
+    {
+      "name": "yallist",
+      "version": "3.1.1",
+      "component_type": "build-tool",
+      "distributed": false,
+      "license": "ISC",
+      "license_source": [
+        "frontend/node_modules/yallist/package.json",
+        "frontend/node_modules/yallist/LICENSE"
+      ],
+      "homepage/source": "git+https://github.com/isaacs/yallist.git",
+      "notice_required": false,
+      "bundled_license_path": [],
+      "review_status": "identified",
+      "redistribution_evidence": "not applicable: build-only package is not distributed",
+      "distribution_metadata": "frontend/node_modules/yallist",
+      "notes": "Build-only package; no package files are copied into frontend/dist as a standalone dependency."
+    }
+  ],
+  "summary": {
+    "component_count": 105,
+    "distributed_runtime_component_count": 40,
+    "build_only_component_count": 65,
+    "license_identified_count": 102,
+    "review_required_count": 6
+  }
+}

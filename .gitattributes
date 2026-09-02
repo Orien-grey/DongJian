@@ -1,0 +1,4 @@
+# Third-party license texts are copied byte-for-byte from local package/runtime
+# evidence. Do not rewrite upstream formatting or flag its intentional trailing
+# whitespace as a source diff error.
+licenses/** -whitespace

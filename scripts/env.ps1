@@ -23,13 +23,16 @@ $uvCache = Join-Path -Path $cacheRoot -ChildPath 'uv'
 $pipCache = Join-Path -Path $cacheRoot -ChildPath 'pip'
 $huggingfaceHome = Join-Path -Path $cacheRoot -ChildPath 'huggingface'
 $huggingfaceHub = Join-Path -Path $huggingfaceHome -ChildPath 'hub'
+$doclingCache = Join-Path -Path $cacheRoot -ChildPath 'docling'
+$ocrCache = Join-Path -Path $cacheRoot -ChildPath 'ocr'
+$tikaCache = Join-Path -Path $cacheRoot -ChildPath 'tika'
 $tempRoot = Join-Path -Path $cacheRoot -ChildPath 'temp'
 $bytecodeCache = Join-Path -Path $tempRoot -ChildPath 'pycache'
 $pipConfig = Join-Path -Path $pipCache -ChildPath 'pip.ini'
 
 # These are all project-local directories. Directory creation is intentionally
 # limited to paths below the project root and affects no global configuration.
-foreach ($directory in @($uvCache, $pipCache, $huggingfaceHome, $huggingfaceHub, $tempRoot, $bytecodeCache)) {
+foreach ($directory in @($uvCache, $pipCache, $huggingfaceHome, $huggingfaceHub, $doclingCache, $ocrCache, $tikaCache, $tempRoot, $bytecodeCache)) {
     New-Item -ItemType Directory -Path $directory -Force | Out-Null
 }
 New-Item -ItemType Directory -Path $packagesRoot -Force | Out-Null

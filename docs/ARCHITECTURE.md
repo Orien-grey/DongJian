@@ -473,3 +473,21 @@ GMFT and Docling are not part of the next phase and are not default
 dependencies. They may be reopened only if a later representative complex-table
 benchmark demonstrates that the current native/OCR candidate paths are
 insufficient and the measured benefit justifies their cost.
+
+## Phase 10 acceptance and release boundary
+
+Phase 10 is release engineering around the deterministic product, not a new
+business extraction layer. The acceptance harness creates only synthetic
+inputs, starts the production server from a copied bundle, and verifies the
+same API journey again after ZIP extraction. It checks the empty registry,
+independent table/text assets, unsupported and corrupt-file isolation,
+incremental extraction/cleaning reuse, source SHA/size/mtime invariants,
+quality review, lexical Search, safe SQL, restart persistence, and lifecycle
+edges.
+
+`scripts/build_release.ps1` is an allowlist assembler. Normal runtime needs
+standalone CPython, `runtime/packages`, OCR models, `src`, scripts, and
+`frontend/dist`; it does not need uv, the development venv, Node, npm, or a
+system service. The generated manifest and ZIP hash are build evidence, not
+catalog data. Release output, acceptance sources, and mutable workspace state
+remain outside Git.

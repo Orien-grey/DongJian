@@ -1,0 +1,1488 @@
+ChongZu 0.1.0-rc1 third-party notices
+
+Engineering audit record for the actual production payload and the
+frontend production bundle. This file records local evidence only; it
+does not make a legal determination or certify redistribution rights.
+Missing or ambiguous evidence is explicitly marked REVIEW_REQUIRED.
+
+Component count: 105
+Distributed runtime components: 40
+Build-only components: 65
+License identified: 102
+Review required: 6
+
+-------------------------------------------------------------------------------
+Name: beautifulsoup4
+Version: 4.15.0
+Component type: python-package
+Distributed: yes
+License: MIT License
+License source: runtime/packages/beautifulsoup4-4.15.0.dist-info/METADATA, runtime/packages/beautifulsoup4-4.15.0.dist-info/licenses/AUTHORS, runtime/packages/beautifulsoup4-4.15.0.dist-info/licenses/LICENSE
+Homepage/source: https://www.crummy.com/software/BeautifulSoup/bs4/
+Notice required: yes
+Redistribution evidence: found in local license/notice evidence
+Review status: identified
+Bundled license path: licenses/beautifulsoup4/runtime__packages__beautifulsoup4-4.15.0.dist-info__licenses__AUTHORS, licenses/beautifulsoup4/runtime__packages__beautifulsoup4-4.15.0.dist-info__licenses__LICENSE
+Notes: All files in this runtime distribution are included in the audit scope; native payload classification is based on local RECORD entries.
+
+-------------------------------------------------------------------------------
+Name: certifi
+Version: 2026.7.22
+Component type: python-package
+Distributed: yes
+License: MPL-2.0
+License source: runtime/packages/certifi-2026.7.22.dist-info/METADATA, runtime/packages/certifi-2026.7.22.dist-info/licenses/LICENSE
+Homepage/source: https://github.com/certifi/python-certifi
+Notice required: yes
+Redistribution evidence: found in local license/notice evidence
+Review status: identified
+Bundled license path: licenses/certifi/runtime__packages__certifi-2026.7.22.dist-info__licenses__LICENSE
+Notes: All files in this runtime distribution are included in the audit scope; native payload classification is based on local RECORD entries.
+
+-------------------------------------------------------------------------------
+Name: ch_ppocr_mobile_v2.0_cls_mobile.onnx
+Version: not recorded in local model manifest
+Component type: model
+Distributed: yes
+License: RELEASE LEGAL REVIEW REQUIRED
+License source: runtime/models/ocr/manifest.json
+Homepage/source: REVIEW_REQUIRED: upstream model project/source is not recorded locally
+Notice required: yes
+Redistribution evidence: not found in local model manifest or adjacent model metadata
+Review status: RELEASE LEGAL REVIEW REQUIRED
+Bundled license path: none
+Notes: The Python package license is not used as a model-weight license conclusion.
+
+-------------------------------------------------------------------------------
+Name: charset-normalizer
+Version: 3.5.1
+Component type: native-library
+Distributed: yes
+License: MIT
+License source: runtime/packages/charset_normalizer-3.5.1.dist-info/METADATA, runtime/packages/charset_normalizer-3.5.1.dist-info/licenses/LICENSE
+Homepage/source: REVIEW_REQUIRED: no homepage/source in local package metadata
+Notice required: yes
+Redistribution evidence: found in local license/notice evidence
+Review status: identified
+Bundled license path: licenses/charset_normalizer/runtime__packages__charset_normalizer-3.5.1.dist-info__licenses__LICENSE
+Notes: All files in this runtime distribution are included in the audit scope; native payload classification is based on local RECORD entries.
+
+-------------------------------------------------------------------------------
+Name: colorama
+Version: 0.4.6
+Component type: python-package
+Distributed: yes
+License: BSD-3-Clause
+License source: runtime/packages/colorama-0.4.6.dist-info/METADATA, runtime/packages/colorama-0.4.6.dist-info/licenses/LICENSE.txt
+Homepage/source: https://github.com/tartley/colorama
+Notice required: yes
+Redistribution evidence: found in local license/notice evidence
+Review status: identified
+Bundled license path: licenses/colorama/runtime__packages__colorama-0.4.6.dist-info__licenses__LICENSE.txt
+Notes: All files in this runtime distribution are included in the audit scope; native payload classification is based on local RECORD entries.
+
+-------------------------------------------------------------------------------
+Name: colorlog
+Version: 6.12.0
+Component type: python-package
+Distributed: yes
+License: MIT License
+License source: runtime/packages/colorlog-6.12.0.dist-info/METADATA, runtime/packages/colorlog-6.12.0.dist-info/licenses/LICENSE
+Homepage/source: https://github.com/borntyping/python-colorlog
+Notice required: yes
+Redistribution evidence: found in local license/notice evidence
+Review status: identified
+Bundled license path: licenses/colorlog/runtime__packages__colorlog-6.12.0.dist-info__licenses__LICENSE
+Notes: All files in this runtime distribution are included in the audit scope; native payload classification is based on local RECORD entries.
+
+-------------------------------------------------------------------------------
+Name: CPython
+Version: 3.11.15
+Component type: python-runtime
+Distributed: yes
+License: PSF-2.0 plus bundled third-party notices
+License source: runtime/python/cpython-3.11.15-windows-x86_64-none/LICENSE.txt, runtime/python/cpython-3.11.15-windows-x86_64-none/tcl/tk8.6/demos/license.terms, runtime/python/cpython-3.11.15-windows-x86_64-none/tcl/tk8.6/license.terms
+Homepage/source: runtime/python/cpython-3.11.15-windows-x86_64-none/LICENSE.txt
+Notice required: yes
+Redistribution evidence: found in the standalone runtime LICENSE.txt and Tcl/Tk license terms
+Review status: identified
+Bundled license path: licenses/CPython.txt, licenses/CPython/tcl/tk8.6/demos/license.terms, licenses/CPython/tcl/tk8.6/license.terms
+Notes: The release builder removes interpreter provisioning site-packages, Scripts, ensurepip, and venv payloads; the standalone CPython license remains included.
+
+-------------------------------------------------------------------------------
+Name: duckdb
+Version: 1.5.5
+Component type: native-library
+Distributed: yes
+License: Apache-2.0
+License source: runtime/packages/duckdb-1.5.5.dist-info/METADATA, runtime/packages/duckdb-1.5.5.dist-info/licenses/LICENSE, runtime/packages/duckdb/experimental/spark/LICENSE
+Homepage/source: https://github.com/duckdb/duckdb-python
+Notice required: yes
+Redistribution evidence: found in local license/notice evidence
+Review status: identified
+Bundled license path: licenses/duckdb/runtime__packages__duckdb-1.5.5.dist-info__licenses__LICENSE, licenses/duckdb/runtime__packages__duckdb__experimental__spark__LICENSE
+Notes: All files in this runtime distribution are included in the audit scope; native payload classification is based on local RECORD entries.
+
+-------------------------------------------------------------------------------
+Name: flatbuffers
+Version: 25.12.19
+Component type: python-package
+Distributed: yes
+License: Apache 2.0
+License source: runtime/packages/flatbuffers-25.12.19.dist-info/METADATA
+Homepage/source: https://github.com/google/flatbuffers
+Notice required: yes
+Redistribution evidence: not found in local license/notice evidence
+Review status: REVIEW_REQUIRED
+Bundled license path: none
+Notes: All files in this runtime distribution are included in the audit scope; native payload classification is based on local RECORD entries.
+
+-------------------------------------------------------------------------------
+Name: idna
+Version: 3.19
+Component type: python-package
+Distributed: yes
+License: BSD-3-Clause
+License source: runtime/packages/idna-3.19.dist-info/METADATA, runtime/packages/idna-3.19.dist-info/licenses/LICENSE.md
+Homepage/source: https://github.com/kjd/idna
+Notice required: yes
+Redistribution evidence: found in local license/notice evidence
+Review status: identified
+Bundled license path: licenses/idna/runtime__packages__idna-3.19.dist-info__licenses__LICENSE.md
+Notes: All files in this runtime distribution are included in the audit scope; native payload classification is based on local RECORD entries.
+
+-------------------------------------------------------------------------------
+Name: img2table
+Version: 2.0.0
+Component type: native-library
+Distributed: yes
+License: MIT
+License source: runtime/packages/img2table-2.0.0.dist-info/METADATA, runtime/packages/img2table-2.0.0.dist-info/licenses/LICENSE.txt
+Homepage/source: https://github.com/xavctn/img2table
+Notice required: yes
+Redistribution evidence: found in local license/notice evidence
+Review status: identified
+Bundled license path: licenses/img2table/runtime__packages__img2table-2.0.0.dist-info__licenses__LICENSE.txt
+Notes: All files in this runtime distribution are included in the audit scope; native payload classification is based on local RECORD entries.
+
+-------------------------------------------------------------------------------
+Name: numpy
+Version: 2.4.6
+Component type: native-library
+Distributed: yes
+License: BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0
+License source: runtime/packages/numpy-2.4.6.dist-info/METADATA, runtime/packages/numpy-2.4.6.dist-info/licenses/LICENSE.txt, runtime/packages/numpy-2.4.6.dist-info/licenses/numpy/_core/include/numpy/libdivide/LICENSE.txt, runtime/packages/numpy-2.4.6.dist-info/licenses/numpy/_core/src/common/pythoncapi-compat/COPYING, runtime/packages/numpy-2.4.6.dist-info/licenses/numpy/_core/src/highway/LICENSE, runtime/packages/numpy-2.4.6.dist-info/licenses/numpy/_core/src/multiarray/dragon4_LICENSE.txt, runtime/packages/numpy-2.4.6.dist-info/licenses/numpy/_core/src/npysort/x86-simd-sort/LICENSE.md, runtime/packages/numpy-2.4.6.dist-info/licenses/numpy/_core/src/umath/svml/LICENSE, runtime/packages/numpy-2.4.6.dist-info/licenses/numpy/fft/pocketfft/LICENSE.md, runtime/packages/numpy-2.4.6.dist-info/licenses/numpy/linalg/lapack_lite/LICENSE.txt, runtime/packages/numpy-2.4.6.dist-info/licenses/numpy/ma/LICENSE, runtime/packages/numpy-2.4.6.dist-info/licenses/numpy/random/LICENSE.md, runtime/packages/numpy-2.4.6.dist-info/licenses/numpy/random/src/distributions/LICENSE.md, runtime/packages/numpy-2.4.6.dist-info/licenses/numpy/random/src/mt19937/LICENSE.md, runtime/packages/numpy-2.4.6.dist-info/licenses/numpy/random/src/pcg64/LICENSE.md, runtime/packages/numpy-2.4.6.dist-info/licenses/numpy/random/src/philox/LICENSE.md, runtime/packages/numpy-2.4.6.dist-info/licenses/numpy/random/src/sfc64/LICENSE.md, runtime/packages/numpy-2.4.6.dist-info/licenses/numpy/random/src/splitmix64/LICENSE.md, runtime/packages/numpy/_core/include/numpy/random/LICENSE.txt, runtime/packages/numpy/ma/LICENSE, runtime/packages/numpy/random/LICENSE.md
+Homepage/source: https://numpy.org
+Notice required: yes
+Redistribution evidence: found in local license/notice evidence
+Review status: identified
+Bundled license path: licenses/numpy/runtime__packages__numpy-2.4.6.dist-info__licenses__LICENSE.txt, licenses/numpy/runtime__packages__numpy-2.4.6.dist-info__licenses__numpy___core__include__numpy__libdivide__LICENSE.txt, licenses/numpy/runtime__packages__numpy-2.4.6.dist-info__licenses__numpy___core__src__common__pythoncapi-compat__COPYING, licenses/numpy/runtime__packages__numpy-2.4.6.dist-info__licenses__numpy___core__src__highway__LICENSE, licenses/numpy/runtime__packages__numpy-2.4.6.dist-info__licenses__numpy___core__src__multiarray__dragon4_LICENSE.txt, licenses/numpy/runtime__packages__numpy-2.4.6.dist-info__licenses__numpy___core__src__npysort__x86-simd-sort__LICENSE.md, licenses/numpy/runtime__packages__numpy-2.4.6.dist-info__licenses__numpy___core__src__umath__svml__LICENSE, licenses/numpy/runtime__packages__numpy-2.4.6.dist-info__licenses__numpy__fft__pocketfft__LICENSE.md, licenses/numpy/runtime__packages__numpy-2.4.6.dist-info__licenses__numpy__linalg__lapack_lite__LICENSE.txt, licenses/numpy/runtime__packages__numpy-2.4.6.dist-info__licenses__numpy__ma__LICENSE, licenses/numpy/runtime__packages__numpy-2.4.6.dist-info__licenses__numpy__random__LICENSE.md, licenses/numpy/runtime__packages__numpy-2.4.6.dist-info__licenses__numpy__random__src__distributions__LICENSE.md, licenses/numpy/runtime__packages__numpy-2.4.6.dist-info__licenses__numpy__random__src__mt19937__LICENSE.md, licenses/numpy/runtime__packages__numpy-2.4.6.dist-info__licenses__numpy__random__src__pcg64__LICENSE.md, licenses/numpy/runtime__packages__numpy-2.4.6.dist-info__licenses__numpy__random__src__philox__LICENSE.md, licenses/numpy/runtime__packages__numpy-2.4.6.dist-info__licenses__numpy__random__src__sfc64__LICENSE.md, licenses/numpy/runtime__packages__numpy-2.4.6.dist-info__licenses__numpy__random__src__splitmix64__LICENSE.md, licenses/numpy/runtime__packages__numpy___core__include__numpy__random__LICENSE.txt, licenses/numpy/runtime__packages__numpy__ma__LICENSE, licenses/numpy/runtime__packages__numpy__random__LICENSE.md
+Notes: All files in this runtime distribution are included in the audit scope; native payload classification is based on local RECORD entries.
+
+-------------------------------------------------------------------------------
+Name: omegaconf
+Version: 2.0.6
+Component type: python-package
+Distributed: yes
+License: BSD-3-Clause
+License source: runtime/packages/omegaconf-2.0.6.dist-info/METADATA, runtime/packages/omegaconf-2.0.6.dist-info/LICENSE
+Homepage/source: https://github.com/omry/omegaconf
+Notice required: yes
+Redistribution evidence: found in local license/notice evidence
+Review status: identified
+Bundled license path: licenses/omegaconf/runtime__packages__omegaconf-2.0.6.dist-info__LICENSE
+Notes: All files in this runtime distribution are included in the audit scope; native payload classification is based on local RECORD entries.
+
+-------------------------------------------------------------------------------
+Name: onnxruntime
+Version: 1.29.0
+Component type: native-library
+Distributed: yes
+License: MIT License
+License source: runtime/packages/onnxruntime-1.29.0.dist-info/METADATA, runtime/packages/onnxruntime/LICENSE
+Homepage/source: https://onnxruntime.ai
+Notice required: yes
+Redistribution evidence: found in local license/notice evidence
+Review status: identified
+Bundled license path: licenses/onnxruntime/runtime__packages__onnxruntime__LICENSE
+Notes: All files in this runtime distribution are included in the audit scope; native payload classification is based on local RECORD entries.
+
+-------------------------------------------------------------------------------
+Name: opencv-contrib-python
+Version: 5.0.0.93
+Component type: native-library
+Distributed: yes
+License: Apache 2.0
+License source: runtime/packages/opencv_contrib_python-5.0.0.93.dist-info/METADATA, runtime/packages/cv2/LICENSE-3RD-PARTY.txt, runtime/packages/cv2/LICENSE.txt, runtime/packages/opencv_contrib_python-5.0.0.93.dist-info/LICENSE-3RD-PARTY.txt, runtime/packages/opencv_contrib_python-5.0.0.93.dist-info/LICENSE.txt
+Homepage/source: https://github.com/opencv/opencv-python
+Notice required: yes
+Redistribution evidence: found in local license/notice evidence
+Review status: identified
+Bundled license path: licenses/opencv_contrib_python/runtime__packages__cv2__LICENSE-3RD-PARTY.txt, licenses/opencv_contrib_python/runtime__packages__cv2__LICENSE.txt, licenses/opencv_contrib_python/runtime__packages__opencv_contrib_python-5.0.0.93.dist-info__LICENSE-3RD-PARTY.txt, licenses/opencv_contrib_python/runtime__packages__opencv_contrib_python-5.0.0.93.dist-info__LICENSE.txt
+Notes: All files in this runtime distribution are included in the audit scope; native payload classification is based on local RECORD entries.
+
+-------------------------------------------------------------------------------
+Name: opencv-python
+Version: 5.0.0.93
+Component type: native-library
+Distributed: yes
+License: Apache 2.0
+License source: runtime/packages/opencv_python-5.0.0.93.dist-info/METADATA, runtime/packages/cv2/LICENSE-3RD-PARTY.txt, runtime/packages/cv2/LICENSE.txt, runtime/packages/opencv_python-5.0.0.93.dist-info/LICENSE-3RD-PARTY.txt, runtime/packages/opencv_python-5.0.0.93.dist-info/LICENSE.txt
+Homepage/source: https://github.com/opencv/opencv-python
+Notice required: yes
+Redistribution evidence: found in local license/notice evidence
+Review status: identified
+Bundled license path: licenses/opencv_python/runtime__packages__cv2__LICENSE-3RD-PARTY.txt, licenses/opencv_python/runtime__packages__cv2__LICENSE.txt, licenses/opencv_python/runtime__packages__opencv_python-5.0.0.93.dist-info__LICENSE-3RD-PARTY.txt, licenses/opencv_python/runtime__packages__opencv_python-5.0.0.93.dist-info__LICENSE.txt
+Notes: All files in this runtime distribution are included in the audit scope; native payload classification is based on local RECORD entries.
+
+-------------------------------------------------------------------------------
+Name: packaging
+Version: 26.3
+Component type: python-package
+Distributed: yes
+License: Apache-2.0 OR BSD-2-Clause
+License source: runtime/packages/packaging-26.3.dist-info/METADATA, runtime/packages/packaging-26.3.dist-info/licenses/LICENSE, runtime/packages/packaging-26.3.dist-info/licenses/LICENSE.APACHE, runtime/packages/packaging-26.3.dist-info/licenses/LICENSE.BSD
+Homepage/source: https://github.com/pypa/packaging
+Notice required: yes
+Redistribution evidence: found in local license/notice evidence
+Review status: identified
+Bundled license path: licenses/packaging/runtime__packages__packaging-26.3.dist-info__licenses__LICENSE, licenses/packaging/runtime__packages__packaging-26.3.dist-info__licenses__LICENSE.APACHE, licenses/packaging/runtime__packages__packaging-26.3.dist-info__licenses__LICENSE.BSD
+Notes: All files in this runtime distribution are included in the audit scope; native payload classification is based on local RECORD entries.
+
+-------------------------------------------------------------------------------
+Name: pillow
+Version: 12.3.0
+Component type: native-library
+Distributed: yes
+License: MIT-CMU
+License source: runtime/packages/pillow-12.3.0.dist-info/METADATA, runtime/packages/pillow-12.3.0.dist-info/licenses/LICENSE
+Homepage/source: https://python-pillow.github.io
+Notice required: yes
+Redistribution evidence: found in local license/notice evidence
+Review status: identified
+Bundled license path: licenses/pillow/runtime__packages__pillow-12.3.0.dist-info__licenses__LICENSE
+Notes: All files in this runtime distribution are included in the audit scope; native payload classification is based on local RECORD entries.
+
+-------------------------------------------------------------------------------
+Name: polars
+Version: 1.44.1
+Component type: python-package
+Distributed: yes
+License: MIT
+License source: runtime/packages/polars-1.44.1.dist-info/METADATA, runtime/packages/polars-1.44.1.dist-info/licenses/LICENSE
+Homepage/source: https://www.pola.rs/
+Notice required: yes
+Redistribution evidence: found in local license/notice evidence
+Review status: identified
+Bundled license path: licenses/polars/runtime__packages__polars-1.44.1.dist-info__licenses__LICENSE
+Notes: All files in this runtime distribution are included in the audit scope; native payload classification is based on local RECORD entries.
+
+-------------------------------------------------------------------------------
+Name: polars-runtime-32
+Version: 1.44.1
+Component type: native-library
+Distributed: yes
+License: MIT
+License source: runtime/packages/polars_runtime_32-1.44.1.dist-info/METADATA, runtime/packages/polars_runtime_32-1.44.1.dist-info/licenses/LICENSE
+Homepage/source: https://www.pola.rs/
+Notice required: yes
+Redistribution evidence: found in local license/notice evidence
+Review status: identified
+Bundled license path: licenses/polars_runtime_32/runtime__packages__polars_runtime_32-1.44.1.dist-info__licenses__LICENSE
+Notes: All files in this runtime distribution are included in the audit scope; native payload classification is based on local RECORD entries.
+
+-------------------------------------------------------------------------------
+Name: PP-OCRv6_det_small.onnx
+Version: not recorded in local model manifest
+Component type: model
+Distributed: yes
+License: RELEASE LEGAL REVIEW REQUIRED
+License source: runtime/models/ocr/manifest.json
+Homepage/source: REVIEW_REQUIRED: upstream model project/source is not recorded locally
+Notice required: yes
+Redistribution evidence: not found in local model manifest or adjacent model metadata
+Review status: RELEASE LEGAL REVIEW REQUIRED
+Bundled license path: none
+Notes: The Python package license is not used as a model-weight license conclusion.
+
+-------------------------------------------------------------------------------
+Name: PP-OCRv6_rec_small.onnx
+Version: not recorded in local model manifest
+Component type: model
+Distributed: yes
+License: RELEASE LEGAL REVIEW REQUIRED
+License source: runtime/models/ocr/manifest.json
+Homepage/source: REVIEW_REQUIRED: upstream model project/source is not recorded locally
+Notice required: yes
+Redistribution evidence: not found in local model manifest or adjacent model metadata
+Review status: RELEASE LEGAL REVIEW REQUIRED
+Bundled license path: none
+Notes: The Python package license is not used as a model-weight license conclusion.
+
+-------------------------------------------------------------------------------
+Name: protobuf
+Version: 7.36.1
+Component type: native-library
+Distributed: yes
+License: 3-Clause BSD License
+License source: runtime/packages/protobuf-7.36.1.dist-info/METADATA, runtime/packages/protobuf-7.36.1.dist-info/LICENSE
+Homepage/source: https://developers.google.com/protocol-buffers/
+Notice required: yes
+Redistribution evidence: found in local license/notice evidence
+Review status: identified
+Bundled license path: licenses/protobuf/runtime__packages__protobuf-7.36.1.dist-info__LICENSE
+Notes: All files in this runtime distribution are included in the audit scope; native payload classification is based on local RECORD entries.
+
+-------------------------------------------------------------------------------
+Name: pyclipper
+Version: 1.4.0
+Component type: native-library
+Distributed: yes
+License: MIT
+License source: runtime/packages/pyclipper-1.4.0.dist-info/METADATA, runtime/packages/pyclipper-1.4.0.dist-info/licenses/LICENSE
+Homepage/source: https://github.com/fonttools/pyclipper
+Notice required: yes
+Redistribution evidence: found in local license/notice evidence
+Review status: identified
+Bundled license path: licenses/pyclipper/runtime__packages__pyclipper-1.4.0.dist-info__licenses__LICENSE
+Notes: All files in this runtime distribution are included in the audit scope; native payload classification is based on local RECORD entries.
+
+-------------------------------------------------------------------------------
+Name: pymupdf
+Version: 1.28.2
+Component type: native-library
+Distributed: yes
+License: Dual Licensed - GNU AFFERO GPL 3.0 or Artifex Commercial License
+License source: runtime/packages/pymupdf-1.28.2.dist-info/METADATA, runtime/packages/pymupdf-1.28.2.dist-info/COPYING
+Homepage/source: https://github.com/pymupdf/pymupdf
+Notice required: yes
+Redistribution evidence: partial: local COPYING identifies dual licensing but does not record the applicable selection or commercial terms
+Review status: RELEASE LEGAL REVIEW REQUIRED
+Bundled license path: licenses/pymupdf/runtime__packages__pymupdf-1.28.2.dist-info__COPYING
+Notes: All files in this runtime distribution are included in the audit scope; native payload classification is based on local RECORD entries.
+
+-------------------------------------------------------------------------------
+Name: pypdfium2
+Version: 5.13.0
+Component type: native-library
+Distributed: yes
+License: BSD-3-Clause, Apache-2.0, dependency licenses
+License source: runtime/packages/pypdfium2-5.13.0.dist-info/METADATA, runtime/packages/pypdfium2-5.13.0.dist-info/licenses/data/windows_x64/BUILD_LICENSES/abseil.txt, runtime/packages/pypdfium2-5.13.0.dist-info/licenses/data/windows_x64/BUILD_LICENSES/agg23.txt, runtime/packages/pypdfium2-5.13.0.dist-info/licenses/data/windows_x64/BUILD_LICENSES/fast_float.txt, runtime/packages/pypdfium2-5.13.0.dist-info/licenses/data/windows_x64/BUILD_LICENSES/freetype.txt, runtime/packages/pypdfium2-5.13.0.dist-info/licenses/data/windows_x64/BUILD_LICENSES/icu.txt, runtime/packages/pypdfium2-5.13.0.dist-info/licenses/data/windows_x64/BUILD_LICENSES/lcms.txt, runtime/packages/pypdfium2-5.13.0.dist-info/licenses/data/windows_x64/BUILD_LICENSES/libjpeg_turbo.ijg, runtime/packages/pypdfium2-5.13.0.dist-info/licenses/data/windows_x64/BUILD_LICENSES/libjpeg_turbo.md, runtime/packages/pypdfium2-5.13.0.dist-info/licenses/data/windows_x64/BUILD_LICENSES/libopenjpeg.txt, runtime/packages/pypdfium2-5.13.0.dist-info/licenses/data/windows_x64/BUILD_LICENSES/libpng.txt, runtime/packages/pypdfium2-5.13.0.dist-info/licenses/data/windows_x64/BUILD_LICENSES/libtiff.txt, runtime/packages/pypdfium2-5.13.0.dist-info/licenses/data/windows_x64/BUILD_LICENSES/llvm-libc.txt, runtime/packages/pypdfium2-5.13.0.dist-info/licenses/data/windows_x64/BUILD_LICENSES/pdfium-binaries.txt, runtime/packages/pypdfium2-5.13.0.dist-info/licenses/data/windows_x64/BUILD_LICENSES/pdfium.txt, runtime/packages/pypdfium2-5.13.0.dist-info/licenses/data/windows_x64/BUILD_LICENSES/simdutf.txt, runtime/packages/pypdfium2-5.13.0.dist-info/licenses/data/windows_x64/BUILD_LICENSES/zlib.txt, runtime/packages/pypdfium2-5.13.0.dist-info/licenses/LICENSES/Apache-2.0.txt, runtime/packages/pypdfium2-5.13.0.dist-info/licenses/LICENSES/BSD-3-Clause.txt, runtime/packages/pypdfium2-5.13.0.dist-info/licenses/LICENSES/CC-BY-4.0.txt
+Homepage/source: https://github.com/pypdfium2-team/pypdfium2
+Notice required: yes
+Redistribution evidence: found in local license/notice evidence
+Review status: identified
+Bundled license path: licenses/pypdfium2/runtime__packages__pypdfium2-5.13.0.dist-info__licenses__data__windows_x64__BUILD_LICENSES__abseil.txt, licenses/pypdfium2/runtime__packages__pypdfium2-5.13.0.dist-info__licenses__data__windows_x64__BUILD_LICENSES__agg23.txt, licenses/pypdfium2/runtime__packages__pypdfium2-5.13.0.dist-info__licenses__data__windows_x64__BUILD_LICENSES__fast_float.txt, licenses/pypdfium2/runtime__packages__pypdfium2-5.13.0.dist-info__licenses__data__windows_x64__BUILD_LICENSES__freetype.txt, licenses/pypdfium2/runtime__packages__pypdfium2-5.13.0.dist-info__licenses__data__windows_x64__BUILD_LICENSES__icu.txt, licenses/pypdfium2/runtime__packages__pypdfium2-5.13.0.dist-info__licenses__data__windows_x64__BUILD_LICENSES__lcms.txt, licenses/pypdfium2/runtime__packages__pypdfium2-5.13.0.dist-info__licenses__data__windows_x64__BUILD_LICENSES__libjpeg_turbo.ijg, licenses/pypdfium2/runtime__packages__pypdfium2-5.13.0.dist-info__licenses__data__windows_x64__BUILD_LICENSES__libjpeg_turbo.md, licenses/pypdfium2/runtime__packages__pypdfium2-5.13.0.dist-info__licenses__data__windows_x64__BUILD_LICENSES__libopenjpeg.txt, licenses/pypdfium2/runtime__packages__pypdfium2-5.13.0.dist-info__licenses__data__windows_x64__BUILD_LICENSES__libpng.txt, licenses/pypdfium2/runtime__packages__pypdfium2-5.13.0.dist-info__licenses__data__windows_x64__BUILD_LICENSES__libtiff.txt, licenses/pypdfium2/runtime__packages__pypdfium2-5.13.0.dist-info__licenses__data__windows_x64__BUILD_LICENSES__llvm-libc.txt, licenses/pypdfium2/runtime__packages__pypdfium2-5.13.0.dist-info__licenses__data__windows_x64__BUILD_LICENSES__pdfium-binaries.txt, licenses/pypdfium2/runtime__packages__pypdfium2-5.13.0.dist-info__licenses__data__windows_x64__BUILD_LICENSES__pdfium.txt, licenses/pypdfium2/runtime__packages__pypdfium2-5.13.0.dist-info__licenses__data__windows_x64__BUILD_LICENSES__simdutf.txt, licenses/pypdfium2/runtime__packages__pypdfium2-5.13.0.dist-info__licenses__data__windows_x64__BUILD_LICENSES__zlib.txt, licenses/pypdfium2/runtime__packages__pypdfium2-5.13.0.dist-info__licenses__LICENSES__Apache-2.0.txt, licenses/pypdfium2/runtime__packages__pypdfium2-5.13.0.dist-info__licenses__LICENSES__BSD-3-Clause.txt, licenses/pypdfium2/runtime__packages__pypdfium2-5.13.0.dist-info__licenses__LICENSES__CC-BY-4.0.txt
+Notes: All files in this runtime distribution are included in the audit scope; native payload classification is based on local RECORD entries.
+
+-------------------------------------------------------------------------------
+Name: python-calamine
+Version: 0.8.2
+Component type: native-library
+Distributed: yes
+License: MIT
+License source: runtime/packages/python_calamine-0.8.2.dist-info/METADATA, runtime/packages/python_calamine-0.8.2.dist-info/licenses/LICENSE
+Homepage/source: https://github.com/dimastbk/python-calamine
+Notice required: yes
+Redistribution evidence: found in local license/notice evidence
+Review status: identified
+Bundled license path: licenses/python_calamine/runtime__packages__python_calamine-0.8.2.dist-info__licenses__LICENSE
+Notes: All files in this runtime distribution are included in the audit scope; native payload classification is based on local RECORD entries.
+
+-------------------------------------------------------------------------------
+Name: PyYAML
+Version: 6.0.3
+Component type: native-library
+Distributed: yes
+License: MIT
+License source: runtime/packages/pyyaml-6.0.3.dist-info/METADATA, runtime/packages/pyyaml-6.0.3.dist-info/licenses/LICENSE
+Homepage/source: https://pyyaml.org/
+Notice required: yes
+Redistribution evidence: found in local license/notice evidence
+Review status: identified
+Bundled license path: licenses/pyyaml/runtime__packages__pyyaml-6.0.3.dist-info__licenses__LICENSE
+Notes: All files in this runtime distribution are included in the audit scope; native payload classification is based on local RECORD entries.
+
+-------------------------------------------------------------------------------
+Name: rapidocr
+Version: 3.9.2
+Component type: python-package
+Distributed: yes
+License: Apache-2.0
+License source: runtime/packages/rapidocr-3.9.2.dist-info/METADATA
+Homepage/source: REVIEW_REQUIRED: no homepage/source in local package metadata
+Notice required: yes
+Redistribution evidence: not found in local license/notice evidence
+Review status: REVIEW_REQUIRED
+Bundled license path: none
+Notes: All files in this runtime distribution are included in the audit scope; native payload classification is based on local RECORD entries.
+
+-------------------------------------------------------------------------------
+Name: react
+Version: 18.3.1
+Component type: frontend-runtime
+Distributed: yes
+License: MIT
+License source: frontend/node_modules/react/package.json, frontend/node_modules/react/LICENSE
+Homepage/source: https://reactjs.org/
+Notice required: yes
+Redistribution evidence: found in local package metadata/license text
+Review status: identified
+Bundled license path: licenses/frontend_react/frontend__node_modules__react__LICENSE
+Notes: Code is bundled into frontend/dist; the package directory is not distributed.
+
+-------------------------------------------------------------------------------
+Name: react-dom
+Version: 18.3.1
+Component type: frontend-runtime
+Distributed: yes
+License: MIT
+License source: frontend/node_modules/react-dom/package.json, frontend/node_modules/react-dom/LICENSE
+Homepage/source: https://reactjs.org/
+Notice required: yes
+Redistribution evidence: found in local package metadata/license text
+Review status: identified
+Bundled license path: licenses/frontend_react_dom/frontend__node_modules__react-dom__LICENSE
+Notes: Code is bundled into frontend/dist; the package directory is not distributed.
+
+-------------------------------------------------------------------------------
+Name: requests
+Version: 2.34.2
+Component type: python-package
+Distributed: yes
+License: Apache-2.0
+License source: runtime/packages/requests-2.34.2.dist-info/METADATA, runtime/packages/requests-2.34.2.dist-info/licenses/LICENSE, runtime/packages/requests-2.34.2.dist-info/licenses/NOTICE
+Homepage/source: https://github.com/psf/requests
+Notice required: yes
+Redistribution evidence: found in local license/notice evidence
+Review status: identified
+Bundled license path: licenses/requests/runtime__packages__requests-2.34.2.dist-info__licenses__LICENSE, licenses/requests/runtime__packages__requests-2.34.2.dist-info__licenses__NOTICE
+Notes: All files in this runtime distribution are included in the audit scope; native payload classification is based on local RECORD entries.
+
+-------------------------------------------------------------------------------
+Name: scheduler
+Version: 0.23.2
+Component type: frontend-runtime
+Distributed: yes
+License: MIT
+License source: frontend/node_modules/scheduler/package.json, frontend/node_modules/scheduler/LICENSE
+Homepage/source: https://reactjs.org/
+Notice required: yes
+Redistribution evidence: found in local package metadata/license text
+Review status: identified
+Bundled license path: licenses/frontend_scheduler/frontend__node_modules__scheduler__LICENSE
+Notes: Code is bundled into frontend/dist; the package directory is not distributed.
+
+-------------------------------------------------------------------------------
+Name: shapely
+Version: 2.1.2
+Component type: native-library
+Distributed: yes
+License: BSD 3-Clause
+License source: runtime/packages/shapely-2.1.2.dist-info/METADATA, runtime/packages/shapely-2.1.2.dist-info/licenses/LICENSE.txt, runtime/packages/shapely-2.1.2.dist-info/licenses/LICENSE_GEOS, runtime/packages/shapely-2.1.2.dist-info/licenses/LICENSE_win32
+Homepage/source: https://github.com/shapely/shapely
+Notice required: yes
+Redistribution evidence: found in local license/notice evidence
+Review status: identified
+Bundled license path: licenses/shapely/runtime__packages__shapely-2.1.2.dist-info__licenses__LICENSE.txt, licenses/shapely/runtime__packages__shapely-2.1.2.dist-info__licenses__LICENSE_GEOS, licenses/shapely/runtime__packages__shapely-2.1.2.dist-info__licenses__LICENSE_win32
+Notes: All files in this runtime distribution are included in the audit scope; native payload classification is based on local RECORD entries.
+
+-------------------------------------------------------------------------------
+Name: six
+Version: 1.17.0
+Component type: python-package
+Distributed: yes
+License: MIT
+License source: runtime/packages/six-1.17.0.dist-info/METADATA, runtime/packages/six-1.17.0.dist-info/LICENSE
+Homepage/source: https://github.com/benjaminp/six
+Notice required: yes
+Redistribution evidence: found in local license/notice evidence
+Review status: identified
+Bundled license path: licenses/six/runtime__packages__six-1.17.0.dist-info__LICENSE
+Notes: All files in this runtime distribution are included in the audit scope; native payload classification is based on local RECORD entries.
+
+-------------------------------------------------------------------------------
+Name: soupsieve
+Version: 2.9.2
+Component type: python-package
+Distributed: yes
+License: MIT
+License source: runtime/packages/soupsieve-2.9.2.dist-info/METADATA, runtime/packages/soupsieve-2.9.2.dist-info/licenses/LICENSE.md
+Homepage/source: https://github.com/facelessuser/soupsieve
+Notice required: yes
+Redistribution evidence: found in local license/notice evidence
+Review status: identified
+Bundled license path: licenses/soupsieve/runtime__packages__soupsieve-2.9.2.dist-info__licenses__LICENSE.md
+Notes: All files in this runtime distribution are included in the audit scope; native payload classification is based on local RECORD entries.
+
+-------------------------------------------------------------------------------
+Name: tqdm
+Version: 4.70.0
+Component type: python-package
+Distributed: yes
+License: MPL-2.0 AND MIT
+License source: runtime/packages/tqdm-4.70.0.dist-info/METADATA, runtime/packages/tqdm-4.70.0.dist-info/licenses/LICENCE
+Homepage/source: https://tqdm.github.io
+Notice required: yes
+Redistribution evidence: found in local license/notice evidence
+Review status: identified
+Bundled license path: licenses/tqdm/runtime__packages__tqdm-4.70.0.dist-info__licenses__LICENCE
+Notes: All files in this runtime distribution are included in the audit scope; native payload classification is based on local RECORD entries.
+
+-------------------------------------------------------------------------------
+Name: typing_extensions
+Version: 4.16.0
+Component type: python-package
+Distributed: yes
+License: PSF-2.0
+License source: runtime/packages/typing_extensions-4.16.0.dist-info/METADATA, runtime/packages/typing_extensions-4.16.0.dist-info/licenses/LICENSE
+Homepage/source: https://github.com/python/typing_extensions
+Notice required: yes
+Redistribution evidence: found in local license/notice evidence
+Review status: identified
+Bundled license path: licenses/typing_extensions/runtime__packages__typing_extensions-4.16.0.dist-info__licenses__LICENSE
+Notes: All files in this runtime distribution are included in the audit scope; native payload classification is based on local RECORD entries.
+
+-------------------------------------------------------------------------------
+Name: urllib3
+Version: 2.7.0
+Component type: python-package
+Distributed: yes
+License: MIT
+License source: runtime/packages/urllib3-2.7.0.dist-info/METADATA, runtime/packages/urllib3-2.7.0.dist-info/licenses/LICENSE.txt
+Homepage/source: REVIEW_REQUIRED: no homepage/source in local package metadata
+Notice required: yes
+Redistribution evidence: found in local license/notice evidence
+Review status: identified
+Bundled license path: licenses/urllib3/runtime__packages__urllib3-2.7.0.dist-info__licenses__LICENSE.txt
+Notes: All files in this runtime distribution are included in the audit scope; native payload classification is based on local RECORD entries.
+
+-------------------------------------------------------------------------------
+Name: xlsxwriter
+Version: 3.2.9
+Component type: python-package
+Distributed: yes
+License: BSD-2-Clause
+License source: runtime/packages/xlsxwriter-3.2.9.dist-info/METADATA, runtime/packages/xlsxwriter-3.2.9.dist-info/LICENSE.txt
+Homepage/source: https://github.com/jmcnamara/XlsxWriter
+Notice required: yes
+Redistribution evidence: found in local license/notice evidence
+Review status: identified
+Bundled license path: licenses/xlsxwriter/runtime__packages__xlsxwriter-3.2.9.dist-info__LICENSE.txt
+Notes: All files in this runtime distribution are included in the audit scope; native payload classification is based on local RECORD entries.
+
+-------------------------------------------------------------------------------
+Name: @babel/code-frame
+Version: 7.29.7
+Component type: build-tool
+Distributed: no
+License: MIT
+License source: frontend/node_modules/@babel/code-frame/package.json, frontend/node_modules/@babel/code-frame/LICENSE
+Homepage/source: https://babel.dev/docs/en/next/babel-code-frame
+Notice required: no
+Redistribution evidence: not applicable: build-only package is not distributed
+Review status: identified
+Bundled license path: none
+Notes: Build-only package; no package files are copied into frontend/dist as a standalone dependency.
+
+-------------------------------------------------------------------------------
+Name: @babel/compat-data
+Version: 7.29.7
+Component type: build-tool
+Distributed: no
+License: MIT
+License source: frontend/node_modules/@babel/compat-data/package.json, frontend/node_modules/@babel/compat-data/LICENSE
+Homepage/source: https://github.com/babel/babel.git
+Notice required: no
+Redistribution evidence: not applicable: build-only package is not distributed
+Review status: identified
+Bundled license path: none
+Notes: Build-only package; no package files are copied into frontend/dist as a standalone dependency.
+
+-------------------------------------------------------------------------------
+Name: @babel/core
+Version: 7.29.7
+Component type: build-tool
+Distributed: no
+License: MIT
+License source: frontend/node_modules/@babel/core/package.json, frontend/node_modules/@babel/core/LICENSE
+Homepage/source: https://babel.dev/docs/en/next/babel-core
+Notice required: no
+Redistribution evidence: not applicable: build-only package is not distributed
+Review status: identified
+Bundled license path: none
+Notes: Build-only package; no package files are copied into frontend/dist as a standalone dependency.
+
+-------------------------------------------------------------------------------
+Name: @babel/generator
+Version: 7.29.8
+Component type: build-tool
+Distributed: no
+License: MIT
+License source: frontend/node_modules/@babel/generator/package.json, frontend/node_modules/@babel/generator/LICENSE
+Homepage/source: https://babel.dev/docs/en/next/babel-generator
+Notice required: no
+Redistribution evidence: not applicable: build-only package is not distributed
+Review status: identified
+Bundled license path: none
+Notes: Build-only package; no package files are copied into frontend/dist as a standalone dependency.
+
+-------------------------------------------------------------------------------
+Name: @babel/helper-compilation-targets
+Version: 7.29.7
+Component type: build-tool
+Distributed: no
+License: MIT
+License source: frontend/node_modules/@babel/helper-compilation-targets/package.json, frontend/node_modules/@babel/helper-compilation-targets/LICENSE
+Homepage/source: https://github.com/babel/babel.git
+Notice required: no
+Redistribution evidence: not applicable: build-only package is not distributed
+Review status: identified
+Bundled license path: none
+Notes: Build-only package; no package files are copied into frontend/dist as a standalone dependency.
+
+-------------------------------------------------------------------------------
+Name: @babel/helper-globals
+Version: 7.29.7
+Component type: build-tool
+Distributed: no
+License: MIT
+License source: frontend/node_modules/@babel/helper-globals/package.json, frontend/node_modules/@babel/helper-globals/LICENSE
+Homepage/source: https://github.com/babel/babel.git
+Notice required: no
+Redistribution evidence: not applicable: build-only package is not distributed
+Review status: identified
+Bundled license path: none
+Notes: Build-only package; no package files are copied into frontend/dist as a standalone dependency.
+
+-------------------------------------------------------------------------------
+Name: @babel/helper-module-imports
+Version: 7.29.7
+Component type: build-tool
+Distributed: no
+License: MIT
+License source: frontend/node_modules/@babel/helper-module-imports/package.json, frontend/node_modules/@babel/helper-module-imports/LICENSE
+Homepage/source: https://babel.dev/docs/en/next/babel-helper-module-imports
+Notice required: no
+Redistribution evidence: not applicable: build-only package is not distributed
+Review status: identified
+Bundled license path: none
+Notes: Build-only package; no package files are copied into frontend/dist as a standalone dependency.
+
+-------------------------------------------------------------------------------
+Name: @babel/helper-module-transforms
+Version: 7.29.7
+Component type: build-tool
+Distributed: no
+License: MIT
+License source: frontend/node_modules/@babel/helper-module-transforms/package.json, frontend/node_modules/@babel/helper-module-transforms/LICENSE
+Homepage/source: https://babel.dev/docs/en/next/babel-helper-module-transforms
+Notice required: no
+Redistribution evidence: not applicable: build-only package is not distributed
+Review status: identified
+Bundled license path: none
+Notes: Build-only package; no package files are copied into frontend/dist as a standalone dependency.
+
+-------------------------------------------------------------------------------
+Name: @babel/helper-plugin-utils
+Version: 7.29.7
+Component type: build-tool
+Distributed: no
+License: MIT
+License source: frontend/node_modules/@babel/helper-plugin-utils/package.json, frontend/node_modules/@babel/helper-plugin-utils/LICENSE
+Homepage/source: https://babel.dev/docs/en/next/babel-helper-plugin-utils
+Notice required: no
+Redistribution evidence: not applicable: build-only package is not distributed
+Review status: identified
+Bundled license path: none
+Notes: Build-only package; no package files are copied into frontend/dist as a standalone dependency.
+
+-------------------------------------------------------------------------------
+Name: @babel/helper-string-parser
+Version: 7.29.7
+Component type: build-tool
+Distributed: no
+License: MIT
+License source: frontend/node_modules/@babel/helper-string-parser/package.json, frontend/node_modules/@babel/helper-string-parser/LICENSE
+Homepage/source: https://babel.dev/docs/en/next/babel-helper-string-parser
+Notice required: no
+Redistribution evidence: not applicable: build-only package is not distributed
+Review status: identified
+Bundled license path: none
+Notes: Build-only package; no package files are copied into frontend/dist as a standalone dependency.
+
+-------------------------------------------------------------------------------
+Name: @babel/helper-validator-identifier
+Version: 7.29.7
+Component type: build-tool
+Distributed: no
+License: MIT
+License source: frontend/node_modules/@babel/helper-validator-identifier/package.json, frontend/node_modules/@babel/helper-validator-identifier/LICENSE
+Homepage/source: https://github.com/babel/babel.git
+Notice required: no
+Redistribution evidence: not applicable: build-only package is not distributed
+Review status: identified
+Bundled license path: none
+Notes: Build-only package; no package files are copied into frontend/dist as a standalone dependency.
+
+-------------------------------------------------------------------------------
+Name: @babel/helper-validator-option
+Version: 7.29.7
+Component type: build-tool
+Distributed: no
+License: MIT
+License source: frontend/node_modules/@babel/helper-validator-option/package.json, frontend/node_modules/@babel/helper-validator-option/LICENSE
+Homepage/source: https://github.com/babel/babel.git
+Notice required: no
+Redistribution evidence: not applicable: build-only package is not distributed
+Review status: identified
+Bundled license path: none
+Notes: Build-only package; no package files are copied into frontend/dist as a standalone dependency.
+
+-------------------------------------------------------------------------------
+Name: @babel/helpers
+Version: 7.29.7
+Component type: build-tool
+Distributed: no
+License: MIT
+License source: frontend/node_modules/@babel/helpers/package.json, frontend/node_modules/@babel/helpers/LICENSE
+Homepage/source: https://babel.dev/docs/en/next/babel-helpers
+Notice required: no
+Redistribution evidence: not applicable: build-only package is not distributed
+Review status: identified
+Bundled license path: none
+Notes: Build-only package; no package files are copied into frontend/dist as a standalone dependency.
+
+-------------------------------------------------------------------------------
+Name: @babel/parser
+Version: 7.29.8
+Component type: build-tool
+Distributed: no
+License: MIT
+License source: frontend/node_modules/@babel/parser/package.json, frontend/node_modules/@babel/parser/LICENSE
+Homepage/source: https://babel.dev/docs/en/next/babel-parser
+Notice required: no
+Redistribution evidence: not applicable: build-only package is not distributed
+Review status: identified
+Bundled license path: none
+Notes: Build-only package; no package files are copied into frontend/dist as a standalone dependency.
+
+-------------------------------------------------------------------------------
+Name: @babel/plugin-transform-react-jsx-self
+Version: 7.29.7
+Component type: build-tool
+Distributed: no
+License: MIT
+License source: frontend/node_modules/@babel/plugin-transform-react-jsx-self/package.json, frontend/node_modules/@babel/plugin-transform-react-jsx-self/LICENSE
+Homepage/source: https://babel.dev/docs/en/next/babel-plugin-transform-react-jsx-self
+Notice required: no
+Redistribution evidence: not applicable: build-only package is not distributed
+Review status: identified
+Bundled license path: none
+Notes: Build-only package; no package files are copied into frontend/dist as a standalone dependency.
+
+-------------------------------------------------------------------------------
+Name: @babel/plugin-transform-react-jsx-source
+Version: 7.29.7
+Component type: build-tool
+Distributed: no
+License: MIT
+License source: frontend/node_modules/@babel/plugin-transform-react-jsx-source/package.json, frontend/node_modules/@babel/plugin-transform-react-jsx-source/LICENSE
+Homepage/source: https://babel.dev/docs/en/next/babel-plugin-transform-react-jsx-source
+Notice required: no
+Redistribution evidence: not applicable: build-only package is not distributed
+Review status: identified
+Bundled license path: none
+Notes: Build-only package; no package files are copied into frontend/dist as a standalone dependency.
+
+-------------------------------------------------------------------------------
+Name: @babel/template
+Version: 7.29.7
+Component type: build-tool
+Distributed: no
+License: MIT
+License source: frontend/node_modules/@babel/template/package.json, frontend/node_modules/@babel/template/LICENSE
+Homepage/source: https://babel.dev/docs/en/next/babel-template
+Notice required: no
+Redistribution evidence: not applicable: build-only package is not distributed
+Review status: identified
+Bundled license path: none
+Notes: Build-only package; no package files are copied into frontend/dist as a standalone dependency.
+
+-------------------------------------------------------------------------------
+Name: @babel/traverse
+Version: 7.29.8
+Component type: build-tool
+Distributed: no
+License: MIT
+License source: frontend/node_modules/@babel/traverse/package.json, frontend/node_modules/@babel/traverse/LICENSE
+Homepage/source: https://babel.dev/docs/en/next/babel-traverse
+Notice required: no
+Redistribution evidence: not applicable: build-only package is not distributed
+Review status: identified
+Bundled license path: none
+Notes: Build-only package; no package files are copied into frontend/dist as a standalone dependency.
+
+-------------------------------------------------------------------------------
+Name: @babel/types
+Version: 7.29.8
+Component type: build-tool
+Distributed: no
+License: MIT
+License source: frontend/node_modules/@babel/types/package.json, frontend/node_modules/@babel/types/LICENSE
+Homepage/source: https://babel.dev/docs/en/next/babel-types
+Notice required: no
+Redistribution evidence: not applicable: build-only package is not distributed
+Review status: identified
+Bundled license path: none
+Notes: Build-only package; no package files are copied into frontend/dist as a standalone dependency.
+
+-------------------------------------------------------------------------------
+Name: @esbuild/win32-x64
+Version: 0.24.2
+Component type: build-tool
+Distributed: no
+License: MIT
+License source: frontend/node_modules/@esbuild/win32-x64/package.json
+Homepage/source: git+https://github.com/evanw/esbuild.git
+Notice required: no
+Redistribution evidence: not applicable: build-only package is not distributed
+Review status: identified
+Bundled license path: none
+Notes: Build-only package; no package files are copied into frontend/dist as a standalone dependency.
+
+-------------------------------------------------------------------------------
+Name: @jridgewell/gen-mapping
+Version: 0.3.13
+Component type: build-tool
+Distributed: no
+License: MIT
+License source: frontend/node_modules/@jridgewell/gen-mapping/package.json, frontend/node_modules/@jridgewell/gen-mapping/LICENSE
+Homepage/source: https://github.com/jridgewell/sourcemaps/tree/main/packages/gen-mapping
+Notice required: no
+Redistribution evidence: not applicable: build-only package is not distributed
+Review status: identified
+Bundled license path: none
+Notes: Build-only package; no package files are copied into frontend/dist as a standalone dependency.
+
+-------------------------------------------------------------------------------
+Name: @jridgewell/remapping
+Version: 2.3.5
+Component type: build-tool
+Distributed: no
+License: MIT
+License source: frontend/node_modules/@jridgewell/remapping/package.json, frontend/node_modules/@jridgewell/remapping/LICENSE
+Homepage/source: https://github.com/jridgewell/sourcemaps/tree/main/packages/remapping
+Notice required: no
+Redistribution evidence: not applicable: build-only package is not distributed
+Review status: identified
+Bundled license path: none
+Notes: Build-only package; no package files are copied into frontend/dist as a standalone dependency.
+
+-------------------------------------------------------------------------------
+Name: @jridgewell/resolve-uri
+Version: 3.1.2
+Component type: build-tool
+Distributed: no
+License: MIT
+License source: frontend/node_modules/@jridgewell/resolve-uri/package.json, frontend/node_modules/@jridgewell/resolve-uri/LICENSE
+Homepage/source: https://github.com/jridgewell/resolve-uri
+Notice required: no
+Redistribution evidence: not applicable: build-only package is not distributed
+Review status: identified
+Bundled license path: none
+Notes: Build-only package; no package files are copied into frontend/dist as a standalone dependency.
+
+-------------------------------------------------------------------------------
+Name: @jridgewell/sourcemap-codec
+Version: 1.6.0
+Component type: build-tool
+Distributed: no
+License: MIT
+License source: frontend/node_modules/@jridgewell/sourcemap-codec/package.json, frontend/node_modules/@jridgewell/sourcemap-codec/LICENSE
+Homepage/source: https://github.com/jridgewell/sourcemaps/tree/main/packages/sourcemap-codec
+Notice required: no
+Redistribution evidence: not applicable: build-only package is not distributed
+Review status: identified
+Bundled license path: none
+Notes: Build-only package; no package files are copied into frontend/dist as a standalone dependency.
+
+-------------------------------------------------------------------------------
+Name: @jridgewell/trace-mapping
+Version: 0.3.31
+Component type: build-tool
+Distributed: no
+License: MIT
+License source: frontend/node_modules/@jridgewell/trace-mapping/package.json, frontend/node_modules/@jridgewell/trace-mapping/LICENSE
+Homepage/source: https://github.com/jridgewell/sourcemaps/tree/main/packages/trace-mapping
+Notice required: no
+Redistribution evidence: not applicable: build-only package is not distributed
+Review status: identified
+Bundled license path: none
+Notes: Build-only package; no package files are copied into frontend/dist as a standalone dependency.
+
+-------------------------------------------------------------------------------
+Name: @rollup/rollup-win32-x64-gnu
+Version: 4.63.1
+Component type: build-tool
+Distributed: no
+License: MIT
+License source: frontend/node_modules/@rollup/rollup-win32-x64-gnu/package.json
+Homepage/source: https://rollupjs.org/
+Notice required: no
+Redistribution evidence: not applicable: build-only package is not distributed
+Review status: identified
+Bundled license path: none
+Notes: Build-only package; no package files are copied into frontend/dist as a standalone dependency.
+
+-------------------------------------------------------------------------------
+Name: @rollup/rollup-win32-x64-msvc
+Version: 4.63.1
+Component type: build-tool
+Distributed: no
+License: MIT
+License source: frontend/node_modules/@rollup/rollup-win32-x64-msvc/package.json
+Homepage/source: https://rollupjs.org/
+Notice required: no
+Redistribution evidence: not applicable: build-only package is not distributed
+Review status: identified
+Bundled license path: none
+Notes: Build-only package; no package files are copied into frontend/dist as a standalone dependency.
+
+-------------------------------------------------------------------------------
+Name: @types/babel__core
+Version: 7.20.5
+Component type: build-tool
+Distributed: no
+License: MIT
+License source: frontend/node_modules/@types/babel__core/package.json, frontend/node_modules/@types/babel__core/LICENSE
+Homepage/source: https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/babel__core
+Notice required: no
+Redistribution evidence: not applicable: build-only package is not distributed
+Review status: identified
+Bundled license path: none
+Notes: Build-only package; no package files are copied into frontend/dist as a standalone dependency.
+
+-------------------------------------------------------------------------------
+Name: @types/babel__generator
+Version: 7.27.0
+Component type: build-tool
+Distributed: no
+License: MIT
+License source: frontend/node_modules/@types/babel__generator/package.json, frontend/node_modules/@types/babel__generator/LICENSE
+Homepage/source: https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/babel__generator
+Notice required: no
+Redistribution evidence: not applicable: build-only package is not distributed
+Review status: identified
+Bundled license path: none
+Notes: Build-only package; no package files are copied into frontend/dist as a standalone dependency.
+
+-------------------------------------------------------------------------------
+Name: @types/babel__template
+Version: 7.4.4
+Component type: build-tool
+Distributed: no
+License: MIT
+License source: frontend/node_modules/@types/babel__template/package.json, frontend/node_modules/@types/babel__template/LICENSE
+Homepage/source: https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/babel__template
+Notice required: no
+Redistribution evidence: not applicable: build-only package is not distributed
+Review status: identified
+Bundled license path: none
+Notes: Build-only package; no package files are copied into frontend/dist as a standalone dependency.
+
+-------------------------------------------------------------------------------
+Name: @types/babel__traverse
+Version: 7.28.0
+Component type: build-tool
+Distributed: no
+License: MIT
+License source: frontend/node_modules/@types/babel__traverse/package.json, frontend/node_modules/@types/babel__traverse/LICENSE
+Homepage/source: https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/babel__traverse
+Notice required: no
+Redistribution evidence: not applicable: build-only package is not distributed
+Review status: identified
+Bundled license path: none
+Notes: Build-only package; no package files are copied into frontend/dist as a standalone dependency.
+
+-------------------------------------------------------------------------------
+Name: @types/estree
+Version: 1.0.9
+Component type: build-tool
+Distributed: no
+License: MIT
+License source: frontend/node_modules/@types/estree/package.json, frontend/node_modules/@types/estree/LICENSE
+Homepage/source: https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/estree
+Notice required: no
+Redistribution evidence: not applicable: build-only package is not distributed
+Review status: identified
+Bundled license path: none
+Notes: Build-only package; no package files are copied into frontend/dist as a standalone dependency.
+
+-------------------------------------------------------------------------------
+Name: @types/prop-types
+Version: 15.7.15
+Component type: build-tool
+Distributed: no
+License: MIT
+License source: frontend/node_modules/@types/prop-types/package.json, frontend/node_modules/@types/prop-types/LICENSE
+Homepage/source: https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/prop-types
+Notice required: no
+Redistribution evidence: not applicable: build-only package is not distributed
+Review status: identified
+Bundled license path: none
+Notes: Build-only package; no package files are copied into frontend/dist as a standalone dependency.
+
+-------------------------------------------------------------------------------
+Name: @types/react
+Version: 18.3.12
+Component type: build-tool
+Distributed: no
+License: MIT
+License source: frontend/node_modules/@types/react/package.json, frontend/node_modules/@types/react/LICENSE
+Homepage/source: https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/react
+Notice required: no
+Redistribution evidence: not applicable: build-only package is not distributed
+Review status: identified
+Bundled license path: none
+Notes: Build-only package; no package files are copied into frontend/dist as a standalone dependency.
+
+-------------------------------------------------------------------------------
+Name: @types/react-dom
+Version: 18.3.1
+Component type: build-tool
+Distributed: no
+License: MIT
+License source: frontend/node_modules/@types/react-dom/package.json, frontend/node_modules/@types/react-dom/LICENSE
+Homepage/source: https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/react-dom
+Notice required: no
+Redistribution evidence: not applicable: build-only package is not distributed
+Review status: identified
+Bundled license path: none
+Notes: Build-only package; no package files are copied into frontend/dist as a standalone dependency.
+
+-------------------------------------------------------------------------------
+Name: @vitejs/plugin-react
+Version: 4.3.4
+Component type: build-tool
+Distributed: no
+License: MIT
+License source: frontend/node_modules/@vitejs/plugin-react/package.json, frontend/node_modules/@vitejs/plugin-react/LICENSE
+Homepage/source: https://github.com/vitejs/vite-plugin-react/tree/main/packages/plugin-react#readme
+Notice required: no
+Redistribution evidence: not applicable: build-only package is not distributed
+Review status: identified
+Bundled license path: none
+Notes: Build-only package; no package files are copied into frontend/dist as a standalone dependency.
+
+-------------------------------------------------------------------------------
+Name: baseline-browser-mapping
+Version: 2.11.20
+Component type: build-tool
+Distributed: no
+License: Apache-2.0
+License source: frontend/node_modules/baseline-browser-mapping/package.json, frontend/node_modules/baseline-browser-mapping/LICENSE.txt
+Homepage/source: git+https://github.com/web-platform-dx/baseline-browser-mapping.git
+Notice required: no
+Redistribution evidence: not applicable: build-only package is not distributed
+Review status: identified
+Bundled license path: none
+Notes: Build-only package; no package files are copied into frontend/dist as a standalone dependency.
+
+-------------------------------------------------------------------------------
+Name: browserslist
+Version: 4.28.8
+Component type: build-tool
+Distributed: no
+License: MIT
+License source: frontend/node_modules/browserslist/package.json, frontend/node_modules/browserslist/LICENSE
+Homepage/source: browserslist/browserslist
+Notice required: no
+Redistribution evidence: not applicable: build-only package is not distributed
+Review status: identified
+Bundled license path: none
+Notes: Build-only package; no package files are copied into frontend/dist as a standalone dependency.
+
+-------------------------------------------------------------------------------
+Name: caniuse-lite
+Version: 1.0.30001810
+Component type: build-tool
+Distributed: no
+License: CC-BY-4.0
+License source: frontend/node_modules/caniuse-lite/package.json, frontend/node_modules/caniuse-lite/LICENSE
+Homepage/source: browserslist/caniuse-lite
+Notice required: no
+Redistribution evidence: not applicable: build-only package is not distributed
+Review status: identified
+Bundled license path: none
+Notes: Build-only package; no package files are copied into frontend/dist as a standalone dependency.
+
+-------------------------------------------------------------------------------
+Name: convert-source-map
+Version: 2.0.0
+Component type: build-tool
+Distributed: no
+License: MIT
+License source: frontend/node_modules/convert-source-map/package.json, frontend/node_modules/convert-source-map/LICENSE
+Homepage/source: https://github.com/thlorenz/convert-source-map
+Notice required: no
+Redistribution evidence: not applicable: build-only package is not distributed
+Review status: identified
+Bundled license path: none
+Notes: Build-only package; no package files are copied into frontend/dist as a standalone dependency.
+
+-------------------------------------------------------------------------------
+Name: csstype
+Version: 3.2.3
+Component type: build-tool
+Distributed: no
+License: MIT
+License source: frontend/node_modules/csstype/package.json, frontend/node_modules/csstype/LICENSE
+Homepage/source: https://github.com/frenic/csstype
+Notice required: no
+Redistribution evidence: not applicable: build-only package is not distributed
+Review status: identified
+Bundled license path: none
+Notes: Build-only package; no package files are copied into frontend/dist as a standalone dependency.
+
+-------------------------------------------------------------------------------
+Name: debug
+Version: 4.4.3
+Component type: build-tool
+Distributed: no
+License: MIT
+License source: frontend/node_modules/debug/package.json, frontend/node_modules/debug/LICENSE
+Homepage/source: git://github.com/debug-js/debug.git
+Notice required: no
+Redistribution evidence: not applicable: build-only package is not distributed
+Review status: identified
+Bundled license path: none
+Notes: Build-only package; no package files are copied into frontend/dist as a standalone dependency.
+
+-------------------------------------------------------------------------------
+Name: electron-to-chromium
+Version: 1.5.420
+Component type: build-tool
+Distributed: no
+License: ISC
+License source: frontend/node_modules/electron-to-chromium/package.json, frontend/node_modules/electron-to-chromium/LICENSE
+Homepage/source: git+https://github.com/Kilian/electron-to-chromium.git
+Notice required: no
+Redistribution evidence: not applicable: build-only package is not distributed
+Review status: identified
+Bundled license path: none
+Notes: Build-only package; no package files are copied into frontend/dist as a standalone dependency.
+
+-------------------------------------------------------------------------------
+Name: esbuild
+Version: 0.24.2
+Component type: build-tool
+Distributed: no
+License: MIT
+License source: frontend/node_modules/esbuild/package.json, frontend/node_modules/esbuild/LICENSE.md
+Homepage/source: git+https://github.com/evanw/esbuild.git
+Notice required: no
+Redistribution evidence: not applicable: build-only package is not distributed
+Review status: identified
+Bundled license path: none
+Notes: Build-only package; no package files are copied into frontend/dist as a standalone dependency.
+
+-------------------------------------------------------------------------------
+Name: escalade
+Version: 3.2.0
+Component type: build-tool
+Distributed: no
+License: MIT
+License source: frontend/node_modules/escalade/package.json, frontend/node_modules/escalade/license
+Homepage/source: lukeed/escalade
+Notice required: no
+Redistribution evidence: not applicable: build-only package is not distributed
+Review status: identified
+Bundled license path: none
+Notes: Build-only package; no package files are copied into frontend/dist as a standalone dependency.
+
+-------------------------------------------------------------------------------
+Name: gensync
+Version: 1.0.0-beta.2
+Component type: build-tool
+Distributed: no
+License: MIT
+License source: frontend/node_modules/gensync/package.json, frontend/node_modules/gensync/LICENSE
+Homepage/source: https://github.com/loganfsmyth/gensync
+Notice required: no
+Redistribution evidence: not applicable: build-only package is not distributed
+Review status: identified
+Bundled license path: none
+Notes: Build-only package; no package files are copied into frontend/dist as a standalone dependency.
+
+-------------------------------------------------------------------------------
+Name: js-tokens
+Version: 4.0.0
+Component type: build-tool
+Distributed: no
+License: MIT
+License source: frontend/node_modules/js-tokens/package.json, frontend/node_modules/js-tokens/LICENSE
+Homepage/source: lydell/js-tokens
+Notice required: no
+Redistribution evidence: not applicable: build-only package is not distributed
+Review status: identified
+Bundled license path: none
+Notes: Build-only package; no package files are copied into frontend/dist as a standalone dependency.
+
+-------------------------------------------------------------------------------
+Name: jsesc
+Version: 3.1.0
+Component type: build-tool
+Distributed: no
+License: MIT
+License source: frontend/node_modules/jsesc/package.json, frontend/node_modules/jsesc/LICENSE-MIT.txt
+Homepage/source: https://mths.be/jsesc
+Notice required: no
+Redistribution evidence: not applicable: build-only package is not distributed
+Review status: identified
+Bundled license path: none
+Notes: Build-only package; no package files are copied into frontend/dist as a standalone dependency.
+
+-------------------------------------------------------------------------------
+Name: json5
+Version: 2.2.3
+Component type: build-tool
+Distributed: no
+License: MIT
+License source: frontend/node_modules/json5/package.json, frontend/node_modules/json5/LICENSE.md
+Homepage/source: http://json5.org/
+Notice required: no
+Redistribution evidence: not applicable: build-only package is not distributed
+Review status: identified
+Bundled license path: none
+Notes: Build-only package; no package files are copied into frontend/dist as a standalone dependency.
+
+-------------------------------------------------------------------------------
+Name: loose-envify
+Version: 1.4.0
+Component type: build-tool
+Distributed: no
+License: MIT
+License source: frontend/node_modules/loose-envify/package.json, frontend/node_modules/loose-envify/LICENSE
+Homepage/source: https://github.com/zertosh/loose-envify
+Notice required: no
+Redistribution evidence: not applicable: build-only package is not distributed
+Review status: identified
+Bundled license path: none
+Notes: Build-only package; no package files are copied into frontend/dist as a standalone dependency.
+
+-------------------------------------------------------------------------------
+Name: lru-cache
+Version: 5.1.1
+Component type: build-tool
+Distributed: no
+License: ISC
+License source: frontend/node_modules/lru-cache/package.json, frontend/node_modules/lru-cache/LICENSE
+Homepage/source: git://github.com/isaacs/node-lru-cache.git
+Notice required: no
+Redistribution evidence: not applicable: build-only package is not distributed
+Review status: identified
+Bundled license path: none
+Notes: Build-only package; no package files are copied into frontend/dist as a standalone dependency.
+
+-------------------------------------------------------------------------------
+Name: ms
+Version: 2.1.3
+Component type: build-tool
+Distributed: no
+License: MIT
+License source: frontend/node_modules/ms/package.json, frontend/node_modules/ms/license.md
+Homepage/source: vercel/ms
+Notice required: no
+Redistribution evidence: not applicable: build-only package is not distributed
+Review status: identified
+Bundled license path: none
+Notes: Build-only package; no package files are copied into frontend/dist as a standalone dependency.
+
+-------------------------------------------------------------------------------
+Name: nanoid
+Version: 3.3.18
+Component type: build-tool
+Distributed: no
+License: MIT
+License source: frontend/node_modules/nanoid/package.json, frontend/node_modules/nanoid/LICENSE
+Homepage/source: ai/nanoid
+Notice required: no
+Redistribution evidence: not applicable: build-only package is not distributed
+Review status: identified
+Bundled license path: none
+Notes: Build-only package; no package files are copied into frontend/dist as a standalone dependency.
+
+-------------------------------------------------------------------------------
+Name: node-releases
+Version: 2.0.54
+Component type: build-tool
+Distributed: no
+License: MIT
+License source: frontend/node_modules/node-releases/package.json, frontend/node_modules/node-releases/LICENSE
+Homepage/source: https://github.com/chicoxyzzy/node-releases.git
+Notice required: no
+Redistribution evidence: not applicable: build-only package is not distributed
+Review status: identified
+Bundled license path: none
+Notes: Build-only package; no package files are copied into frontend/dist as a standalone dependency.
+
+-------------------------------------------------------------------------------
+Name: Node.js
+Version: 22.14.0
+Component type: build-tool
+Distributed: no
+License: MIT plus bundled third-party notices
+License source: runtime/node-dev/LICENSE
+Homepage/source: runtime/node-dev/README.md
+Notice required: no
+Redistribution evidence: not applicable: build-only runtime is not distributed
+Review status: identified
+Bundled license path: none
+Notes: Node/npm are build-only and are intentionally excluded from the release bundle.
+
+-------------------------------------------------------------------------------
+Name: picocolors
+Version: 1.1.1
+Component type: build-tool
+Distributed: no
+License: ISC
+License source: frontend/node_modules/picocolors/package.json, frontend/node_modules/picocolors/LICENSE
+Homepage/source: alexeyraspopov/picocolors
+Notice required: no
+Redistribution evidence: not applicable: build-only package is not distributed
+Review status: identified
+Bundled license path: none
+Notes: Build-only package; no package files are copied into frontend/dist as a standalone dependency.
+
+-------------------------------------------------------------------------------
+Name: postcss
+Version: 8.5.26
+Component type: build-tool
+Distributed: no
+License: MIT
+License source: frontend/node_modules/postcss/package.json, frontend/node_modules/postcss/LICENSE
+Homepage/source: https://postcss.org/
+Notice required: no
+Redistribution evidence: not applicable: build-only package is not distributed
+Review status: identified
+Bundled license path: none
+Notes: Build-only package; no package files are copied into frontend/dist as a standalone dependency.
+
+-------------------------------------------------------------------------------
+Name: react-refresh
+Version: 0.14.2
+Component type: build-tool
+Distributed: no
+License: MIT
+License source: frontend/node_modules/react-refresh/package.json, frontend/node_modules/react-refresh/LICENSE
+Homepage/source: https://reactjs.org/
+Notice required: no
+Redistribution evidence: not applicable: build-only package is not distributed
+Review status: identified
+Bundled license path: none
+Notes: Build-only package; no package files are copied into frontend/dist as a standalone dependency.
+
+-------------------------------------------------------------------------------
+Name: rollup
+Version: 4.63.1
+Component type: build-tool
+Distributed: no
+License: MIT
+License source: frontend/node_modules/rollup/package.json, frontend/node_modules/rollup/LICENSE.md
+Homepage/source: https://rollupjs.org/
+Notice required: no
+Redistribution evidence: not applicable: build-only package is not distributed
+Review status: identified
+Bundled license path: none
+Notes: Build-only package; no package files are copied into frontend/dist as a standalone dependency.
+
+-------------------------------------------------------------------------------
+Name: semver
+Version: 6.3.1
+Component type: build-tool
+Distributed: no
+License: ISC
+License source: frontend/node_modules/semver/package.json, frontend/node_modules/semver/LICENSE
+Homepage/source: https://github.com/npm/node-semver.git
+Notice required: no
+Redistribution evidence: not applicable: build-only package is not distributed
+Review status: identified
+Bundled license path: none
+Notes: Build-only package; no package files are copied into frontend/dist as a standalone dependency.
+
+-------------------------------------------------------------------------------
+Name: source-map-js
+Version: 1.2.1
+Component type: build-tool
+Distributed: no
+License: BSD-3-Clause
+License source: frontend/node_modules/source-map-js/package.json, frontend/node_modules/source-map-js/LICENSE
+Homepage/source: https://github.com/7rulnik/source-map-js
+Notice required: no
+Redistribution evidence: not applicable: build-only package is not distributed
+Review status: identified
+Bundled license path: none
+Notes: Build-only package; no package files are copied into frontend/dist as a standalone dependency.
+
+-------------------------------------------------------------------------------
+Name: typescript
+Version: 5.7.3
+Component type: build-tool
+Distributed: no
+License: Apache-2.0
+License source: frontend/node_modules/typescript/package.json, frontend/node_modules/typescript/LICENSE.txt
+Homepage/source: https://www.typescriptlang.org/
+Notice required: no
+Redistribution evidence: not applicable: build-only package is not distributed
+Review status: identified
+Bundled license path: none
+Notes: Build-only package; no package files are copied into frontend/dist as a standalone dependency.
+
+-------------------------------------------------------------------------------
+Name: update-browserslist-db
+Version: 1.3.2
+Component type: build-tool
+Distributed: no
+License: MIT
+License source: frontend/node_modules/update-browserslist-db/package.json, frontend/node_modules/update-browserslist-db/LICENSE
+Homepage/source: browserslist/update-db
+Notice required: no
+Redistribution evidence: not applicable: build-only package is not distributed
+Review status: identified
+Bundled license path: none
+Notes: Build-only package; no package files are copied into frontend/dist as a standalone dependency.
+
+-------------------------------------------------------------------------------
+Name: vite
+Version: 6.0.7
+Component type: build-tool
+Distributed: no
+License: MIT
+License source: frontend/node_modules/vite/package.json, frontend/node_modules/vite/LICENSE.md
+Homepage/source: https://vite.dev
+Notice required: no
+Redistribution evidence: not applicable: build-only package is not distributed
+Review status: identified
+Bundled license path: none
+Notes: Build-only package; no package files are copied into frontend/dist as a standalone dependency.
+
+-------------------------------------------------------------------------------
+Name: yallist
+Version: 3.1.1
+Component type: build-tool
+Distributed: no
+License: ISC
+License source: frontend/node_modules/yallist/package.json, frontend/node_modules/yallist/LICENSE
+Homepage/source: git+https://github.com/isaacs/yallist.git
+Notice required: no
+Redistribution evidence: not applicable: build-only package is not distributed
+Review status: identified
+Bundled license path: none
+Notes: Build-only package; no package files are copied into frontend/dist as a standalone dependency.
+
+OCR model audit boundary:
+The three PP-OCRv6/mobile ONNX files are audited as model components
+separately from the RapidOCR Python package. Their current local
+manifest records hashes but no upstream license or redistribution
+terms, so each is RELEASE LEGAL REVIEW REQUIRED.
