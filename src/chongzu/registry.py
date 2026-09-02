@@ -594,6 +594,25 @@ class Registry:
         columns = [item[0] for item in cursor.description]
         return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
+    def text_candidates(self, source_root: str) -> list[dict[str, Any]]:
+        """Return supported plain-text files for the deterministic text pass."""
+
+        cursor = self.connection.execute(
+            """
+            SELECT file_id, sha256, source_root, relative_path, business_format,
+                   size_bytes, mtime_ns
+            FROM files
+            WHERE source_root=? AND current_presence_state='present'
+              AND support_status='supported'
+              AND text_candidate=TRUE AND business_format='txt'
+              AND sha256 IS NOT NULL
+            ORDER BY relative_path
+            """,
+            [source_root],
+        )
+        columns = [item[0] for item in cursor.description]
+        return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
     def recover_incomplete_extractions(self, source_root: str) -> int:
         row = self.connection.execute(
             "SELECT COUNT(*) FROM extraction_runs WHERE source_root=? AND status='running'",
@@ -799,6 +818,95 @@ class Registry:
             }
             for item in paths_cursor.fetchall()
         ]
+        result["text_asset_count"] = len(result["text_assets"])
+        table_cursor = self.connection.execute(
+            """
+            SELECT table_id, raw_artifact_path, normalized_artifact_path,
+                   metadata_artifact_path
+            FROM table_assets
+            WHERE extraction_run_id=? AND is_current=TRUE
+            ORDER BY page_number NULLS LAST, table_id
+            """,
+            [result["extraction_run_id"]],
+        )
+        result["table_assets"] = [
+            {
+                "table_id": item[0],
+                "raw_artifact_path": item[1],
+                "normalized_artifact_path": item[2],
+                "metadata_artifact_path": item[3],
+            }
+            for item in table_cursor.fetchall()
+        ]
+        result["artifacts"] = [
+            artifact
+            for asset in result["text_assets"]
+            for artifact in (
+                asset.get("raw_artifact_path"),
+                asset.get("normalized_artifact_path"),
+                asset.get("metadata_artifact_path"),
+            )
+            if artifact
+        ]
+        result["artifacts"].extend(
+            artifact
+            for asset in result["table_assets"]
+            for artifact in (
+                asset.get("raw_artifact_path"),
+                asset.get("normalized_artifact_path"),
+                asset.get("metadata_artifact_path"),
+            )
+            if artifact
+        )
+        return result
+
+    def reusable_text_extraction(self, extraction_identity: str) -> dict[str, Any] | None:
+        """Return one reusable deterministic TXT extraction and its artifacts."""
+
+        cursor = self.connection.execute(
+            """
+            SELECT extraction_run_id, file_id, content_sha256, status,
+                   quality_issue_count, total_bytes, timings_json, warnings_json,
+                   table_count, total_rows
+            FROM extraction_runs
+            WHERE extraction_identity=? AND attempted_route='text_plain'
+              AND status IN ('successful', 'partial')
+            ORDER BY finished_at DESC NULLS LAST, started_at DESC
+            LIMIT 1
+            """,
+            [extraction_identity],
+        )
+        row = cursor.fetchone()
+        if row is None:
+            return None
+        columns = [item[0] for item in cursor.description]
+        result = dict(zip(columns, row))
+        asset_cursor = self.connection.execute(
+            """
+            SELECT text_asset_id, raw_artifact_path, normalized_artifact_path,
+                   metadata_artifact_path
+            FROM text_assets
+            WHERE extraction_run_id=? AND is_current=TRUE
+            """,
+            [result["extraction_run_id"]],
+        )
+        result["text_assets"] = [
+            {
+                "text_asset_id": item[0],
+                "raw_artifact_path": item[1],
+                "normalized_artifact_path": item[2],
+                "metadata_artifact_path": item[3],
+            }
+            for item in asset_cursor.fetchall()
+        ]
+        result["text_asset_count"] = len(result["text_assets"])
+        result["text_chunk_count"] = int(
+            self.connection.execute(
+                "SELECT COUNT(*) FROM text_chunks WHERE text_asset_id IN (SELECT text_asset_id FROM text_assets WHERE extraction_run_id=?)",
+                [result["extraction_run_id"]],
+            ).fetchone()[0]
+            or 0
+        )
         result["artifacts"] = [
             artifact
             for asset in result["text_assets"]
@@ -956,6 +1064,43 @@ class Registry:
                 paths.OCR_CONFIG_VERSION,
                 "ocr_rapidocr",
                 route_reason,
+                json.dumps({extractor: extractor_version}),
+            ],
+        )
+
+    def start_text_extraction(
+        self,
+        *,
+        extraction_run_id: str,
+        extraction_identity: str,
+        source: Any,
+        extractor: str,
+        extractor_version: str,
+        started_at: datetime,
+        force: bool,
+    ) -> None:
+        self.connection.execute(
+            """
+            INSERT INTO extraction_runs(
+                extraction_run_id, file_id, content_sha256, extraction_identity,
+                source_root, source_relative_path, started_at, status, force,
+                pipeline_version, configuration_version, attempted_route,
+                route_reason, extractor_versions_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'running', ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                extraction_run_id,
+                source.file_id,
+                source.content_sha256,
+                extraction_identity,
+                source.source_root,
+                source.relative_path,
+                started_at,
+                force,
+                paths.TEXT_PIPELINE_VERSION,
+                paths.TEXT_CONFIG_VERSION,
+                "text_plain",
+                "supported_txt_text",
                 json.dumps({extractor: extractor_version}),
             ],
         )
@@ -1291,9 +1436,50 @@ class Registry:
                     """,
                     [result.source.file_id, result.extractor, result.source.content_sha256],
                 )
+            # The integrated route owns the image-table extractor even when a
+            # page/image yields zero candidates, so a forced rerun must retire
+            # an older same-route table set rather than leave stale assets.
+            table_extractors = {"img2table-image"}
+            table_extractors.update(asset.extractor for asset in result.table_assets)
+            for table_extractor in table_extractors:
+                owns_new_table_set = result.status == "successful" or (
+                    result.status == "partial" and bool(result.table_assets)
+                )
+                if owns_new_table_set:
+                    connection.execute(
+                        """
+                        UPDATE table_assets SET is_current=FALSE
+                        WHERE file_id=? AND extractor=? AND is_current=TRUE
+                        """,
+                        [result.source.file_id, table_extractor],
+                    )
+                elif result.status == "partial":
+                    # Keep a prior same-content candidate visible when OCR
+                    # text succeeded but the image table adapter failed
+                    # before publishing any replacement table. Changed
+                    # content is still retired so stale assets cannot look
+                    # current for the new source SHA.
+                    connection.execute(
+                        """
+                        UPDATE table_assets SET is_current=FALSE
+                        WHERE file_id=? AND extractor=? AND content_sha256<>? AND is_current=TRUE
+                        """,
+                        [result.source.file_id, table_extractor, result.source.content_sha256],
+                    )
+                elif result.status == "failed":
+                    connection.execute(
+                        """
+                        UPDATE table_assets SET is_current=FALSE
+                        WHERE file_id=? AND extractor=? AND content_sha256<>? AND is_current=TRUE
+                        """,
+                        [result.source.file_id, table_extractor, result.source.content_sha256],
+                    )
             warnings_payload = {
                 "warnings": result.warnings,
                 "ocr_targets": result.ocr_targets,
+                "image_table_extractor": "img2table-image",
+                "image_table_extractor_version": f"{paths.IMG2TABLE_VERSION}+ocrdata-v1",
+                "ocr_reused_by_image_table": True,
             }
             connection.execute(
                 """
@@ -1323,9 +1509,204 @@ class Registry:
                     result.route_reason,
                     json.dumps(result.timings.as_dict(), ensure_ascii=False, default=str),
                     json.dumps(warnings_payload, ensure_ascii=False, default=str),
+                    json.dumps(
+                        {
+                            result.extractor: result.extractor_version,
+                            "img2table-image": f"{paths.IMG2TABLE_VERSION}+ocrdata-v1",
+                        }
+                    ),
+                    len(result.table_assets),
+                    result.target_count,
+                    len(result.issues),
+                    result.total_rows,
+                    result.source.size_bytes,
+                    result.error_category,
+                    result.error_message,
+                ],
+            )
+            for asset in result.table_assets:
+                connection.execute(
+                    """
+                    INSERT OR REPLACE INTO table_assets(
+                        table_id, file_id, content_sha256, extraction_run_id, extractor,
+                        extractor_version, source_kind, source_relative_path, sheet_name,
+                        page_number, bbox_json, source_row_start, source_row_end,
+                        source_column_start, source_column_end, row_count, column_count,
+                        columns_json, raw_artifact_path, normalized_artifact_path,
+                        metadata_artifact_path, extraction_confidence, quality_status,
+                        created_at, is_current
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE)
+                    """,
+                    [
+                        asset.table_id,
+                        asset.file_id,
+                        asset.content_sha256,
+                        asset.extraction_run_id,
+                        asset.extractor,
+                        asset.extractor_version,
+                        asset.source_kind.value,
+                        asset.source_relative_path,
+                        asset.sheet_name,
+                        asset.page_number,
+                        json.dumps(asset.bbox.__dict__) if asset.bbox else None,
+                        asset.source_row_start,
+                        asset.source_row_end,
+                        asset.source_column_start,
+                        asset.source_column_end,
+                        asset.row_count,
+                        asset.column_count,
+                        json.dumps(asset.columns, ensure_ascii=False),
+                        asset.raw_artifact_path,
+                        asset.normalized_artifact_path,
+                        asset.metadata_artifact_path,
+                        asset.extraction_confidence,
+                        asset.quality_status.value,
+                        asset.created_at.replace(tzinfo=None),
+                    ],
+                )
+            for asset in result.text_assets:
+                connection.execute(
+                    """
+                    INSERT OR REPLACE INTO text_assets(
+                        text_asset_id, file_id, content_sha256, extraction_run_id,
+                        extractor, extractor_version, source_kind, page_number, section,
+                        bbox_json, text, language, created_at, source_relative_path,
+                        raw_artifact_path, normalized_artifact_path, metadata_artifact_path,
+                        is_current
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE)
+                    """,
+                    [
+                        asset.text_asset_id,
+                        asset.file_id,
+                        asset.content_sha256,
+                        asset.extraction_run_id,
+                        asset.extractor,
+                        asset.extractor_version,
+                        asset.source_kind.value,
+                        asset.page_number,
+                        asset.section,
+                        json.dumps(asset.bbox.__dict__) if asset.bbox else None,
+                        asset.text,
+                        asset.language,
+                        asset.created_at.replace(tzinfo=None),
+                        asset.source_relative_path,
+                        asset.raw_artifact_path,
+                        asset.normalized_artifact_path,
+                        asset.metadata_artifact_path,
+                    ],
+                )
+            for chunk in result.text_chunks:
+                connection.execute(
+                    """
+                    INSERT OR REPLACE INTO text_chunks(
+                        chunk_id, text_asset_id, file_id, chunk_index, text,
+                        char_start, char_end, provenance_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    [
+                        chunk.chunk_id,
+                        chunk.text_asset_id,
+                        chunk.file_id,
+                        chunk.chunk_index,
+                        chunk.text,
+                        chunk.char_start,
+                        chunk.char_end,
+                        json.dumps(chunk.provenance.__dict__, ensure_ascii=False, default=str),
+                    ],
+                )
+            for issue in result.issues:
+                connection.execute(
+                    """
+                    INSERT INTO quality_issues(
+                        issue_id, extraction_run_id, asset_id, severity, issue_type,
+                        description, evidence_json, detected_by, suggested_action,
+                        status, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(issue_id) DO UPDATE SET
+                        extraction_run_id=excluded.extraction_run_id,
+                        evidence_json=excluded.evidence_json,
+                        description=excluded.description
+                    """,
+                    [
+                        issue.issue_id,
+                        result.extraction_run_id,
+                        issue.asset_id,
+                        issue.severity.value,
+                        issue.issue_type,
+                        issue.description,
+                        json.dumps(issue.evidence, ensure_ascii=False, default=str),
+                        issue.detected_by,
+                        issue.suggested_action,
+                        issue.status.value,
+                        finished_at,
+                    ],
+                )
+            connection.execute("COMMIT")
+        except Exception:
+            connection.execute("ROLLBACK")
+            raise
+
+    def record_text_result(
+        self,
+        result: Any,
+        *,
+        started_at: datetime,
+        finished_at: datetime,
+        force: bool,
+    ) -> None:
+        """Persist one deterministic plain-text result through the writer."""
+
+        connection = self.connection
+        connection.execute("BEGIN TRANSACTION")
+        try:
+            if result.status in {"successful", "partial"}:
+                connection.execute(
+                    """
+                    UPDATE text_assets SET is_current=FALSE
+                    WHERE file_id=? AND extractor=? AND is_current=TRUE
+                    """,
+                    [result.source.file_id, result.extractor],
+                )
+            elif result.status == "failed":
+                connection.execute(
+                    """
+                    UPDATE text_assets SET is_current=FALSE
+                    WHERE file_id=? AND extractor=? AND content_sha256<>? AND is_current=TRUE
+                    """,
+                    [result.source.file_id, result.extractor, result.source.content_sha256],
+                )
+            warnings_payload = {"warnings": result.warnings}
+            connection.execute(
+                """
+                INSERT OR REPLACE INTO extraction_runs(
+                    extraction_run_id, file_id, content_sha256, extraction_identity,
+                    source_root, source_relative_path, started_at, finished_at, status,
+                    force, pipeline_version, configuration_version, attempted_route,
+                    route_reason, timings_json, warnings_json, extractor_versions_json,
+                    table_count, sheet_count, quality_issue_count, total_rows, total_bytes,
+                    error_category, error_message
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    result.extraction_run_id,
+                    result.source.file_id,
+                    result.source.content_sha256,
+                    result.extraction_identity,
+                    result.source.source_root,
+                    result.source.relative_path,
+                    started_at,
+                    finished_at,
+                    result.status,
+                    force,
+                    paths.TEXT_PIPELINE_VERSION,
+                    paths.TEXT_CONFIG_VERSION,
+                    "text_plain",
+                    "supported_txt_text",
+                    json.dumps(result.timings.as_dict(), ensure_ascii=False, default=str),
+                    json.dumps(warnings_payload, ensure_ascii=False, default=str),
                     json.dumps({result.extractor: result.extractor_version}),
                     0,
-                    result.target_count,
+                    0,
                     len(result.issues),
                     0,
                     result.source.size_bytes,

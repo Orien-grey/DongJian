@@ -89,12 +89,24 @@ limitation is recorded rather than guessed.
 | `normalized_artifact_path` | `str | None` | Workspace-relative deterministic normalized text artifact. |
 | `metadata_artifact_path` | `str | None` | Workspace-relative block/page provenance metadata. |
 
-Phase 5A OCR TextAssets use `source_kind=image` for standalone images and
+Phase 5A/5B OCR TextAssets use `source_kind=image` for standalone images and
 `source_kind=page` for rendered scanned PDF pages. Their metadata artifact
-stores ordered OCR blocks, pixel/PDF-point coordinate space, and per-block
-confidence when available. The `extractor` value is `rapidocr-onnx`, so these
-rows remain independent from native `pymupdf-native-text` rows for the same
-file/page.
+stores ordered `OCRBlock` records, pixel/PDF-point coordinate space, and
+per-block confidence when available. `OCRBlock` is the stable internal
+contract (`text`, `bbox`, `confidence`, page/image, block index, extractor, and
+version); RapidOCR's raw return shape is not persisted as a business contract.
+The `extractor` value is `rapidocr-onnx`, so these rows remain independent from
+native `pymupdf-native-text` rows for the same file/page.
+
+Phase 5B image/scanned-page TableAssets use the same fields and artifact paths
+as structured and native PDF candidates. Their extractor is
+`img2table-image`, their `source_kind` is `image` or `page`, and their metadata
+records the image/PDF bbox, OCR block indexes, `ocr_reused=true`, and
+`ocr_backend_calls=0`. A single image/page may therefore publish both one or
+more TextAssets and zero or more TableAssets. Candidate quality signals are
+stored as `QualityIssue` rows and `quality_status`; they do not replace raw or
+normalized Parquet. `possible_table_candidate` is a weak heuristic hint, not
+ground truth.
 
 ## TextChunk
 

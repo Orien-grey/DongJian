@@ -16,6 +16,11 @@ a table, and a footer therefore keeps its page/block `TextAsset` and
 `TextChunk` records while also publishing one `TableAsset` per detected table.
 There is no exclusive table-versus-text branch.
 
+`possible_table_candidate` from the PDF profile is only a weak heuristic
+routing hint (`heuristic_hint_not_ground_truth`), not evidence that a real table
+exists. The native candidate must still produce a concrete table structure
+before a `TableAsset` is published.
+
 ## Operator commands
 
 ```text
@@ -44,6 +49,7 @@ The stored Phase 4A profile is the source of truth:
 
 The table route never reimplements scan heuristics and never turns a weak
 `possible_table_candidate` profile hint into a TableAsset by itself.
+Candidate metadata carries the same weak-hint semantics.
 
 ## Asset and artifact contract
 
@@ -103,8 +109,9 @@ and bundle-size increase. The result must be one of:
   later measured route;
 - **REMOVE** — its benefit does not justify its native runtime cost.
 
-GMFT and Docling remain future Phase 6 benchmark candidates. RapidOCR and other
-OCR engines belong to Phase 5 and are not installed here. Semantic naming,
+GMFT and Docling are not part of the next phase and are not installed here.
+RapidOCR image/scanned-page integration is handled by Phase 5B, not this
+native-text candidate. Semantic naming,
 classification, field interpretation, summaries, and complex quality judgments
 remain a later provider-neutral DeepSeek/Qwen layer and cannot overwrite raw or
 normalized artifacts.

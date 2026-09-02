@@ -140,40 +140,31 @@ human table ground truth remains pending.
 
 Acceptance: images and scanned pages emit traceable OCR TextAssets/TextChunks
 and block evidence with coordinates, confidence, model/version, and source
-provenance. OCR-to-table integration remains a separate Phase 5B benchmark.
+provenance. OCR-to-table integration is implemented in Phase 5B.
 
-## Phase 5B - OCR/table integration benchmark
+## Phase 5B - Image/scanned-PDF dual extraction and unified pipeline
 
-- Benchmark OCR blocks as input evidence for the existing table candidate on
-  representative scanned pages.
-- Keep OCR text and table extraction independently reusable and separately
-  reviewable; do not assume a screenshot is only a table.
+- Status: implementation complete for this round; changes remain intentionally
+  uncommitted for review.
+- Reuse one RapidOCR pass as the internal `OCRBlock` evidence contract for
+  TextAssets and the `img2table==2.0.0` image adapter.
+- Route JPG/JPEG/PNG and scanned PDF pages to independent text and table
+  outputs. Mixed PDFs remain page-local: native pages use PyMuPDF and scanned
+  pages use render plus OCR.
+- Publish image/scanned-page tables through the shared `TableAsset` contract,
+  apply only conservative mechanical quality signals, and retain weak table
+  candidate hints as routing evidence rather than truth.
+- Provide `chongzu extract SOURCE`, one-scan orchestration, incremental reuse,
+  per-file isolation, offline/network guards, and a unified summary.
+- Compare a small selection of Phase 4C rendered pages with the image route for
+  count/shape/cell-overlap consistency only. Native candidate output is not
+  ground truth and cannot establish accuracy.
 
-## Phase 6 - Complex table benchmark
+Acceptance: synthetic images, mixed/scanned PDFs, unsupported files, relocation,
+failure isolation, source SHA invariants, and offline reuse are verified. No
+GMFT, Docling, LLM, embedding, or frontend work is included.
 
-- Compare img2table, GMFT, and Docling on the actual corpus's difficult tables.
-- Score structure fidelity, merged/multi-row headers, false positives, runtime,
-  memory, bundle size, portability, and offline artifact requirements.
-- Retain only heavy components whose measured benefit justifies their cost.
-- Keep GMFT/Docling behind explicit evidence-based escalation gates.
-
-Acceptance: the selected complex-table path has reproducible superiority on
-defined cases; no heavy candidate becomes a universal/default route.
-
-## Phase 7 - Qwen semantic enrichment
-
-- Implement a provider adapter for a user-configured OpenAI-compatible base URL.
-- Target Qwen3.6-35B-A3B initially while keeping model selection configurable.
-- Generate naming, category, descriptions, semantic field mappings, summaries,
-  quality suggestions, and optional difficult visual-review results.
-- Version prompts, validate structured responses, redact secrets, isolate
-  request failures, and prohibit automatic public fallback.
-- Never allow model output to overwrite raw or normalized extraction.
-
-Acceptance: semantic metadata and review issues are reproducible/auditable,
-optional, and separable from core extraction correctness.
-
-## Phase 8 - Cleaning and Data Catalog
+## Phase 6 - Deterministic Cleaning and Data Catalog
 
 - Implement deterministic Unicode/null/row/column/type/name normalization.
 - Add profiling, reversible cleaning operations, issue detection, and human
@@ -184,29 +175,55 @@ optional, and separable from core extraction correctness.
 
 Acceptance: every transformation is traceable and raw assets remain immutable.
 
-## Phase 9 - Local frontend
+## Phase 7 - LLM Semantic Enrichment
 
-- Implement Overview, Data Catalog, Asset Detail, Quality Review, and initial
-  Search/Analysis surfaces described in `UI_ARCHITECTURE.md`.
-- Support raw-versus-extracted comparison and human confirmation of AI advice.
+- Implement a provider adapter only for a user-configured OpenAI-compatible
+  base URL after explicit configuration and explicit test authorization.
+- Keep model selection configuration-driven; Qwen3.6-35B-A3B is the expected
+  company service and DeepSeek is development-only when explicitly authorized.
+- Generate naming, category, descriptions, semantic field mappings, summaries,
+  quality suggestions, and optional difficult visual-review results.
+- Version prompts, validate structured responses, redact secrets, isolate
+  request failures, and prohibit public endpoint fallback.
+- Never allow model output to overwrite raw or normalized extraction.
+
+Acceptance: semantic metadata and review issues are reproducible/auditable,
+optional, and separable from core extraction correctness.
+
+## Phase 8 - Local Frontend
+
+- Implement Overview, Data Catalog, Asset Detail, and Quality Review surfaces
+  described in `UI_ARCHITECTURE.md`.
+- Support raw-versus-extracted comparison and human confirmation of semantic
+  advice.
 - Keep the frontend local, relocatable, and independent of a database service.
 
 Acceptance: users can inspect provenance and review suggestions without direct
 database manipulation or source-file mutation.
 
-## Phase 10 - Search, SQL, and text retrieval
+## Phase 9 - Search, SQL, and Text Retrieval
 
 - Add structured catalog selection and validated read-only DuckDB SQL.
 - Add deterministic keyword retrieval over TextChunks.
 - Evaluate a user-supplied embedding service only after its contract is known;
   add vector retrieval without making it a core correctness dependency.
-- Combine retrieved evidence with configured Qwen answers and citations back to
-  assets/chunks.
+- Combine retrieved evidence with configured semantic answers and citations
+  back to assets/chunks.
 
 Acceptance: structured and text answers are read-only, evidence-linked, and
 safe against unrestricted generated SQL.
 
-## Release - Full offline Windows bundle
+## Phase 10 - End-to-End Acceptance
+
+- Exercise the complete supported-format matrix on the representative project.
+- Verify incremental reruns, interruption recovery, failure isolation,
+  relocation, source immutability, network policy, license/integrity manifests,
+  and operator-facing summaries.
+- Freeze release evidence and document known limitations before packaging.
+
+Acceptance: all release gates are reproducible from a clean copied bundle.
+
+## Release - Offline Windows Bundle
 
 - Benchmark the representative approximately 1,500-file project and tune
   bounded queues/resource limits.

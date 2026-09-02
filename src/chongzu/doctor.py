@@ -507,6 +507,19 @@ def _check_optional_tools(report: DoctorReport) -> None:
     # Keep the Phase 2 diagnostic label for scripts that grep historical
     # doctor output; the authoritative Phase 5 checks above are PASS/FAIL.
     report.add("OCR/RapidOCR", "INFO", "RapidOCR is provisioned; see RapidOCR, ONNX Runtime, and OCR models checks")
+    llm_config_files = [
+        path
+        for path in (paths.PROJECT_ROOT / "config").glob("llm*.json")
+        if path.name.casefold() != "llm.example.json"
+    ]
+    if llm_config_files:
+        report.add(
+            "LLM STATUS",
+            "INFO",
+            "CONFIGURED FILE PRESENT; calls remain disabled until explicit user authorization",
+        )
+    else:
+        report.add("LLM STATUS", "INFO", "NOT CONFIGURED")
 
 
 def run_checks() -> DoctorReport:

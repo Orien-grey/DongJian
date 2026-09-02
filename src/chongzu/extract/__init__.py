@@ -10,6 +10,8 @@ from .pdf import (
 )
 from .structured import StructuredExtractionError, extract_structured
 from .ocr import OCRExtractionError, OCRExtractionSummary, extract_ocr
+from .text import TextExtractionError, TextExtractionSummary, extract_text
+from .unified import UnifiedExtractionError, UnifiedExtractionSummary, extract_unified
 
 __all__ = [
     "PDFExtractionError",
@@ -23,4 +25,10 @@ __all__ = [
     "OCRExtractionError",
     "OCRExtractionSummary",
     "extract_ocr",
+    "TextExtractionError",
+    "TextExtractionSummary",
+    "extract_text",
+    "UnifiedExtractionError",
+    "UnifiedExtractionSummary",
+    "extract_unified",
 ]

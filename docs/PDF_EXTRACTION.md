@@ -14,8 +14,9 @@ The coordinator automatically performs an incremental scan, selects supported
 .\chongzu.cmd benchmark pdf-table "D:\Research Project" [--workers 1..4] [--force] [--ground-truth reference.json]
 ```
 
-The explicit `pdf` and `pdf-table` subcommands are intentional while the
-unified extractor CLI is being built. Unsupported files and
+The explicit `pdf` and `pdf-table` subcommands remain available as expert
+routes. The formal user entry point is `extract SOURCE`, which coordinates all
+applicable routes. Unsupported files and
 supported-but-not-yet-implemented image or Office routes remain in the Registry
 and are not treated as PDF failures. `pdf-table` is the Phase 4B img2table
 candidate and never enables OCR.
@@ -56,7 +57,8 @@ Each PDF receives a profile artifact with `profile_version`, `page_count`,
 
 `page_number`, width/height, rotation, total/effective characters, text-block and
 image counts, text/image area coverage estimates, drawing/grid-line counts,
-native-text/scanned/table-candidate booleans, and reason codes.
+native-text/scanned/table-candidate booleans, and reason codes. The profile also
+labels table candidates as `heuristic_hint_not_ground_truth`.
 
 The classification is deliberately conservative:
 
@@ -67,8 +69,8 @@ The classification is deliberately conservative:
 - `unknown`: no native text without enough image evidence to assert a scan.
 
 Text scarcity alone never declares a scan. `possible_table_candidate` uses only
-aligned short text blocks and/or several drawing lines; it is not a table
-extractor and cannot create a `TableAsset`.
+aligned short text blocks and/or several drawing lines; it is a weak routing
+hint, not a table extractor or ground truth, and cannot create a `TableAsset`.
 
 ## Artifacts and provenance
 
@@ -107,14 +109,14 @@ Native PDF text and candidate table extraction are independent cache identities.
 An unchanged PyMuPDF result can be reused while a changed img2table/config
 identity is rerun, and vice versa. `--force` applies to the selected route.
 Image-only/suspected-scanned pages are recorded as `deferred_to_ocr` by the
-native table candidate; Phase 5A can later route the same profile-selected
-pages to the independent local RapidOCR extractor. The candidate's synthetic
-ground-truth scores do not stand in for a real-corpus quality decision.
+native table candidate; Phase 5B routes the same profile-selected pages to the
+local RapidOCR plus image-table adapter. The candidate's synthetic or rendered
+page consistency scores do not stand in for a real-corpus quality decision.
 
 ## Known limitations
 
-- OCR is a separate Phase 5A route. Native PDF table detection remains a
-  separate Phase 4B candidate and is intentionally not final/default yet.
+- OCR is a Phase 5A/5B route. Native PDF table detection remains a separate
+  Phase 4B candidate and is intentionally not final/default yet.
 - Built-in block text is not a semantic section/header interpretation.
 - Page coverage estimates are bounding-box signals, not pixel-accurate unions.
 - CJK/font encoding quality depends on the source PDF's embedded ToUnicode maps.

@@ -40,6 +40,7 @@ from ..artifacts import (
     write_parquet_atomic,
 )
 from ..models import StructuredSource
+from .profiling import TABLE_CANDIDATE_SEMANTICS
 from .table_quality import DetectedTable
 
 
@@ -201,7 +202,7 @@ def _issue(
         "possible_column_shift": "Review ragged rows and cell alignment against the source page.",
         "multiple_tables_on_page": "Review each table boundary independently.",
         "empty_detected_table": "Verify the candidate region and table detector output.",
-        "deferred_to_ocr": "Queue the page for a future OCR benchmark; do not treat this as extraction failure.",
+        "deferred_to_ocr": "Queue the page for the Phase 5B OCR/image route; do not treat this as extraction failure.",
         "table_extractor_error": "Review the candidate dependency/runtime error and preserve the source PDF.",
     }.get(issue_type, "Review the candidate table against the source PDF.")
     return QualityIssue(
@@ -292,6 +293,7 @@ def _write_table(
         "contract_version": paths.PDF_TABLE_CONFIG_VERSION,
         "table_id": table_id,
         "candidate_status": "candidate",
+        "candidate_semantics": TABLE_CANDIDATE_SEMANTICS,
         "file_id": source.file_id,
         "content_sha256": source.content_sha256,
         "source_relative_path": source.relative_path,

@@ -17,13 +17,16 @@ from .extract import (
     PDFTableExtractionError,
     StructuredExtractionError,
     OCRExtractionError,
+    UnifiedExtractionError,
     extract_pdf,
     extract_pdf_tables,
     extract_structured,
     extract_ocr,
+    extract_unified,
 )
 from .extract.pdf.table_quality import load_ground_truth
 from .benchmark.pdf_real import run_real_pdf_benchmark
+from .benchmark.ocr_consistency import run_rendered_page_consistency
 
 
 def _print_summary(summary) -> None:
@@ -73,6 +76,12 @@ def _build_parser() -> argparse.ArgumentParser:
     extract_ocr_parser.add_argument("source", type=Path)
     extract_ocr_parser.add_argument("--workers", type=int, default=None)
     extract_ocr_parser.add_argument("--force", action="store_true")
+    extract_unified_parser = extract_sub.add_parser(
+        "unified", help="formal dual table/text extraction pipeline"
+    )
+    extract_unified_parser.add_argument("source", type=Path)
+    extract_unified_parser.add_argument("--workers", type=int, default=None)
+    extract_unified_parser.add_argument("--force", action="store_true")
 
     registry_parser = sub.add_parser("registry", help="inspect the local DuckDB registry")
     registry_sub = registry_parser.add_subparsers(dest="registry_command", required=True)
@@ -112,6 +121,13 @@ def _build_parser() -> argparse.ArgumentParser:
     benchmark_pdf_real.add_argument("--max-samples", type=int, default=80)
     benchmark_pdf_real.add_argument("--max-negative-samples", type=int, default=20)
     benchmark_pdf_real.add_argument("--force", action="store_true")
+    benchmark_pdf_consistency = benchmark_sub.add_parser(
+        "pdf-consistency", help="compare rendered PDF pages with the offline image route"
+    )
+    benchmark_pdf_consistency.add_argument("review_root", type=Path, nargs="?", default=None)
+    benchmark_pdf_consistency.add_argument("--max-pages", type=int, default=12)
+    benchmark_pdf_consistency.add_argument("--workers", type=int, default=1)
+    benchmark_pdf_consistency.add_argument("--force", action="store_true")
     benchmark_ocr = benchmark_sub.add_parser("ocr", help="benchmark offline RapidOCR image/scanned-page extraction")
     benchmark_ocr.add_argument("source", type=Path)
     benchmark_ocr.add_argument("--workers", type=int, default=None)
@@ -187,6 +203,9 @@ def _print_ocr_summary(summary) -> None:
     print(f"Targets: {summary.targets}")
     print(f"Pages OCRed: {summary.pages_ocred}")
     print(f"Text assets produced: {summary.text_assets_produced}")
+    print(f"Table assets produced: {summary.table_assets_produced}")
+    print(f"Image table extraction failures: {summary.image_table_extraction_failures}")
+    print(f"RapidOCR calls: {summary.image_table_ocr_calls}")
     print(f"OCR chars: {summary.ocr_chars}")
     print(f"Deferred to profile: {summary.deferred_to_profile}")
     print(f"Quality issues: {summary.quality_issues}")
@@ -194,10 +213,36 @@ def _print_ocr_summary(summary) -> None:
     print(f"Elapsed: {summary.wall_time_ms:.2f} ms")
 
 
+def _print_unified_summary(summary) -> None:
+    print(f"Run: {summary.run_id}")
+    print(f"Source: {summary.source_root}")
+    print(f"Files discovered: {summary.files_discovered}")
+    print(f"Supported: {summary.supported}")
+    print(f"Unsupported: {summary.unsupported}")
+    print(f"Processed: {summary.processed}")
+    print(f"Reused: {summary.reused}")
+    print(f"Failed: {summary.failed}")
+    print(f"TableAssets: {summary.table_assets}")
+    print(f"TextAssets: {summary.text_assets}")
+    print(f"TextChunks: {summary.text_chunks}")
+    print(f"QualityIssues: {summary.quality_issues}")
+    print(f"Structured files: {summary.structured_files}")
+    print(f"Native PDF pages: {summary.native_pdf_pages}")
+    print(f"OCR pages/images: {summary.ocr_pages_images}")
+    print(f"Deferred: {summary.deferred}")
+    print(f"Wall time: {summary.wall_time_ms:.2f} ms")
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Dispatch diagnostics, registry inspection, and extraction commands."""
 
     args = list(sys.argv[1:] if argv is None else argv)
+    # ``extract SOURCE`` is the formal user entry point.  The existing named
+    # subcommands remain expert/debug routes, so normalize only an unknown
+    # second token into the explicit parser branch.
+    expert_extract_commands = {"structured", "pdf", "pdf-table", "ocr", "unified"}
+    if len(args) >= 2 and args[0] == "extract" and args[1] not in expert_extract_commands and not args[1].startswith("-"):
+        args = ["extract", "unified", *args[1:]]
     parser = _build_parser()
     parsed = parser.parse_args(args)
     try:
@@ -228,6 +273,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             summary = extract_ocr(parsed.source, workers=parsed.workers, force=parsed.force)
             _print_ocr_summary(summary)
             return 0 if summary.failures == 0 else 0
+        if parsed.command == "extract" and parsed.extract_command == "unified":
+            summary = extract_unified(parsed.source, workers=parsed.workers, force=parsed.force)
+            _print_unified_summary(summary)
+            return 0
         if parsed.command == "benchmark" and parsed.benchmark_command == "scan":
             summary = scan_source(parsed.source, workers=parsed.workers, rehash=parsed.rehash)
             _print_summary(summary)
@@ -283,6 +332,29 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"Review CSV: {result.review_path}")
             print(f"Report: {result.report_path}")
             return 0
+        if parsed.command == "benchmark" and parsed.benchmark_command == "pdf-consistency":
+            result = run_rendered_page_consistency(
+                parsed.review_root if parsed.review_root is not None else None,
+                max_pages=parsed.max_pages,
+                workers=parsed.workers,
+                force=parsed.force,
+            )
+            print("Comparison: rendered native PDF pages treated as simulated scan inputs")
+            print("Accuracy claim: none; native output is a weak reference only")
+            print(f"Selected pages: {result.selected_pages}")
+            print(f"Native candidate pages: {result.native_candidate_pages}")
+            print(f"Native negative pages: {result.native_negative_pages}")
+            print(f"OCR text assets: {result.ocr_summary.text_assets_produced}")
+            print(f"Image table assets: {result.ocr_summary.table_assets_produced}")
+            print(f"Table-count-consistent pages: {result.table_count_consistent_pages}")
+            print(f"Shape-consistent tables: {result.shape_consistent_tables}")
+            print(f"Normalized cell overlap ratio: {result.normalized_cell_overlap_ratio:.4f}")
+            print(f"Source unchanged: {result.source_unchanged}")
+            print(f"First-pass wall time: {result.first_run_metrics.get('wall clock ms', 'unavailable')} ms")
+            print(f"Reuse-pass wall time: {result.reuse_run_metrics.get('wall clock ms', 'unavailable')} ms")
+            print(f"Wall time: {result.ocr_summary.wall_time_ms:.2f} ms")
+            print(f"Report: {result.report_path}")
+            return 0
         if parsed.command == "benchmark" and parsed.benchmark_command == "ocr":
             summary = extract_ocr(parsed.source, workers=parsed.workers, force=parsed.force)
             _print_ocr_summary(summary)
@@ -313,6 +385,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         PDFExtractionError,
         PDFTableExtractionError,
         OCRExtractionError,
+        UnifiedExtractionError,
         RegistryError,
         ValueError,
         OSError,

@@ -6,6 +6,7 @@ PDF or native table extractors:
 ```text
 JPG/JPEG/PNG --------------------> RapidOCR + ONNX Runtime -> TextAsset/TextChunk
 PDF -> Phase 4A profile -> scanned page -> PyMuPDF render -> RapidOCR -> TextAsset
+                                                        \-> img2table adapter -> TableAsset
 ```
 
 The source file remains read-only. OCR writes the same workspace-contained raw,
@@ -13,8 +14,10 @@ normalized, and metadata text artifacts used by native PDF extraction. Each
 asset records the source file, SHA-256, image/page, extractor/version, run ID,
 relative path, bounding boxes, and per-block confidence when the engine
 returns it. Image coordinates are pixels; PDF coordinates are mapped back to
-PDF points. OCR text never replaces a native `pymupdf-native-text` asset and
-does not imply a `TableAsset`.
+PDF points. OCR text never replaces a native `pymupdf-native-text` asset.
+Phase 5B consumes the same internal `OCRBlock` values for an independent
+image/scanned-page table candidate; an image/page can publish text and zero or
+more tables.
 
 ## Offline runtime contract
 
@@ -75,11 +78,33 @@ intra/inter-op thread per worker. DuckDB writes are centralized in the parent
 process. Rendering, OCR, artifact, registry, and total wall-clock timings are
 recorded per run.
 
+## Phase 5B table integration
+
+`img2table==2.0.0` exposes a RapidOCR backend, but the direct backend would
+repeat OCR. The Phase 5B adapter converts the stable `OCRBlock` contract into
+img2table `OCRData`, passes it to the same decoded image, and calls the table
+extractor with `ocr=None`. Metadata and warnings record
+`ocr_reused=true` and `ocr_backend_calls=0`. OCR text remains publishable if
+table reconstruction fails.
+
+Image/scanned-page tables use the common `TableAsset` contract and write
+`raw.parquet`, `normalized.parquet`, and `metadata.json`. Conservative quality
+signals include low confidence, sparse OCR, suspicious one-row/one-column
+shapes, likely column shifts, header loss, merged-cell evidence, and long
+paragraph cells. They create review status/issues only; a candidate is not
+silently deleted.
+
+The PDF profile remains the routing source of truth. Only pages without
+reliable native text are rendered/OCR'd, so a mixed PDF is processed page by
+page rather than OCR'd wholesale. The formal user command is
+`chongzu extract SOURCE`; see [UNIFIED_EXTRACTION.md](UNIFIED_EXTRACTION.md).
+
 ## Commands
 
 ```text
 .\chongzu.cmd extract ocr "D:\Research Data\Project" --workers 2
 .\chongzu.cmd benchmark ocr "D:\Research Data\Project" --workers 2
+.\chongzu.cmd extract "D:\Research Data\Project" --workers 2
 ```
 
 The command automatically performs an incremental Registry scan and establishes
@@ -88,10 +113,7 @@ isolated in the Registry; one bad image or page does not terminate the batch.
 
 ## Known limitations and next step
 
-RapidOCR returns text blocks, not a guaranteed table structure. OCR table text
-is retained as evidence and a future table candidate may consume its blocks;
-complex table reconstruction is deliberately deferred. CJK accuracy depends on
-the bundled model and source resolution. Confidence is only reported when the
-engine returns a score and is not treated as ground truth. Phase 5A's real
-corpus smoke run is limited to a small number of profile-selected scanned pages;
-full corpus OCR and Phase 5B table integration require explicit review.
+RapidOCR returns text blocks, not a guaranteed table structure. The Phase 5B
+image adapter is still a candidate route: CJK accuracy, table boundaries,
+merged cells, and borderless layouts require review. Confidence is only
+reported when the engine returns a score and is not treated as ground truth.

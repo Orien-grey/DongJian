@@ -76,6 +76,12 @@ Bulk table cells will be Parquet-first. DuckDB stores catalog metadata,
 provenance, processing/query state, and directly queries Parquet rather than
 duplicating every large table cell in catalog rows.
 
+Phase 5B image/scanned-page rows use the same catalog tables as every other
+route. `img2table-image` TableAssets are current independently from
+`rapidocr-onnx` TextAssets; both can reference the same file and page. OCR
+warnings record the stable `OCRBlock` contract and whether OCR was reused by
+the table adapter. No OCR-specific table schema is introduced.
+
 ## Incremental scan semantics
 
 The first scan streams SHA-256 for every readable regular file. Later scans may
@@ -109,6 +115,13 @@ artifacts.
 Missing artifacts invalidate reuse. `--force` bypasses reuse. A changed file or
 changed extractor/config version creates another run; reuse never depends on a
 filename or AI-generated display name.
+
+The formal `extract SOURCE` coordinator shares one scan result with all
+applicable routes. Structured, native PDF, native PDF-table, OCR/image-table,
+and TXT identities remain separate, so reuse is stage-local and a failure in
+one route does not erase an independent asset type. A unified summary reports
+file counts plus current catalog TableAsset/TextAsset/TextChunk and issue
+counts.
 
 ## Lightweight detection versus business support
 

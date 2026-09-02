@@ -8,6 +8,13 @@ from .rapidocr_engine import (
     validate_ocr_models,
 )
 from .runner import OCRExtractionError, OCRExtractionSummary, extract_ocr
+from .img2table_adapter import (
+    IMAGE_TABLE_EXTRACTOR,
+    IMAGE_TABLE_EXTRACTOR_VERSION,
+    ImageTableAdapterError,
+    ImageTableConfig,
+    ocr_data_from_blocks,
+)
 
 __all__ = [
     "OCRBlock",
@@ -18,4 +25,9 @@ __all__ = [
     "OCRExtractionError",
     "OCRExtractionSummary",
     "extract_ocr",
+    "IMAGE_TABLE_EXTRACTOR",
+    "IMAGE_TABLE_EXTRACTOR_VERSION",
+    "ImageTableAdapterError",
+    "ImageTableConfig",
+    "ocr_data_from_blocks",
 ]

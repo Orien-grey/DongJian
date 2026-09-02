@@ -33,7 +33,13 @@ from chongzu.assets import (
 from ..models import StructuredSource
 from .artifacts import profile_target, workspace_relative, write_json_atomic, write_text_asset
 from .blocks import chunk_text, extract_text_blocks, image_info_bboxes, normalize_text
-from .profiling import PDFProfile, PageProfile, build_pdf_profile, profile_page
+from .profiling import (
+    TABLE_CANDIDATE_SEMANTICS,
+    PDFProfile,
+    PageProfile,
+    build_pdf_profile,
+    profile_page,
+)
 
 
 EXTRACTOR_NAME = "pymupdf-native-text"
@@ -129,10 +135,10 @@ def _issue(
         default=str,
     ).encode("utf-8")
     action = {
-        "suspected_scanned_page": "Queue the page for a future OCR benchmark.",
+        "suspected_scanned_page": "Queue the page for the Phase 5B OCR/image route.",
         "no_native_text_layer": "Verify whether the PDF is image-only before OCR routing.",
         "mixed_pdf_evidence": "Review native-text and scanned pages separately.",
-        "possible_table_candidate": "Benchmark a native table detector before creating a TableAsset.",
+        "possible_table_candidate": "Use only as a weak routing hint; verify with a table extractor before accepting a TableAsset.",
         "empty_pdf": "Verify the source PDF has pages and is not a placeholder export.",
     }.get(issue_type, "Review the PDF profile before escalating the route.")
     return QualityIssue(
@@ -377,6 +383,7 @@ def extract_pdf_file(
                                 "text_block_count": page.text_block_count,
                                 "drawing_count": page.drawing_count,
                                 "grid_line_count": page.grid_line_count,
+                                "semantics": TABLE_CANDIDATE_SEMANTICS,
                             },
                         )
                     )

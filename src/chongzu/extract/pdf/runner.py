@@ -224,6 +224,7 @@ def extract_pdf(
     force: bool = False,
     registry_path: Path | str | None = None,
     workspace_root: Path | str | None = None,
+    _scan_summary=None,
 ) -> PDFExtractionSummary:
     """Scan *source*, then extract current PDF candidates with PyMuPDF."""
 
@@ -232,10 +233,13 @@ def extract_pdf(
     registry_file = Path(registry_path or paths.REGISTRY_PATH).resolve()
     workspace = Path(workspace_root or paths.WORKSPACE_ROOT).resolve()
     workspace.mkdir(parents=True, exist_ok=True)
-    try:
-        scan_summary = scan_source(source, workers=worker_count, registry_path=registry_file)
-    except ScanError as exc:
-        raise PDFExtractionError(str(exc)) from exc
+    if _scan_summary is None:
+        try:
+            scan_summary = scan_source(source, workers=worker_count, registry_path=registry_file)
+        except ScanError as exc:
+            raise PDFExtractionError(str(exc)) from exc
+    else:
+        scan_summary = _scan_summary
     source_root = canonical_source_root(source, require_directory=True)
     summary = PDFExtractionSummary(
         source_root=source_root,

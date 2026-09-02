@@ -341,6 +341,85 @@ def test_relocated_copy_reanchors_runtime_registry_and_cache() -> None:
         assert "Failures: 0" in ocr_extraction.stdout
         assert _sha256(ocr_image) == ocr_hash
 
+        unified_source = destination / "workspace" / "unified mixed corpus 中文 with spaces"
+        unified_source.mkdir(parents=True, exist_ok=True)
+        (unified_source / "records.csv").write_text(
+            "name,value\nalpha,1\nbeta,2\n", encoding="utf-8"
+        )
+        write_xlsx(
+            unified_source / "records.xlsx",
+            [("Data", [["name", "value"], ["alpha", 1], ["beta", 2]], None)],
+        )
+        write_pdf(
+            unified_source / "native.pdf",
+            [{"texts": [(72, 72, "unified native PDF text")]}],
+        )
+        from PIL import Image, ImageDraw
+
+        scanned_image = unified_source / "scanned source.png"
+        scanned_canvas = Image.new("RGB", (800, 320), "white")
+        scanned_draw = ImageDraw.Draw(scanned_canvas)
+        scanned_draw.text((35, 35), "Scanned page text", fill="black")
+        x0, y0, cell_width, row_height = 100, 110, 260, 70
+        for row_index in range(3):
+            y = y0 + row_index * row_height
+            scanned_draw.line((x0, y, x0 + cell_width * 2, y), fill="black", width=4)
+        for column_index in range(3):
+            x = x0 + column_index * cell_width
+            scanned_draw.line((x, y0, x, y0 + row_height * 2), fill="black", width=4)
+        scanned_draw.text((125, 130), "A", fill="black")
+        scanned_draw.text((385, 130), "B", fill="black")
+        scanned_draw.text((125, 200), "1", fill="black")
+        scanned_draw.text((385, 200), "2", fill="black")
+        scanned_canvas.save(scanned_image)
+        import pymupdf
+
+        scanned_pdf = unified_source / "scanned.pdf"
+        scanned_document = pymupdf.open()
+        scanned_page = scanned_document.new_page(width=800, height=320)
+        scanned_page.insert_image(pymupdf.Rect(0, 0, 800, 320), filename=str(scanned_image))
+        scanned_document.save(scanned_pdf)
+        scanned_document.close()
+        scanned_image.unlink()
+        jpg_image = unified_source / "photo.jpg"
+        scanned_canvas.save(jpg_image, format="JPEG")
+        png_image = unified_source / "table screenshot.png"
+        scanned_canvas.save(png_image)
+        (unified_source / "notes.txt").write_text("unified text evidence", encoding="utf-8")
+        (unified_source / "page.html").write_text("<html>retained</html>", encoding="utf-8")
+        unified_hashes = {
+            path.relative_to(unified_source).as_posix(): _sha256(path)
+            for path in unified_source.iterdir()
+        }
+        unified_extraction = _run_cmd(
+            destination / "chongzu.cmd",
+            ["extract", str(unified_source), "--workers", "1", "--force"],
+            destination,
+            clean_env,
+        )
+        assert unified_extraction.returncode == 0, unified_extraction.stdout + unified_extraction.stderr
+        assert "Files discovered: 8" in unified_extraction.stdout
+        assert "Supported: 7" in unified_extraction.stdout
+        assert "Unsupported: 1" in unified_extraction.stdout
+        assert "Processed: 7" in unified_extraction.stdout
+        assert "Failed: 0" in unified_extraction.stdout
+        assert "TableAssets:" in unified_extraction.stdout
+        assert "TextAssets:" in unified_extraction.stdout
+        assert unified_hashes == {
+            path.relative_to(unified_source).as_posix(): _sha256(path)
+            for path in unified_source.iterdir()
+        }
+        unified_catalog = _run_cmd(
+            destination / "chongzu.cmd",
+            ["registry", "summary", "--source", str(unified_source)],
+            destination,
+            clean_env,
+        )
+        assert unified_catalog.returncode == 0, unified_catalog.stdout + unified_catalog.stderr
+        unified_catalog_data = json.loads(unified_catalog.stdout)
+        assert unified_catalog_data["catalog"]["table_assets"] >= 3
+        assert unified_catalog_data["catalog"]["text_assets"] >= 5
+
         probe_code = (
             "import duckdb,json,polars,python_calamine,pymupdf,img2table,numpy,cv2,pypdfium2,rapidocr,onnxruntime,sys,pathlib; "
             "c=duckdb.connect('workspace/state/registry.duckdb'); "

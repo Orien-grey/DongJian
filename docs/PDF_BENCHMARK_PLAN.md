@@ -40,10 +40,12 @@ img2table candidate (Phase 4B, only after approval)
 measured table quality and bundle-cost decision
 ```
 
-GMFT and Docling remain later complex-table benchmark candidates. RapidOCR is a
-separate Phase 5 image/scanned-document decision. `img2table` is a candidate
-dependency until its Windows x64 wheel/runtime and real-corpus result are
-reviewed.
+GMFT and Docling are not the next phase and remain disabled unless later
+representative evidence proves the current routes insufficient. Phase 5B uses
+RapidOCR blocks with a local img2table image adapter for scanned/image pages;
+this is a separate dual-extraction route, not a claim that native candidate
+output is ground truth. `img2table` remains a candidate dependency until its
+Windows x64 wheel/runtime and real-corpus result are reviewed.
 
 ## Evaluation dimensions
 

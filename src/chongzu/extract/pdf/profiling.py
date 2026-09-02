@@ -10,6 +10,9 @@ from chongzu.assets import BoundingBox
 from .blocks import ExtractedTextBlock
 
 
+TABLE_CANDIDATE_SEMANTICS = "heuristic_hint_not_ground_truth"
+
+
 def _area(box: BoundingBox) -> float:
     return max(0.0, box.x1 - box.x0) * max(0.0, box.y1 - box.y0)
 
@@ -90,6 +93,7 @@ class PageProfile:
             "native_text_available": self.native_text_available,
             "suspected_scanned": self.suspected_scanned,
             "possible_table_candidate": self.possible_table_candidate,
+            "table_candidate_semantics": TABLE_CANDIDATE_SEMANTICS,
             "reason_codes": list(self.reason_codes),
         }
 
@@ -127,6 +131,7 @@ class PDFProfile:
             "native_text_available": self.native_text_available,
             "suspected_scanned_pages": list(self.suspected_scanned_pages),
             "classification": self.classification,
+            "table_candidate_semantics": TABLE_CANDIDATE_SEMANTICS,
             "reason_codes": list(self.reason_codes),
             "pages": [page.as_dict() for page in self.pages],
             "metadata": dict(self.metadata),

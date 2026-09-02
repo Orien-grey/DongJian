@@ -8,8 +8,8 @@ meanings, summaries, quality explanations, and difficult visual/OCR judgments.
 It is optional and is never part of extraction correctness.
 
 LLM and network-model calls are disabled unless the user has supplied a real
-provider configuration and explicitly authorized a test. Phase 4C and Phase
-5A do not read an LLM configuration and make no model/API requests.
+provider configuration and explicitly authorized a test. Phase 4C, Phase 5A,
+and Phase 5B do not read an LLM configuration and make no model/API requests.
 
 The semantic layer is provider-neutral. During local development and semantic
 contract tests, a user may configure a DeepSeek OpenAI-compatible endpoint. The

@@ -20,6 +20,7 @@ from chongzu.assets import (
     QualityIssueSeverity,
     QualityIssueStatus,
     SourceKind,
+    TableAsset,
     TextAsset,
     TextChunk,
     make_chunk_id,
@@ -30,8 +31,18 @@ from chongzu.registry import Registry, canonical_source_root, utc_now as registr
 from chongzu.scan import scan_source
 
 from ..models import StructuredSource
-from ..pdf.artifacts import workspace_relative, write_text_asset
+from ..pdf.artifacts import write_text_asset
 from ..pdf.blocks import chunk_text, normalize_text
+from ..pdf.table_quality import DetectedTable
+from .img2table_adapter import (
+    IMAGE_TABLE_EXTRACTOR,
+    IMAGE_TABLE_EXTRACTOR_VERSION,
+    ImageTableAdapterError,
+    ImageTableConfig,
+    extract_tables_from_document,
+    load_image_document,
+    publish_image_table,
+)
 from .rapidocr_engine import OCRBlock, OCREngineError, RapidOCREngine
 
 
@@ -56,12 +67,14 @@ class OCRTarget:
 class OCRStageTimings:
     render_ms: float = 0.0
     ocr_ms: float = 0.0
+    image_table_ms: float = 0.0
     artifact_write_ms: float = 0.0
 
     def as_dict(self) -> dict[str, float]:
         return {
             "render_ms": self.render_ms,
             "ocr_ms": self.ocr_ms,
+            "image_table_ms": self.image_table_ms,
             "artifact_write_ms": self.artifact_write_ms,
         }
 
@@ -76,9 +89,12 @@ class OCRExtractionResult:
     status: str = "successful"
     text_assets: list[TextAsset] = field(default_factory=list)
     text_chunks: list[TextChunk] = field(default_factory=list)
+    table_assets: list[TableAsset] = field(default_factory=list)
+    detected_tables: list[DetectedTable] = field(default_factory=list)
     issues: list[QualityIssue] = field(default_factory=list)
     warnings: list[dict[str, Any]] = field(default_factory=list)
     timings: OCRStageTimings = field(default_factory=OCRStageTimings)
+    image_table_extraction_failed: bool = False
     error_category: str | None = None
     error_message: str | None = None
 
@@ -98,6 +114,10 @@ class OCRExtractionResult:
     def total_chars(self) -> int:
         return sum(len(asset.text) for asset in self.text_assets)
 
+    @property
+    def total_rows(self) -> int:
+        return sum(asset.row_count for asset in self.table_assets)
+
 
 @dataclass
 class OCRExtractionSummary:
@@ -112,6 +132,10 @@ class OCRExtractionSummary:
     targets: int = 0
     pages_ocred: int = 0
     text_assets_produced: int = 0
+    table_assets_produced: int = 0
+    image_table_extraction_failures: int = 0
+    image_table_ocr_calls: int = 0
+    image_table_ms: float = 0.0
     ocr_chars: int = 0
     failures: int = 0
     quality_issues: int = 0
@@ -128,9 +152,14 @@ class OCRExtractionSummary:
             "files": self.files_attempted,
             "images": self.images_considered,
             "PDFs": self.pdfs_considered,
+            "reused": self.reused,
             "targets": self.targets,
             "pages OCRed": self.pages_ocred,
             "OCR chars": self.ocr_chars,
+            "table assets": self.table_assets_produced,
+            "image table extraction failures": self.image_table_extraction_failures,
+            "RapidOCR calls": self.image_table_ocr_calls,
+            "image table ms": self.image_table_ms,
             "files/sec": self.files_attempted / seconds if seconds else 0.0,
             "pages/sec": self.pages_ocred / seconds if seconds else 0.0,
             "render ms": self.render_ms,
@@ -212,14 +241,6 @@ def _profile_targets(profile: dict[str, Any] | None) -> tuple[list[OCRTarget], s
     return [], "phase4a_native_text_pages_only"
 
 
-def _array_from_pixmap(pixmap: Any) -> Any:
-    import numpy as np  # type: ignore[import-not-found]
-
-    channels = 4 if bool(getattr(pixmap, "alpha", False)) else 3
-    array = np.frombuffer(pixmap.samples, dtype=np.uint8)
-    return array.reshape((pixmap.height, pixmap.width, channels))[:, :, :3]
-
-
 def _bbox_from_block(block: OCRBlock, *, scale_x: float = 1.0, scale_y: float = 1.0) -> BoundingBox | None:
     if len(block.bbox) < 4:
         return None
@@ -260,13 +281,18 @@ def _publish_asset(
     image_width: int,
     image_height: int,
     page_bbox: BoundingBox,
+    image_id: str | None = None,
     page_rotation: int | None = None,
     pdf_scale: tuple[float, float] = (1.0, 1.0),
 ) -> None:
     source = result.source
     page_number = target.page_number
     source_kind = SourceKind.IMAGE if target.kind == "image" else SourceKind.PAGE
-    locator = f"image:full:config:{paths.OCR_CONFIG_VERSION}" if target.kind == "image" else f"page:{page_number}:ocr:config:{paths.OCR_CONFIG_VERSION}"
+    locator = (
+        f"image:full:config:{paths.OCR_CONFIG_VERSION}"
+        if target.kind == "image"
+        else f"page:{page_number}:ocr:config:{paths.OCR_CONFIG_VERSION}"
+    )
     asset_id = make_text_asset_id(
         file_id=source.file_id,
         content_sha256=source.content_sha256,
@@ -292,6 +318,12 @@ def _publish_asset(
                 "text": block.text,
                 "confidence": block.confidence,
                 "bbox": bbox.__dict__ if bbox else None,
+                "bbox_points": [list(point) for point in block.bbox],
+                "page_number": block.page_number,
+                "image": block.image or image_id,
+                "block_index": block.block_index,
+                "extractor": block.extractor,
+                "extractor_version": block.extractor_version,
                 "coordinate_space": "pdf_points" if target.kind == "pdf_page" else "image_pixels",
             }
         )
@@ -311,6 +343,7 @@ def _publish_asset(
         "page_rotation": page_rotation,
         "ocr_target_reason": target.reason,
         "ocr_blocks": block_payload,
+        "ocr_block_contract": "OCRBlock-v1",
         "average_confidence": average_confidence,
         "chunk_config_version": paths.TEXT_CHUNK_CONFIG_VERSION,
         "offset_basis": "normalized_text",
@@ -399,18 +432,130 @@ def _extract_one(source: StructuredSource, run_id: str, identity: str, targets: 
         if (before.st_size, before.st_mtime_ns) != (source.size_bytes, source.mtime_ns):
             raise OCREngineError("source size or mtime changed after registry scan")
         engine = RapidOCREngine()
-        if source.business_format in {"jpeg", "png"}:
-            from PIL import Image  # type: ignore[import-not-found]
 
-            with Image.open(source.path) as image:
-                image_width, image_height = image.size
-            target = targets[0]
-            blocks, ocr_ms = engine.recognize(str(source.path))
+        def process_target(
+            *,
+            target: OCRTarget,
+            image_document: Any,
+            image: Any,
+            image_width: int,
+            image_height: int,
+            page_bbox: BoundingBox,
+            page_rotation: int | None = None,
+            pdf_scale: tuple[float, float] = (1.0, 1.0),
+        ) -> None:
+            blocks, ocr_ms = engine.recognize(
+                image,
+                page_number=target.page_number,
+                image_id=source.relative_path,
+            )
             result.timings.ocr_ms += ocr_ms
+            result.warnings.append(
+                {
+                    "target": target.as_dict(),
+                    "ocr_calls": 1,
+                    "ocr_blocks": len(blocks),
+                    "table_adapter": IMAGE_TABLE_EXTRACTOR,
+                    "table_adapter_version": IMAGE_TABLE_EXTRACTOR_VERSION,
+                    "ocr_reused_by_table_adapter": True,
+                    "img2table_ocr_backend_calls": 0,
+                }
+            )
             _publish_asset(
                 result=result,
                 target=target,
                 blocks=blocks,
+                image_width=image_width,
+                image_height=image_height,
+                page_bbox=page_bbox,
+                image_id=source.relative_path,
+                page_rotation=page_rotation,
+                pdf_scale=pdf_scale,
+            )
+            try:
+                tables, _width, _height, table_ms = extract_tables_from_document(
+                    image_document,
+                    blocks,
+                    config=ImageTableConfig(),
+                )
+            except ImageTableAdapterError as exc:
+                result.image_table_extraction_failed = True
+                result.status = "partial"
+                result.issues.append(
+                    _quality_issue(
+                        source,
+                        f"image-table:{source.file_id}:page:{target.page_number or 1}",
+                        "image_table_extractor_error",
+                        {
+                            "target": target.as_dict(),
+                            "error": str(exc),
+                            "ocr_reused": True,
+                        },
+                    )
+                )
+                return
+            result.timings.image_table_ms += table_ms
+            for table_index, table in enumerate(tables):
+                try:
+                    publication = publish_image_table(
+                        source=source,
+                        extraction_run_id=result.extraction_run_id,
+                        table=table,
+                        table_index=table_index,
+                        blocks=blocks,
+                        image_width=image_width,
+                        image_height=image_height,
+                        source_kind=SourceKind.IMAGE if target.kind == "image" else SourceKind.PAGE,
+                        page_number=target.page_number,
+                        scale_x=pdf_scale[0],
+                        scale_y=pdf_scale[1],
+                        config=ImageTableConfig(),
+                    )
+                except Exception as exc:
+                    # OCR text is already a valid independent result.  A
+                    # table artifact/write failure must therefore remain
+                    # partial instead of discarding the text asset.
+                    result.image_table_extraction_failed = True
+                    result.status = "partial"
+                    result.issues.append(
+                        _quality_issue(
+                            source,
+                            f"image-table:{source.file_id}:page:{target.page_number or 1}:table:{table_index}",
+                            "image_table_extractor_error",
+                            {
+                                "target": target.as_dict(),
+                                "table_index": table_index,
+                                "error": str(exc),
+                                "ocr_reused": True,
+                            },
+                        )
+                    )
+                    continue
+                result.timings.artifact_write_ms += publication.artifact_write_ms
+                if publication.asset is not None:
+                    result.table_assets.append(publication.asset)
+                if publication.detected is not None:
+                    result.detected_tables.append(publication.detected)
+                result.issues.extend(publication.issues)
+            result.warnings.append(
+                {
+                    "target": target.as_dict(),
+                    "image_table_count": len(tables),
+                    "image_table_ocr_reused": True,
+                    "image_table_ocr_backend_calls": 0,
+                    "image_table_ms": table_ms,
+                }
+            )
+
+        if source.business_format in {"jpeg", "png"}:
+            target = targets[0]
+            image_document = load_image_document(source.path)
+            image = image_document.images[0]
+            image_height, image_width = int(image.shape[0]), int(image.shape[1])
+            process_target(
+                target=target,
+                image_document=image_document,
+                image=image,
                 image_width=image_width,
                 image_height=image_height,
                 page_bbox=BoundingBox(0.0, 0.0, float(image_width), float(image_height)),
@@ -422,21 +567,22 @@ def _extract_one(source: StructuredSource, run_id: str, identity: str, targets: 
                 for target in targets:
                     page = document[target.page_number - 1]
                     render_started = time.perf_counter_ns()
-                    # A 150 DPI render is a bounded CPU baseline; later phases
-                    # can benchmark resolution without changing provenance.
-                    pixmap = page.get_pixmap(matrix=pymupdf.Matrix(150 / 72, 150 / 72), alpha=False)
+                    # Use one 200 DPI render for both RapidOCR and img2table;
+                    # the table adapter receives the same decoded image and
+                    # injected OCRData, so it never starts another OCR pass.
+                    pixmap = page.get_pixmap(matrix=pymupdf.Matrix(200 / 72, 200 / 72), alpha=False)
                     result.timings.render_ms += (time.perf_counter_ns() - render_started) / 1_000_000
-                    image = _array_from_pixmap(pixmap)
-                    blocks, ocr_ms = engine.recognize(image)
-                    result.timings.ocr_ms += ocr_ms
-                    scale_x = float(page.rect.width) / max(1, pixmap.width)
-                    scale_y = float(page.rect.height) / max(1, pixmap.height)
-                    _publish_asset(
-                        result=result,
+                    image_document = load_image_document(pixmap.tobytes("png"))
+                    image = image_document.images[0]
+                    image_height, image_width = int(image.shape[0]), int(image.shape[1])
+                    scale_x = float(page.rect.width) / max(1, image_width)
+                    scale_y = float(page.rect.height) / max(1, image_height)
+                    process_target(
                         target=target,
-                        blocks=blocks,
-                        image_width=pixmap.width,
-                        image_height=pixmap.height,
+                        image_document=image_document,
+                        image=image,
+                        image_width=image_width,
+                        image_height=image_height,
                         page_bbox=BoundingBox(float(page.rect.x0), float(page.rect.y0), float(page.rect.x1), float(page.rect.y1)),
                         page_rotation=int(page.rotation or 0),
                         pdf_scale=(scale_x, scale_y),
@@ -448,6 +594,8 @@ def _extract_one(source: StructuredSource, run_id: str, identity: str, targets: 
         result.status = "failed"
         result.text_assets.clear()
         result.text_chunks.clear()
+        result.table_assets.clear()
+        result.detected_tables.clear()
         result.issues.clear()
         result.error_category = "ocr_error"
         result.error_message = str(exc)
@@ -470,8 +618,12 @@ def _record(registry: Registry, summary: OCRExtractionSummary, result: OCRExtrac
     summary.registry_write_ms += (time.perf_counter_ns() - started) / 1_000_000
     summary.render_ms += result.timings.render_ms
     summary.ocr_ms += result.timings.ocr_ms
+    summary.image_table_ms += result.timings.image_table_ms
     summary.artifact_write_ms += result.timings.artifact_write_ms
     summary.quality_issues += len(result.issues)
+    summary.table_assets_produced += len(result.table_assets)
+    summary.image_table_extraction_failures += int(result.image_table_extraction_failed)
+    summary.image_table_ocr_calls += len(result.ocr_targets)
     if result.status == "failed":
         summary.failures += 1
         return
@@ -488,18 +640,29 @@ def extract_ocr(
     force: bool = False,
     registry_path: Path | str | None = None,
     workspace_root: Path | str | None = None,
+    _scan_summary: Any | None = None,
+    selected_relative_paths: set[str] | None = None,
 ) -> OCRExtractionSummary:
-    """Run offline OCR for images and only scanned PDF pages in *source*."""
+    """Run offline OCR for images and only scanned PDF pages in *source*.
+
+    ``selected_relative_paths`` is a deliberately narrow benchmark hook.  It
+    filters already-registered image/PDF candidates after the normal scan and
+    is used by the rendered-page consistency benchmark; it does not change
+    production routing or the persisted source registry facts.
+    """
 
     wall_started = time.perf_counter_ns()
     worker_count = normalize_ocr_workers(workers)
     registry_file = Path(registry_path or paths.REGISTRY_PATH).resolve()
     workspace = Path(workspace_root or paths.WORKSPACE_ROOT).resolve()
     workspace.mkdir(parents=True, exist_ok=True)
-    try:
-        scan_summary = scan_source(source, workers=worker_count, registry_path=registry_file)
-    except Exception as exc:
-        raise OCRExtractionError(str(exc)) from exc
+    if _scan_summary is None:
+        try:
+            scan_summary = scan_source(source, workers=worker_count, registry_path=registry_file)
+        except Exception as exc:
+            raise OCRExtractionError(str(exc)) from exc
+    else:
+        scan_summary = _scan_summary
     source_root = canonical_source_root(source, require_directory=True)
     summary = OCRExtractionSummary(source_root=source_root, discovery_scan_ms=scan_summary.elapsed_ms)
     registry = Registry.open(registry_file)
@@ -509,9 +672,23 @@ def extract_ocr(
         if any(row.get("business_format") == "pdf" for row in registry.ocr_candidates(source_root)):
             from ..pdf.runner import extract_pdf
 
-            extract_pdf(source, workers=worker_count, force=False, registry_path=registry_file, workspace_root=workspace)
+            extract_pdf(
+                source,
+                workers=worker_count,
+                force=False,
+                registry_path=registry_file,
+                workspace_root=workspace,
+                _scan_summary=scan_summary,
+            )
         registry.recover_incomplete_extractions(source_root)
         rows = registry.ocr_candidates(source_root)
+        if selected_relative_paths is not None:
+            selected = {str(path).replace("\\", "/") for path in selected_relative_paths}
+            rows = [
+                row
+                for row in rows
+                if str(row.get("relative_path") or "").replace("\\", "/") in selected
+            ]
         summary.files_considered = len(rows)
         summary.images_considered = sum(1 for row in rows if row.get("business_format") in {"jpeg", "png"})
         summary.pdfs_considered = sum(1 for row in rows if row.get("business_format") == "pdf")
@@ -539,6 +716,8 @@ def extract_ocr(
                 summary.reused += 1
                 summary.targets += len(targets)
                 summary.pages_ocred += sum(1 for target in targets if target.kind == "pdf_page")
+                summary.text_assets_produced += int(reusable.get("text_asset_count") or len(reusable.get("text_assets") or []))
+                summary.table_assets_produced += int(reusable.get("table_count") or 0)
                 return None
             run_id = f"xrun_{uuid4().hex}"
             started_at = registry_now()

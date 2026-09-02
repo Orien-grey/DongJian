@@ -418,6 +418,7 @@ def extract_pdf_tables(
     ground_truth: dict[str, tuple[ExpectedTable, ...]] | None = None,
     config: PDFTableConfig | None = None,
     selected_relative_paths: set[str] | None = None,
+    _scan_summary=None,
 ) -> PDFTableExtractionSummary:
     """Ensure Phase 4A facts exist, then run the img2table candidate.
 
@@ -440,6 +441,7 @@ def extract_pdf_tables(
             force=False,
             registry_path=registry_file,
             workspace_root=workspace,
+            _scan_summary=_scan_summary,
         )
     except Exception as exc:
         raise PDFTableExtractionError(str(exc)) from exc

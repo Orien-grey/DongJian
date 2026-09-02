@@ -115,6 +115,7 @@ def extract_structured(
     force: bool = False,
     registry_path: Path | str | None = None,
     workspace_root: Path | str | None = None,
+    _scan_summary=None,
 ) -> StructuredExtractionSummary:
     """Scan *source*, then extract current CSV/TSV/XLS/XLSX registry rows."""
 
@@ -123,10 +124,13 @@ def extract_structured(
     registry_file = Path(registry_path or paths.REGISTRY_PATH).resolve()
     workspace = Path(workspace_root or paths.WORKSPACE_ROOT).resolve()
     workspace.mkdir(parents=True, exist_ok=True)
-    try:
-        scan_summary = scan_source(source, workers=worker_count, registry_path=registry_file)
-    except ScanError as exc:
-        raise StructuredExtractionError(str(exc)) from exc
+    if _scan_summary is None:
+        try:
+            scan_summary = scan_source(source, workers=worker_count, registry_path=registry_file)
+        except ScanError as exc:
+            raise StructuredExtractionError(str(exc)) from exc
+    else:
+        scan_summary = _scan_summary
     source_root = canonical_source_root(source, require_directory=True)
     summary = StructuredExtractionSummary(source_root=source_root, discovery_scan_ms=scan_summary.elapsed_ms)
     registry = Registry.open(registry_file)

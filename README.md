@@ -15,15 +15,15 @@ from their own location, so a prepared bundle can be moved as a directory.
 Phase 3 now implements the first business extraction path: strict CSV/TSV and
 native XLS/XLSX extraction into traceable `TableAsset` records plus separate
 raw and normalized Parquet. It uses bounded workers, a central DuckDB writer,
-content/version-based reuse, and atomic publication below `workspace/`. It does
-not extract images/Office text, call an LLM, create embeddings, or provide a
-frontend. Phase 4A adds the native PDF facts path: PyMuPDF page inventories,
-native text blocks, page/block provenance, deterministic chunks, and PDF
-profiles. Phase 4B keeps `img2table` as a measured native-text table candidate;
-Phase 4C records a read-only real-corpus baseline. Phase 5A adds a local,
-offline RapidOCR + ONNX Runtime foundation for JPG/JPEG/PNG and only the
-scanned pages selected by the PyMuPDF profile. OCR assets are independent from
-native text assets and never overwrite them.
+content/version-based reuse, and atomic publication below `workspace/`.
+Phase 4A adds the native PDF facts path: PyMuPDF page inventories, native text
+blocks, page/block provenance, deterministic chunks, and PDF profiles. Phase 4B
+keeps `img2table` as a measured native-text table candidate; Phase 4C records a
+read-only real-corpus baseline. Phase 5A adds a local, offline RapidOCR + ONNX
+Runtime foundation, and Phase 5B connects it to the image table adapter and
+formal `extract SOURCE` pipeline. Images and scanned PDF pages may now emit
+independent TextAssets and TableAssets from one OCR pass. No LLM, embedding, or
+frontend is part of the core extraction route.
 
 ## Product flow
 
@@ -61,8 +61,14 @@ whether the product supports it and which extraction branches are candidates.
 The Phase 4A PyMuPDF branch and Phase 4B `img2table` native-text candidate are
 independent: `extract pdf-table` preserves the Phase 4A
 `TextAsset`/`TextChunk` rows while adding zero or more PDF `TableAsset` rows.
-The candidate explicitly defers image-only/suspected-scanned pages to a future
-OCR phase and is not yet a permanent default extractor.
+The candidate explicitly defers image-only/suspected-scanned pages to the
+Phase 5B OCR/image route and is not yet a permanent default extractor.
+`possible_table_candidate`
+is a weak heuristic routing hint, not table ground truth.
+
+The current runtime reports `LLM STATUS = NOT CONFIGURED` when no real config
+exists. This is normal: extraction never calls DeepSeek, Qwen, OpenAI, a vision
+API, an embedding API, or a public endpoint/fallback.
 
 ## Data safety and semantic boundary
 
@@ -117,6 +123,8 @@ Formal portable launchers require no activation:
 .\chongzu.cmd extract pdf-table "D:\Research Data\Project" --workers 2
 .\chongzu.cmd benchmark pdf-table "D:\Research Data\Project" --ground-truth reference.json
 .\chongzu.cmd extract ocr "D:\Research Data\Project" --workers 2
+.\chongzu.cmd extract "D:\Research Data\Project" --workers 2
+.\chongzu.cmd benchmark pdf-consistency
 .\chongzu.cmd benchmark ocr "D:\Research Data\Project" --workers 2
 .\chongzu.cmd registry summary
 ```
@@ -147,4 +155,5 @@ dependencies of the table/OCR candidates. See
 [Structured extraction](docs/STRUCTURED_EXTRACTION.md),
 [PDF extraction](docs/PDF_EXTRACTION.md), and
 [PDF table extraction](docs/PDF_TABLE_EXTRACTION.md), and
-[OCR foundation](docs/OCR_FOUNDATION.md).
+[OCR foundation](docs/OCR_FOUNDATION.md), and
+[unified extraction](docs/UNIFIED_EXTRACTION.md).

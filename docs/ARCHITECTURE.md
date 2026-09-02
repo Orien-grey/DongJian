@@ -199,7 +199,46 @@ files plus a SHA-256 manifest live in `runtime/models/ocr/`. The adapter passes
 explicit string model paths (including the Windows OmegaConf compatibility
 workaround) and never invokes RapidOCR's download command. Missing or altered
 models are a doctor failure. No OCR backend is enabled in the Phase 4B
-`img2table` candidate, and OCR does not yet infer a TableAsset.
+native-text candidate; image/scanned-page table reconstruction belongs to the
+Phase 5B adapter below.
+
+### Phase 5B image/scanned-PDF dual extraction
+
+`src/chongzu/extract/ocr/rapidocr_engine.py` maps engine output immediately to
+the stable internal `OCRBlock` contract: text, polygon bbox, confidence,
+one-based page or image provenance, block index, extractor, and version. Raw
+RapidOCR return objects do not cross into the registry, asset builders, or
+table adapter. This keeps a future local OCR replacement behind one boundary.
+
+`img2table==2.0.0` has a RapidOCR backend, but using it directly would run a
+second OCR pass. `img2table_adapter.py` instead injects the already-produced
+blocks as the library's `OCRData` shape and calls `extract_tables(ocr=None)`.
+The same decoded image is used for OCR and table reconstruction. Run warnings
+and table metadata record `ocr_reused=true` and
+`ocr_backend_calls=0`; any adapter failure is a partial file result so the OCR
+TextAsset remains usable.
+
+Standalone images always run both independent branches. PDF routing reuses the
+Phase 4A page profile: reliable native pages stay on PyMuPDF plus the native
+candidate, while only pages without reliable native text are rendered and sent
+through RapidOCR plus the image table adapter. A mixed PDF can therefore have
+native TextAssets on page 1, OCR TextAssets and image TableAssets on page 2,
+and native assets again on page 3. There is no whole-file OCR fallback.
+
+Image/scanned-page tables use the common `TableAsset`/raw-Parquet/
+normalized-Parquet/metadata contract. Mechanical review signals include sparse
+OCR, suspicious one-row/one-column shapes, likely column shifts, header loss,
+merged-cell evidence, and long-paragraph cells. These signals set quality
+status/issues only; they do not silently delete candidate tables. The profile's
+`possible_table_candidate` remains a weak heuristic hint and is explicitly
+marked `heuristic_hint_not_ground_truth` in profile/metadata evidence.
+
+The formal coordinator is `extract_unified()` and the user-facing command is
+`chongzu extract SOURCE`. It scans once, invokes the independent structured,
+native PDF, native PDF-table, OCR/image-table, and TXT routes as applicable,
+then reads current catalog counts. Each route keeps its own identity and reuse
+key, so one file failure does not cancel other files or erase an independent
+asset type. See [UNIFIED_EXTRACTION.md](UNIFIED_EXTRACTION.md).
 
 Stable table/text/chunk IDs are derived from extraction provenance. Semantic
 display names, categories, model responses, and UI edits never participate in
@@ -317,6 +356,7 @@ Unstructured, Data Prep Kit, NiFi, NeMo Curator, OpenRefine runtime/server,
 WSL, Docker, Kubernetes, Spark, and Ray are outside the product architecture.
 HTML/CSS/XML remain discoverable but have no business extractor.
 
-GMFT and Docling are future complex-table benchmark candidates only. They are
-not default dependencies and will be retained only if representative corpus
-evidence demonstrates a material advantage that lighter paths cannot provide.
+GMFT and Docling are not part of the next phase and are not default
+dependencies. They may be reopened only if a later representative complex-table
+benchmark demonstrates that the current native/OCR candidate paths are
+insufficient and the measured benefit justifies their cost.

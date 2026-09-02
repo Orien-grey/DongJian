@@ -25,6 +25,14 @@ def test_phase_one_heavy_tools_are_nonfatal_information() -> None:
         assert checks[0].fatal is False
 
 
+def test_llm_is_optional_when_no_real_configuration_exists() -> None:
+    report = doctor.run_checks()
+    checks = [check for check in report.checks if check.name == "LLM STATUS"]
+    assert checks and checks[0].status == "INFO"
+    assert "NOT CONFIGURED" in checks[0].detail
+    assert checks[0].fatal is False
+
+
 def test_portable_doctor_passes_with_standalone_python() -> None:
     root = paths.PROJECT_ROOT
     env = os.environ.copy()

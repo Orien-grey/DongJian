@@ -89,7 +89,7 @@ and invoke the standalone executable directly. They never activate or invoke
 `runtime\venv`. In the standalone process `sys.prefix == sys.base_prefix` is
 expected; that is a normal, non-venv interpreter.
 
-Phase 3, Phase 4A, the Phase 4B candidate, and the Phase 5A OCR foundation are
+Phase 3, Phase 4A, the Phase 4B candidate, and the Phase 5A/5B OCR foundation are
 installed into `runtime\packages` with project-private uv, the locked
 versions/hashes, and a wheel-only constraint. `scripts\bootstrap.ps1` performs
 the install in a temporary project-local staging venv, removes stale target
@@ -199,7 +199,7 @@ PIP_CONFIG_FILE          E:\Desktop\ChongZu\cache\pip\pip.ini
 
 Always load `scripts\env.ps1` before invoking uv. During this preparation, two initial bare uv probes demonstrated why: without the project variables uv attempted to initialize/open its default user paths under `%LOCALAPPDATA%\uv\cache` and `%APPDATA%\uv\python`; both probes failed before creating anything. Every successful download, lock, sync, and verification command then used the project-local variables.
 
-## Phase 1-5A Python packages
+## Phase 1-5B Python packages
 
 The lock file is [`uv.lock`](../uv.lock). `uv sync --locked` installs the
 development/test set into `runtime\venv`; the production subset is installed
@@ -214,6 +214,8 @@ as a target into `runtime\packages` with the same pinned versions:
 | `python-calamine` | `0.8.2` | Native XLS/XLSX reader |
 | `PyMuPDF` | `1.28.2` | Phase 4A native PDF text/page profiling |
 | `img2table` | `2.0.0` | Phase 4B native-text PDF table candidate; OCR disabled |
+| `rapidocr` | `3.9.2` | Phase 5A/5B offline CPU OCR |
+| `onnxruntime` | `1.29.0` | RapidOCR CPU inference |
 | `numpy` | `2.4.6` | img2table native candidate dependency |
 | `opencv-contrib-python` | `5.0.0.93` | img2table native candidate dependency |
 | `pypdfium2` | `5.13.0` | img2table PDF rendering dependency |
@@ -225,22 +227,26 @@ as a target into `runtime\packages` with the same pinned versions:
 | `pluggy` | `1.6.0` | pytest dependency |
 | `pygments` | `2.21.0` | pytest dependency |
 
-The resolved Phase 3/4A/4B/5A runtime tree adds Polars, its matching runtime
+The resolved Phase 3/4A/4B/5A/5B runtime tree adds Polars, its matching runtime
 wheel, python-calamine, PyMuPDF, and the candidate dependency tree above. The
 wheel-only dry run and provisioning required no local compiler or source build.
 PyArrow, Pandas, OpenPyXL, GMFT, Docling, Torch, Java, and Tika remain absent.
-RapidOCR/ONNX Runtime are present for offline OCR only; they do not create
-structured tables. NumPy/OpenCV/pypdfium2 are shared native dependencies of
-the candidate and OCR trees.
+RapidOCR/ONNX Runtime are present for offline OCR only; Phase 5B injects their
+OCR blocks into the existing img2table image adapter without a second OCR
+backend call. NumPy/OpenCV/pypdfium2 are shared native dependencies of the
+candidate and OCR trees. Phase 5B adds no package or model dependency.
 Polars writes and reads Parquet using its bundled native runtime. PyMuPDF's
 native payload is loaded from `runtime\packages\pymupdf`; the development venv
 is not a production input.
 
-Phase 3/4A/4B/5A processing makes no network request and does not call the
-configured LLM. Provisioning is the only network-enabled step. Java/Tika is not
-a default route; GMFT and Docling remain future benchmark candidates rather than
-portable-bundle requirements. img2table's optional OCR extras are not installed;
-Phase 5A uses its own explicit RapidOCR model bundle and never downloads models
+Phase 3/4A/4B/5A/5B processing makes no network request and does not call the
+configured LLM. Provisioning is the only network-enabled step. Doctor reports
+`PyMuPDF PASS`, `img2table PASS (candidate)`, `RapidOCR PASS`, `ONNX Runtime
+PASS`, `OCR models PASS`, `Polars PASS`, `Calamine PASS`, `DuckDB PASS`, and
+`LLM STATUS: NOT CONFIGURED` when no real config exists. Java/Tika is not a
+default route; GMFT and Docling are not next-phase requirements and can return
+only through later evidence. img2table's optional OCR extras are not installed;
+Phase 5B uses its own explicit RapidOCR model bundle and never downloads models
 at runtime.
 
 The standalone CPython image also contains its own project-local bootstrap tools `pip==26.1.2` and `setuptools==82.0.1` under `runtime\python`; they are not system packages and are not exposed through the venv because the venv does not use system site-packages. The package build isolation uses the exact `setuptools==80.10.2` requirement declared in `pyproject.toml`.

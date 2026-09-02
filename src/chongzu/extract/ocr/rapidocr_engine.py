@@ -28,6 +28,21 @@ class OCRBlock:
     text: str
     confidence: float | None
     bbox: tuple[tuple[float, float], ...]
+    page_number: int | None = None
+    image: str | None = None
+    block_index: int = 0
+    extractor: str = "rapidocr-onnx"
+    extractor_version: str = paths.RAPIDOCR_VERSION
+
+    def __post_init__(self) -> None:
+        if not self.text.strip():
+            raise ValueError("OCRBlock text must not be empty")
+        if self.page_number is not None and self.page_number < 1:
+            raise ValueError("OCRBlock page_number must be one-based")
+        if self.block_index < 0:
+            raise ValueError("OCRBlock block_index must be non-negative")
+        if self.confidence is not None and not 0.0 <= self.confidence <= 1.0:
+            raise ValueError("OCRBlock confidence must be between 0 and 1")
 
 
 def required_model_paths(model_root: Path | str | None = None) -> dict[str, Path]:
@@ -130,7 +145,20 @@ class RapidOCREngine:
             }
         )
 
-    def recognize(self, image: Any) -> tuple[list[OCRBlock], float]:
+    def recognize(
+        self,
+        image: Any,
+        *,
+        page_number: int | None = None,
+        image_id: str | None = None,
+    ) -> tuple[list[OCRBlock], float]:
+        """Recognize one image and return only the internal OCR contract.
+
+        The RapidOCR result object never leaves this adapter.  ``page_number``
+        and ``image_id`` are caller-owned provenance because the same engine is
+        used for a standalone image and for a rendered PDF page.
+        """
+
         started = time.perf_counter_ns()
         try:
             output = self._engine(image)
@@ -146,6 +174,17 @@ class RapidOCREngine:
                 continue
             score = _as_float(scores[index]) if index < len(scores) else None
             bbox = _as_bbox(boxes[index]) if index < len(boxes) else ()
-            blocks.append(OCRBlock(text=value, confidence=score, bbox=bbox))
+            blocks.append(
+                OCRBlock(
+                    text=value,
+                    confidence=score,
+                    bbox=bbox,
+                    page_number=page_number,
+                    image=image_id,
+                    block_index=index,
+                    extractor=self.extractor,
+                    extractor_version=self.extractor_version,
+                )
+            )
         elapsed_ms = (time.perf_counter_ns() - started) / 1_000_000
         return blocks, elapsed_ms
