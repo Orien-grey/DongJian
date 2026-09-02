@@ -165,8 +165,8 @@ GMFT, Docling, LLM, embedding, or frontend work is included.
 
 ## Phase 6 - Deterministic Cleaning, Data Profiling, and Data Catalog
 
-- Status: implementation complete for this round; changes intentionally remain
-  uncommitted for review.
+- Status: implementation complete and committed 2026-09-02 as
+  `82f6b921f66d3710f6bc19293fe87a24f08e7ba3`.
 - Run `process SOURCE` as scan -> independent extraction -> deterministic
   cleaning -> profiling/quality -> `catalog_assets`.
 - Normalize only Unicode/whitespace/newlines, explicit nulls, empty rows/
@@ -182,21 +182,39 @@ GMFT, Docling, LLM, embedding, or frontend work is included.
 
 Acceptance: every transformation is traceable and raw assets remain immutable.
 
-## Phase 7 - LLM Semantic Enrichment
+## Phase 7A - Semantic Enrichment Infrastructure
 
-- Implement a provider adapter only after the user supplies configuration and
-  explicitly authorizes actual requests to that configured OpenAI-compatible
-  base URL.
-- Keep model selection configuration-driven; Qwen3.6-35B-A3B is the expected
-  company service and DeepSeek is development-only when explicitly authorized.
-- Generate naming, category, descriptions, semantic field mappings, summaries,
-  quality suggestions, and optional difficult visual-review results.
-- Version prompts, validate structured responses, redact secrets, isolate
-  request failures, and prohibit public endpoint fallback.
-- Never allow model output to overwrite raw or normalized extraction.
+- Status: implementation complete for this round; changes intentionally remain
+  uncommitted for review.
+- Add the provider-neutral `SemanticRequest`/`SemanticResponse` boundary, the
+  versioned `table-semantic-v1` and `text-semantic-v1` prompts, bounded table
+  sampling/text excerpts, strict local JSON validation, and semantic run/cache
+  history in Registry schema v5.
+- Keep output in the separate semantic layer. A validated result may propose
+  names, categories, descriptions, fields, summaries, or open quality
+  suggestions; it cannot mutate raw/normalized artifacts, physical columns, or
+  existing issue status.
+- Provide a deterministic Fake Provider for offline tests and explicit smoke
+  runs. The standard-library OpenAI-compatible adapter exists as a reviewed
+  future boundary but is hard-disabled in Phase 7A.
+- Use only project-root `.env` as the future configuration source. Missing
+  configuration is `LLM_STATUS=NOT_CONFIGURED`, not a doctor failure.
 
 Acceptance: semantic metadata and review issues are reproducible/auditable,
-optional, and separable from core extraction correctness.
+optional, and separable from core extraction correctness. Phase 7A acceptance
+does not include a real model or network request.
+
+## Phase 7B - Real Provider Acceptance
+
+Status: **BLOCKED BY USER CONFIGURATION / NOT RUN**.
+
+This phase may begin only after the user fills `.env` with an explicit
+OpenAI-compatible base URL, API key, model, and bounded timeout/retry settings,
+then explicitly authorizes a controlled test. It will validate the HTTP
+adapter, response behavior, payload audit, and provider-specific deployment
+without adding a public endpoint fallback. Development may use DeepSeek and
+the company may deploy Qwen3.6-35B-A3B, but ChongZu remains vendor/model
+neutral. Phase 8 can proceed without completing this phase.
 
 ## Phase 8 - Local Frontend
 

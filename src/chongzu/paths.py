@@ -45,12 +45,16 @@ CLEANING_CONFIG_VERSION = "clean-v1"
 TABLE_CLEANER_VERSION = "table-clean-v1"
 TEXT_CLEANER_VERSION = "text-clean-v1"
 PROFILE_CONFIG_VERSION = "profile-v1"
+SEMANTIC_PIPELINE_VERSION = "phase7a-semantic-infrastructure"
+SEMANTIC_CONFIG_VERSION = "semantic-v1"
+SEMANTIC_TABLE_PROMPT_VERSION = "table-semantic-v1"
+SEMANTIC_TEXT_PROMPT_VERSION = "text-semantic-v1"
 # Extraction identities must not change merely because the metadata registry
 # gains additive catalog tables.  Extractor/config versions remain the cache
 # invalidation boundary for raw extraction.
 EXTRACTION_IDENTITY_SCHEMA_VERSION = 3
 REGISTRY_SCHEMA_NAME = "chongzu_file_registry"
-REGISTRY_SCHEMA_VERSION = 4
+REGISTRY_SCHEMA_VERSION = 5
 
 
 def _discover_project_root() -> Path:

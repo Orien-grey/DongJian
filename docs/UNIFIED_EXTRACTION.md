@@ -107,14 +107,16 @@ and `catalog show <asset-id>` provide bounded operator views. Table previews
 default to 20 rows and text previews to 2,000 characters. Unsupported files
 remain in `files` with `support_status=unsupported`; assets from OCR/PDF
 candidate routes remain `needs_review` when their provenance or structure is
-uncertain. `semantic_status` is `pending` and no semantic metadata is created
-by this phase.
+uncertain. `semantic_status` is `pending` until the explicit semantic command;
+`process` itself never invokes semantic enrichment.
 
 ```text
 .\chongzu.cmd catalog summary
 .\chongzu.cmd catalog list --type table --quality needs_review --limit 20
 .\chongzu.cmd catalog show <asset-id> --rows 20 --chars 2000
 .\chongzu.cmd benchmark cleaning "D:\Research Data\Project"
+.\chongzu.cmd semantic status
+.\chongzu.cmd semantic enrich --provider fake --asset <asset-id>
 ```
 
 ## Quality signals
@@ -153,10 +155,11 @@ model download. It does not modify the source PDF or page PNGs.
 ## Offline and LLM boundary
 
 Core extraction uses only project-local Python, packages, OCR models, and
-DuckDB/Parquet. Cleaning and catalog use only local Polars/DuckDB and the
-already-published artifacts. There is no `pip`, `uv sync`, Hugging Face, HTTP OCR, public
-endpoint, or automatic model fallback during extraction. With no real user
-configuration, doctor reports `LLM STATUS: NOT CONFIGURED`; this is a normal
-optional state. No DeepSeek, Qwen, OpenAI, vision, or embedding request is
-made in Phase 5B or Phase 6. `LLM STATUS = NOT CONFIGURED` is normal and does
-not fail doctor or process.
+DuckDB/Parquet. Cleaning, Catalog, and the Phase 7A Fake Provider use only
+local code and already-published artifacts. There is no `pip`, `uv sync`,
+Hugging Face, HTTP OCR, public endpoint, or automatic model fallback during
+these routes. With no `.env`, doctor reports `LLM STATUS: NOT CONFIGURED /
+OPTIONAL`; this is normal and does not fail doctor or process. Phase 7A makes
+no DeepSeek, Qwen, OpenAI, vision, or embedding request. The real HTTP adapter
+is hard-disabled until Phase 7B receives explicit user configuration and
+authorization.

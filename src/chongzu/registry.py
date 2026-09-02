@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -259,7 +260,34 @@ CATALOG_SCHEMA_STATEMENTS = (
         prompt_version VARCHAR NOT NULL,
         confidence DOUBLE,
         generated_at TIMESTAMP NOT NULL,
+        semantic_run_id VARCHAR,
+        input_hash VARCHAR NOT NULL DEFAULT '',
+        current BOOLEAN NOT NULL DEFAULT TRUE,
         PRIMARY KEY(asset_id, asset_type, model, prompt_version, generated_at)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS semantic_runs (
+        semantic_run_id VARCHAR PRIMARY KEY,
+        semantic_identity VARCHAR NOT NULL,
+        asset_id VARCHAR NOT NULL,
+        asset_type VARCHAR NOT NULL CHECK (asset_type IN ('table', 'text')),
+        file_id VARCHAR NOT NULL,
+        content_sha256 VARCHAR NOT NULL,
+        normalized_artifact_identity VARCHAR NOT NULL,
+        model VARCHAR NOT NULL,
+        prompt_version VARCHAR NOT NULL,
+        config_version VARCHAR NOT NULL,
+        input_hash VARCHAR NOT NULL,
+        provider VARCHAR NOT NULL,
+        status VARCHAR NOT NULL CHECK (status IN ('running', 'successful', 'failed', 'reused', 'skipped')),
+        started_at TIMESTAMP NOT NULL,
+        finished_at TIMESTAMP,
+        current BOOLEAN NOT NULL DEFAULT FALSE,
+        input_metadata_json JSON,
+        warnings_json JSON,
+        error_code VARCHAR,
+        error_message VARCHAR
     )
     """,
     """
@@ -267,6 +295,7 @@ CATALOG_SCHEMA_STATEMENTS = (
         issue_id VARCHAR PRIMARY KEY,
         extraction_run_id VARCHAR,
         cleaning_run_id VARCHAR,
+        semantic_run_id VARCHAR,
         asset_id VARCHAR NOT NULL,
         severity VARCHAR NOT NULL,
         issue_type VARCHAR NOT NULL,
@@ -282,8 +311,12 @@ CATALOG_SCHEMA_STATEMENTS = (
     "CREATE INDEX IF NOT EXISTS idx_text_assets_file ON text_assets(file_id, content_sha256)",
     "CREATE INDEX IF NOT EXISTS idx_text_chunks_asset ON text_chunks(text_asset_id, chunk_index)",
     "CREATE INDEX IF NOT EXISTS idx_semantic_metadata_asset ON semantic_metadata(asset_id, asset_type)",
+    "CREATE INDEX IF NOT EXISTS idx_semantic_metadata_current ON semantic_metadata(asset_id, asset_type, current)",
+    "CREATE INDEX IF NOT EXISTS idx_semantic_runs_identity ON semantic_runs(semantic_identity, status)",
+    "CREATE INDEX IF NOT EXISTS idx_semantic_runs_asset ON semantic_runs(asset_id, asset_type, started_at)",
     "CREATE INDEX IF NOT EXISTS idx_quality_issues_asset ON quality_issues(asset_id, status)",
     "CREATE INDEX IF NOT EXISTS idx_quality_issues_cleaning ON quality_issues(cleaning_run_id, asset_id)",
+    "CREATE INDEX IF NOT EXISTS idx_quality_issues_semantic ON quality_issues(semantic_run_id, asset_id)",
     "CREATE INDEX IF NOT EXISTS idx_extraction_runs_file ON extraction_runs(file_id, content_sha256)",
     "CREATE INDEX IF NOT EXISTS idx_extraction_identity ON extraction_runs(extraction_identity, status)",
 )
@@ -395,8 +428,18 @@ issue_counts AS (
     WHERE q.cleaning_run_id IS NULL OR c.cleaning_run_id IS NOT NULL
     GROUP BY q.asset_id
 ),
-semantic_assets AS (
-    SELECT DISTINCT asset_id, asset_type FROM semantic_metadata
+semantic_current AS (
+    SELECT * EXCLUDE (row_number)
+    FROM (
+        SELECT s.*,
+               ROW_NUMBER() OVER (
+                   PARTITION BY s.asset_id, s.asset_type
+                   ORDER BY s.current DESC, s.generated_at DESC, s.semantic_run_id DESC NULLS LAST
+               ) AS row_number
+        FROM semantic_metadata s
+        WHERE s.current = TRUE
+    ) ranked
+    WHERE row_number = 1
 ),
 text_chunk_counts AS (
     SELECT text_asset_id, COUNT(*) AS chunk_count
@@ -423,6 +466,15 @@ table_catalog AS (
             WHEN t.source_kind = 'image' THEN f.filename || ' / Table ' || CAST(ROW_NUMBER() OVER (PARTITION BY t.file_id ORDER BY t.table_id) AS VARCHAR)
             ELSE f.filename
         END AS fallback_display_name,
+        s.display_name AS semantic_display_name,
+        COALESCE(s.display_name,
+            CASE
+                WHEN t.sheet_name IS NOT NULL THEN f.filename || ' / ' || t.sheet_name
+                WHEN t.page_number IS NOT NULL THEN f.filename || ' / Page ' || CAST(t.page_number AS VARCHAR) || ' / Table ' || CAST(ROW_NUMBER() OVER (PARTITION BY t.file_id, t.page_number ORDER BY t.table_id) AS VARCHAR)
+                WHEN t.source_kind = 'image' THEN f.filename || ' / Table ' || CAST(ROW_NUMBER() OVER (PARTITION BY t.file_id ORDER BY t.table_id) AS VARCHAR)
+                ELSE f.filename
+            END) AS effective_display_name,
+        s.category AS category,
         COALESCE(p.row_count, t.row_count) AS "rows",
         CAST(NULL AS BIGINT) AS "chars",
         COALESCE(p.column_count, t.column_count) AS "columns",
@@ -436,6 +488,9 @@ table_catalog AS (
             END) AS quality_status,
         COALESCE(i.issue_count, 0) AS quality_issue_count,
         CASE WHEN s.asset_id IS NULL THEN 'pending' ELSE 'enriched' END AS semantic_status,
+        s.model AS semantic_model,
+        s.confidence AS semantic_confidence,
+        s.semantic_run_id,
         COALESCE(c.status, 'not_run') AS cleaning_status,
         c.cleaning_run_id,
         c.cleaning_identity,
@@ -456,7 +511,7 @@ table_catalog AS (
     LEFT JOIN latest_cleaning c ON c.asset_id = t.table_id AND c.content_sha256 = t.content_sha256
     LEFT JOIN table_profiles p ON p.cleaning_run_id = c.cleaning_run_id AND p.table_id = t.table_id
     LEFT JOIN issue_counts i ON i.asset_id = t.table_id
-    LEFT JOIN semantic_assets s ON s.asset_id = t.table_id AND s.asset_type = 'table'
+    LEFT JOIN semantic_current s ON s.asset_id = t.table_id AND s.asset_type = 'table'
     WHERE t.is_current = TRUE AND f.current_presence_state = 'present'
 ),
 text_catalog AS (
@@ -477,6 +532,13 @@ text_catalog AS (
             WHEN t.page_number IS NOT NULL THEN f.filename || ' / Page ' || CAST(t.page_number AS VARCHAR)
             ELSE f.filename
         END AS fallback_display_name,
+        s.display_name AS semantic_display_name,
+        COALESCE(s.display_name,
+            CASE
+                WHEN t.page_number IS NOT NULL THEN f.filename || ' / Page ' || CAST(t.page_number AS VARCHAR)
+                ELSE f.filename
+            END) AS effective_display_name,
+        s.category AS category,
         CAST(NULL AS BIGINT) AS "rows",
         COALESCE(p.char_count, LENGTH(t.text)) AS "chars",
         CAST(NULL AS BIGINT) AS "columns",
@@ -489,6 +551,9 @@ text_catalog AS (
             END) AS quality_status,
         COALESCE(i.issue_count, 0) AS quality_issue_count,
         CASE WHEN s.asset_id IS NULL THEN 'pending' ELSE 'enriched' END AS semantic_status,
+        s.model AS semantic_model,
+        s.confidence AS semantic_confidence,
+        s.semantic_run_id,
         COALESCE(c.status, 'not_run') AS cleaning_status,
         c.cleaning_run_id,
         c.cleaning_identity,
@@ -510,7 +575,7 @@ text_catalog AS (
         LEFT JOIN text_profiles p ON p.cleaning_run_id = c.cleaning_run_id AND p.text_asset_id = t.text_asset_id
         LEFT JOIN text_chunk_counts tc ON tc.text_asset_id = t.text_asset_id
     LEFT JOIN issue_counts i ON i.asset_id = t.text_asset_id
-    LEFT JOIN semantic_assets s ON s.asset_id = t.text_asset_id AND s.asset_type = 'text'
+    LEFT JOIN semantic_current s ON s.asset_id = t.text_asset_id AND s.asset_type = 'text'
     WHERE t.is_current = TRUE AND f.current_presence_state = 'present'
 )
 SELECT * FROM table_catalog
@@ -651,11 +716,46 @@ def _migrate_v3_to_v4(connection: duckdb.DuckDBPyConnection) -> None:
         connection.execute("ALTER TABLE quality_issues ADD COLUMN cleaning_run_id VARCHAR")
     for statement in CLEANING_SCHEMA_STATEMENTS:
         connection.execute(statement)
+    _ensure_v5_semantic_schema(connection)
     connection.execute("CREATE INDEX IF NOT EXISTS idx_quality_issues_cleaning ON quality_issues(cleaning_run_id, asset_id)")
     connection.execute(CATALOG_VIEW_STATEMENT)
     connection.execute(
         "UPDATE registry_meta SET meta_value=?, updated_at=? WHERE meta_key=?",
         ["4", utc_now(), paths.REGISTRY_SCHEMA_NAME],
+    )
+
+
+def _ensure_v5_semantic_schema(connection: duckdb.DuckDBPyConnection) -> None:
+    """Add Phase 7 semantic history columns/tables without rewriting assets."""
+
+    semantic_columns = {row[1] for row in connection.execute("PRAGMA table_info('semantic_metadata')").fetchall()}
+    additions = {
+        "semantic_run_id": "ALTER TABLE semantic_metadata ADD COLUMN semantic_run_id VARCHAR",
+        "input_hash": "ALTER TABLE semantic_metadata ADD COLUMN input_hash VARCHAR DEFAULT ''",
+        "current": "ALTER TABLE semantic_metadata ADD COLUMN current BOOLEAN DEFAULT TRUE",
+    }
+    for name, statement in additions.items():
+        if name not in semantic_columns:
+            connection.execute(statement)
+    issue_columns = {row[1] for row in connection.execute("PRAGMA table_info('quality_issues')").fetchall()}
+    if "semantic_run_id" not in issue_columns:
+        connection.execute("ALTER TABLE quality_issues ADD COLUMN semantic_run_id VARCHAR")
+    for statement in CATALOG_SCHEMA_STATEMENTS:
+        connection.execute(statement)
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_semantic_metadata_current ON semantic_metadata(asset_id, asset_type, current)")
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_semantic_runs_identity ON semantic_runs(semantic_identity, status)")
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_semantic_runs_asset ON semantic_runs(asset_id, asset_type, started_at)")
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_quality_issues_semantic ON quality_issues(semantic_run_id, asset_id)")
+
+
+def _migrate_v4_to_v5(connection: duckdb.DuckDBPyConnection) -> None:
+    """Add semantic runs/history and rebuild the unified catalog view."""
+
+    _ensure_v5_semantic_schema(connection)
+    connection.execute(CATALOG_VIEW_STATEMENT)
+    connection.execute(
+        "UPDATE registry_meta SET meta_value=?, updated_at=? WHERE meta_key=?",
+        ["5", utc_now(), paths.REGISTRY_SCHEMA_NAME],
     )
 
 
@@ -701,6 +801,13 @@ def initialize_schema(connection: duckdb.DuckDBPyConnection) -> None:
         # Re-run additive DDL after an interrupted migration before any
         # coordinator relies on the catalog view or profile tables.
         _migrate_v3_to_v4(connection)
+    if version == 4 and paths.REGISTRY_SCHEMA_VERSION >= 5:
+        _migrate_v4_to_v5(connection)
+        version = 5
+    if version == 5 and paths.REGISTRY_SCHEMA_VERSION == 5:
+        # Re-run additive DDL after an interrupted Phase 7 migration before
+        # any semantic coordinator relies on the history tables or view.
+        _migrate_v4_to_v5(connection)
     if version < paths.REGISTRY_SCHEMA_VERSION:
         raise RegistryError(f"Registry schema migration from {version} to {paths.REGISTRY_SCHEMA_VERSION} is not implemented")
 
@@ -2841,7 +2948,7 @@ class Registry:
         result: dict[str, Any] = dict(zip(columns, row))
         issue_cursor = self.connection.execute(
             """
-            SELECT issue_id, extraction_run_id, cleaning_run_id, asset_id, severity,
+            SELECT issue_id, extraction_run_id, cleaning_run_id, semantic_run_id, asset_id, severity,
                    issue_type, description, evidence_json, detected_by,
                    suggested_action, status, created_at
             FROM quality_issues
@@ -2880,7 +2987,214 @@ class Registry:
                     except json.JSONDecodeError:
                         pass
                 result["profile"] = profile
+        result["semantic_history"] = self.semantic_history(asset_id)
         return result
+
+    def semantic_reusable(self, semantic_identity: str, asset_id: str, asset_type: str) -> dict[str, Any] | None:
+        """Return a successful semantic result for an exact input identity."""
+
+        cursor = self.connection.execute(
+            """
+            SELECT r.*, m.display_name, m.category, m.description, m.keywords_json,
+                   m.summary, m.semantic_fields_json, m.confidence, m.generated_at
+            FROM semantic_runs r
+            JOIN semantic_metadata m ON m.semantic_run_id = r.semantic_run_id
+            WHERE r.semantic_identity=? AND r.asset_id=? AND r.asset_type=?
+              AND r.status='successful'
+            ORDER BY r.finished_at DESC, r.semantic_run_id DESC
+            LIMIT 1
+            """,
+            [semantic_identity, asset_id, asset_type],
+        )
+        row = cursor.fetchone()
+        if row is None:
+            return None
+        columns = [item[0] for item in cursor.description]
+        return dict(zip(columns, row))
+
+    def recover_incomplete_semantic_runs(self, asset_id: str | None = None) -> int:
+        clauses = ["status='running'"]
+        params: list[Any] = []
+        if asset_id is not None:
+            clauses.append("asset_id=?")
+            params.append(asset_id)
+        cursor = self.connection.execute(
+            f"UPDATE semantic_runs SET status='failed', finished_at=?, error_code='interrupted', error_message='semantic run interrupted before completion' WHERE {' AND '.join(clauses)} RETURNING semantic_run_id",
+            [utc_now(), *params],
+        )
+        return len(cursor.fetchall())
+
+    def start_semantic_run(
+        self,
+        *,
+        semantic_run_id: str,
+        semantic_identity: str,
+        asset_id: str,
+        asset_type: str,
+        file_id: str,
+        content_sha256: str,
+        normalized_artifact_identity: str,
+        model: str,
+        prompt_version: str,
+        config_version: str,
+        input_hash: str,
+        provider: str,
+        input_metadata: Mapping[str, Any],
+        started_at: datetime,
+        force: bool = False,
+    ) -> None:
+        self.recover_incomplete_semantic_runs(asset_id)
+        self.connection.execute(
+            """
+            INSERT INTO semantic_runs(
+                semantic_run_id, semantic_identity, asset_id, asset_type, file_id,
+                content_sha256, normalized_artifact_identity, model, prompt_version,
+                config_version, input_hash, provider, status, started_at, current,
+                input_metadata_json, warnings_json, error_code, error_message
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'running', ?, FALSE, ?, NULL, NULL, NULL)
+            """,
+            [
+                semantic_run_id,
+                semantic_identity,
+                asset_id,
+                asset_type,
+                file_id,
+                content_sha256,
+                normalized_artifact_identity,
+                model,
+                prompt_version,
+                config_version,
+                input_hash,
+                provider,
+                started_at,
+                json.dumps({**dict(input_metadata), "force": bool(force)}, ensure_ascii=False, default=str),
+            ],
+        )
+
+    def record_semantic_failure(
+        self,
+        semantic_run_id: str,
+        *,
+        finished_at: datetime,
+        error_code: str,
+        error_message: str,
+        warnings: Iterable[str] = (),
+    ) -> None:
+        self.connection.execute(
+            """
+            UPDATE semantic_runs SET status='failed', finished_at=?, current=FALSE,
+                warnings_json=?, error_code=?, error_message=?
+            WHERE semantic_run_id=?
+            """,
+            [finished_at, json.dumps(list(warnings), ensure_ascii=False), error_code, error_message, semantic_run_id],
+        )
+
+    def record_semantic_success(
+        self,
+        *,
+        semantic_run_id: str,
+        asset_id: str,
+        asset_type: str,
+        metadata: Mapping[str, Any],
+        generated_at: datetime,
+        finished_at: datetime,
+        warnings: Iterable[str] = (),
+        suggestions: Iterable[Mapping[str, Any]] = (),
+    ) -> None:
+        """Atomically publish semantic metadata and review-only suggestions."""
+
+        connection = self.connection
+        warning_list = list(warnings)
+        connection.execute("BEGIN TRANSACTION")
+        try:
+            connection.execute(
+                "UPDATE semantic_runs SET current=FALSE WHERE asset_id=? AND asset_type=? AND current=TRUE",
+                [asset_id, asset_type],
+            )
+            connection.execute(
+                "UPDATE semantic_metadata SET current=FALSE WHERE asset_id=? AND asset_type=? AND current=TRUE",
+                [asset_id, asset_type],
+            )
+            connection.execute(
+                """
+                INSERT INTO semantic_metadata(
+                    asset_id, asset_type, display_name, category, description,
+                    keywords_json, summary, semantic_fields_json, model,
+                    prompt_version, confidence, generated_at, semantic_run_id,
+                    input_hash, current
+                )
+                SELECT ?, ?, ?, ?, ?, ?, ?, ?, model, prompt_version, ?, ?, ?, input_hash, TRUE
+                FROM semantic_runs WHERE semantic_run_id=?
+                """,
+                [
+                    asset_id,
+                    asset_type,
+                    str(metadata["display_name"]),
+                    str(metadata["category"]),
+                    str(metadata["description"]),
+                    json.dumps(metadata.get("keywords", []), ensure_ascii=False, default=str),
+                    str(metadata["summary"]),
+                    json.dumps(metadata.get("semantic_fields", []), ensure_ascii=False, default=str),
+                    float(metadata["confidence"]),
+                    generated_at,
+                    semantic_run_id,
+                    semantic_run_id,
+                ],
+            )
+            connection.execute(
+                """
+                UPDATE semantic_runs SET status='successful', finished_at=?, current=TRUE,
+                    warnings_json=?, error_code=NULL, error_message=NULL
+                WHERE semantic_run_id=?
+                """,
+                [finished_at, json.dumps(warning_list, ensure_ascii=False), semantic_run_id],
+            )
+            for suggestion in suggestions:
+                issue_type = str(suggestion.get("issue_type") or "semantic_quality_suggestion")
+                explanation = str(suggestion.get("explanation") or "Semantic provider supplied a review suggestion.")
+                suggested_action = str(suggestion.get("suggested_action") or "Review this suggestion; it is not automatically applied.")
+                severity = str(suggestion.get("severity") or "warning")
+                if severity not in {"info", "warning", "error", "critical"}:
+                    severity = "warning"
+                issue_identity = json.dumps(
+                    [semantic_run_id, asset_id, issue_type, explanation, suggested_action],
+                    ensure_ascii=False,
+                    sort_keys=True,
+                ).encode("utf-8")
+                issue_id = f"sem_issue_{hashlib.sha256(issue_identity).hexdigest()[:32]}"
+                connection.execute(
+                    """
+                    INSERT OR REPLACE INTO quality_issues(
+                        issue_id, extraction_run_id, cleaning_run_id, semantic_run_id,
+                        asset_id, severity, issue_type, description, evidence_json,
+                        detected_by, suggested_action, status, created_at
+                    ) VALUES (?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?)
+                    """,
+                    [
+                        issue_id,
+                        semantic_run_id,
+                        asset_id,
+                        severity,
+                        issue_type,
+                        explanation,
+                        json.dumps({"semantic": True, "provider_suggestion": dict(suggestion)}, ensure_ascii=False, default=str),
+                        "semantic",
+                        suggested_action,
+                        finished_at,
+                    ],
+                )
+            connection.execute("COMMIT")
+        except Exception:
+            connection.execute("ROLLBACK")
+            raise
+
+    def semantic_history(self, asset_id: str) -> list[dict[str, Any]]:
+        cursor = self.connection.execute(
+            "SELECT * FROM semantic_runs WHERE asset_id=? ORDER BY started_at, semantic_run_id",
+            [asset_id],
+        )
+        columns = [item[0] for item in cursor.description]
+        return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
     def list_files(self, source_root: str | None = None, state: str | None = None, limit: int = 1000) -> list[dict[str, Any]]:
         if limit < 1 or limit > 100_000:

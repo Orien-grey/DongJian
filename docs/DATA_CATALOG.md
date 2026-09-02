@@ -1,12 +1,13 @@
-# Phase 6 local Data Catalog
+# Local Data Catalog (Phase 6 / Phase 7A)
 
 The Catalog is the read model over current extracted assets. It is stored in
 the embedded DuckDB file `workspace/state/registry.duckdb`; large table values
 remain in Parquet. There is no MySQL service and no network dependency.
 
-## Schema v4
+## Schema v5
 
-Phase 6 adds these structures without rewriting extraction history:
+Phase 6 and Phase 7A add these structures without rewriting extraction or
+cleaning history:
 
 | Structure | Purpose |
 | --- | --- |
@@ -14,12 +15,16 @@ Phase 6 adds these structures without rewriting extraction history:
 | `table_profiles` | Columnar table dimensions, null/duplicate/shape/OCR/provenance profile and profile JSON. |
 | `text_profiles` | Text size/page/block/chunk/native-OCR/low-content profile and profile JSON. |
 | `quality_issues.cleaning_run_id` | Separates deterministic cleaning issues from extraction issues. |
+| `semantic_runs` | Historical semantic attempts, cache identity, bounded-input audit metadata, and sanitized errors. |
+| `semantic_metadata` history fields | `semantic_run_id`, `input_hash`, and `current`; prior model/prompt results are retained. |
+| `quality_issues.semantic_run_id` | Links a semantic review suggestion without changing issue status. |
 | `catalog_assets` | Unified view over current TableAssets and TextAssets. |
 
 The migration from schema v3 is additive and idempotent. Existing
 `files`, `contents`, `scan_runs`, `extraction_runs`, raw assets, chunks, and
 issues remain available. Registry schema changes do not enter extraction
-identity, so opening the v4 Catalog does not invalidate raw extraction caches.
+identity, so opening the v5 Catalog does not invalidate raw extraction or
+Phase 6 cleaning caches.
 
 ## `catalog_assets` view
 
@@ -28,9 +33,11 @@ The view returns one row per current asset with:
 ```text
 asset_id, asset_type, file_id, source_root, content_sha256,
 source_file, source_format, extractor, extractor_version, source_kind,
-sheet_name, page_number, fallback_display_name,
+sheet_name, page_number, fallback_display_name, semantic_display_name,
+effective_display_name, category,
 rows/chars, columns/chunks, quality_status, quality_issue_count,
-semantic_status, cleaning_status, cleaning_run_id, cleaning_identity,
+semantic_status, semantic_model, semantic_confidence, semantic_run_id,
+cleaning_status, cleaning_run_id, cleaning_identity,
 cleaner, cleaner_version, raw_artifact_path, normalized_artifact_path,
 cleaned_normalized_artifact_path, extraction_normalized_artifact_path,
 metadata_artifact_path, cleaning_manifest_path, profile_artifact_path,
@@ -41,8 +48,10 @@ Table and text assets are a union, not mutually exclusive rows. A scanned PDF
 page or image may therefore have both a text row and one or more table rows.
 `fallback_display_name` is generated only from filename/sheet/page/table
 provenance, for example `report.pdf / Page 3 / Table 2`; it is not
-`SemanticMetadata` and never affects stable IDs. `semantic_status` is
-`pending` until a future explicitly authorized semantic pass.
+`SemanticMetadata` and never affects stable IDs. `semantic_display_name` is
+present only for the current successful result, and `effective_display_name`
+selects it over the fallback. `semantic_status` is `pending` until an
+explicit semantic pass.
 
 Before cleaning, the view falls back to extraction paths and source-aware
 quality state. After a successful cleaning run it exposes the cleaned
@@ -58,6 +67,8 @@ remove the raw path.
 .\chongzu.cmd catalog list --type table --quality needs_review --format pdf --limit 20
 .\chongzu.cmd catalog list --type text --format png --limit 20
 .\chongzu.cmd catalog show <asset-id> --rows 20 --chars 2000
+.\chongzu.cmd semantic status
+.\chongzu.cmd semantic enrich --provider fake --asset <asset-id>
 ```
 
 `summary` reports files, TableAssets, TextAssets, TextChunks, ready/review/
@@ -65,12 +76,14 @@ unusable counts, quality issues, and semantic-pending count. `list` supports
 only the small type/quality/format/limit filters. `show` includes source and
 provenance, metadata, profile, current quality issues, and a bounded preview
 (20 table rows or 2,000 text characters by default); it never prints a whole
-large Parquet table.
+large Parquet table. `show` also includes semantic history and effective-name
+selection. The Fake Provider is an explicit offline test path; the HTTP
+provider is disabled in Phase 7A.
 
 ## Boundaries
 
-Catalog metadata is deterministic and local. No semantic display name,
-category, summary, embedding, vector database, or LLM response is created by
-Phase 6. Unsupported files remain registered in `files` with their source
-fingerprint but have no asset row. All source and raw hashes remain stable
-across cleaning and Catalog queries.
+Catalog metadata remains local and queryable. Phase 7A may add Fake Provider
+semantic metadata, but no real LLM response, embedding, or vector database is
+created. Unsupported files remain registered in `files` with their source
+fingerprint but have no asset row. All source and raw/normalized hashes remain
+stable across cleaning, semantic validation, and Catalog queries.

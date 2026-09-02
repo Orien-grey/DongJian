@@ -5,10 +5,10 @@ The source of truth is the embedded DuckDB file
 a database service process. Scans write only below `workspace/state/` and
 `workspace/logs/`; source directories are read-only.
 
-## Schema version 4
+## Schema version 5
 
-`registry_meta` stores `chongzu_file_registry = 4`. Opening schema v1, v2, or v3
-performs ordered, restartable migrations through v4. A database
+`registry_meta` stores `chongzu_file_registry = 5`. Opening schema v1, v2, v3,
+or v4 performs ordered, restartable migrations through v5. A database
 newer than the supported version is rejected. No silent destructive rebuild is
 allowed.
 
@@ -19,6 +19,8 @@ The migration:
 - backfills those fields from stored detector/extension facts;
 - creates empty catalog contract tables and indexes;
 - adds cleaning/profile tables and the unified `catalog_assets` view;
+- adds semantic run history and current-result fields without replacing older
+  semantic records;
 - does not create demo/synthetic extraction rows.
 
 DuckDB does not permit the required ALTER and backfill on the same old table in
@@ -66,6 +68,7 @@ detection evidence; they are not moved/deleted and do not fail the scan.
 | `text_assets` | Current/historical TextAsset content, source/extractor/run provenance, and raw/normalized/metadata artifact paths. |
 | `text_chunks` | Searchable deterministic chunks with offsets and provenance JSON. |
 | `semantic_metadata` | Separate model-generated names/categories/descriptions/fields/summaries with model/prompt/time/confidence. |
+| `semantic_runs` | Every semantic attempt, cache identity, model/prompt/config, input audit counts, status, and sanitized error. |
 | `quality_issues` | Deterministic/AI/human issues and `open/accepted/ignored/resolved` review status. |
 | `cleaning_runs` | Independent cleaning identity, raw artifact identity, status, output paths, timings, and errors. |
 | `table_profiles` | Bounded deterministic table profile and quality signals for a cleaning run. |
@@ -76,6 +79,13 @@ One `file_id` is intentionally non-unique in both asset tables. There can be
 zero, one, or many table rows and independently zero, one, or many text rows.
 Semantic metadata has its own versioned identity tuple and cannot replace an
 asset row.
+
+Schema v5 extends `semantic_metadata` with `semantic_run_id`, `input_hash`, and
+`current`; `quality_issues.semantic_run_id` identifies review-only semantic
+suggestions. `catalog_assets` joins only the current successful semantic result
+and exposes fallback/effective display names. Historical results remain in
+DuckDB. Semantic migrations are additive and do not enter extraction or
+cleaning identities.
 
 Bulk table cells will be Parquet-first. DuckDB stores catalog metadata,
 provenance, processing/query state, and directly queries Parquet rather than
@@ -136,6 +146,13 @@ creates a new `cleaning_runs` result without invalidating a valid OCR, PDF, or
 structured extraction run. `catalog_assets` selects the latest cleaning result
 for the current asset/content pair; previous runs remain in history and raw
 artifacts remain intact.
+
+Semantic reuse is independent from extraction and cleaning. Its identity uses
+asset/type, normalized-artifact identity, provider, model, prompt version,
+semantic config version, and the bounded input hash. The input hash covers the
+bounded request envelope. Model or prompt changes create a semantic run only. A failed or
+invalid semantic response leaves assets, artifacts, and prior issue statuses
+intact.
 
 ## Lightweight detection versus business support
 

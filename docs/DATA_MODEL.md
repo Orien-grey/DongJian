@@ -187,9 +187,20 @@ mutation.
 | `prompt_version` | `str` | Versioned prompt/response contract. |
 | `confidence` | `float | None` | Confidence in `[0, 1]` when supplied/derived. |
 | `generated_at` | `datetime` | Generation time. |
+| `semantic_run_id` | `str | None` | Versioned semantic attempt that produced this record. |
+| `input_hash` | `str | None` | Hash of the bounded provider-neutral input envelope. |
+| `current` | `bool` | Catalog projection marker; historical records remain stored. |
 
 Multiple model/prompt/time records may refer to the same asset. Stable asset
 IDs do not change when display names or categories change.
+
+Phase 7A table output uses strict JSON keys `display_name`, `category`,
+`description`, `keywords`, `summary`, `semantic_fields`, and `confidence`.
+Each semantic field contains `source_column`, `semantic_name`, `description`,
+`semantic_type`, nullable `unit`, `aliases`, and a `[0, 1]` confidence. Text
+output uses the same common keys without `semantic_fields`. Optional
+`quality_suggestions` are review-only records. These values are never applied
+to Parquet columns or text.
 
 ## QualityIssue
 
@@ -224,7 +235,7 @@ parent text asset plus deterministic index and offsets.
 
 ## Persistence mapping
 
-DuckDB schema v4 maps tuples/mappings/bounding boxes to JSON catalog columns
+DuckDB schema v5 maps tuples/mappings/bounding boxes to JSON catalog columns
 and stores text directly in the initial contract. Phase 3 writes real table
 catalog rows whose payload paths reference Parquet and metadata below
 `workspace/artifacts/`. Phase 4A writes real PDF TextAsset/TextChunk rows and
@@ -247,6 +258,11 @@ The `catalog_assets` view is the unified read model for current assets. It
 exposes `asset_id`, asset/source format, fallback source display name,
 extractor/version, rows or chars, columns or chunks, quality status and issue
 count, raw/cleaned artifact paths, extraction/cleaning provenance, and
-`semantic_status` (`pending` until a future authorized enrichment). Fallback
+`semantic_status` (`pending` until an explicit semantic enrichment). Fallback
 names such as `report.pdf / Page 3 / Table 2` are presentation helpers only;
 they are not semantic metadata and never participate in stable IDs.
+
+`semantic_runs` preserves every attempt, model, prompt version, config version,
+normalized-artifact identity, input hash, status, bounded-input audit metadata,
+warnings, and sanitized failure code. `semantic_metadata.current` identifies
+the current successful result; older model/prompt results remain queryable.

@@ -90,8 +90,10 @@ and invoke the standalone executable directly. They never activate or invoke
 expected; that is a normal, non-venv interpreter.
 
 Phase 3, Phase 4A, the Phase 4B candidate, and the Phase 5A/5B OCR foundation
-use the existing project-local runtime. Phase 6 cleaning/catalog code adds no
-package or model payload. The packages are installed into `runtime\packages`
+use the existing project-local runtime. Phase 6 cleaning/catalog and Phase 7A
+semantic infrastructure add no package, OCR, or model payload. Phase 7A uses
+only Python standard library code for configuration, validation, and its
+disabled HTTP adapter. The packages are installed into `runtime\packages`
 with project-private uv, the locked
 versions/hashes, and a wheel-only constraint. `scripts\bootstrap.ps1` performs
 the install in a temporary project-local staging venv, removes stale target
@@ -236,24 +238,28 @@ PyArrow, Pandas, OpenPyXL, GMFT, Docling, Torch, Java, and Tika remain absent.
 RapidOCR/ONNX Runtime are present for offline OCR only; Phase 5B injects their
 OCR blocks into the existing img2table image adapter without a second OCR
 backend call. NumPy/OpenCV/pypdfium2 are shared native dependencies of the
-candidate and OCR trees. Phase 5B and Phase 6 add no package or model
-dependency.
+candidate and OCR trees. Phase 5B, Phase 6, and Phase 7A add no package or
+model dependency.
 Polars writes and reads Parquet using its bundled native runtime. PyMuPDF's
 native payload is loaded from `runtime\packages\pymupdf`; the development venv
 is not a production input.
 
-Phase 3/4A/4B/5A/5B/6 processing makes no network request and does not call the
-configured LLM. Provisioning is the only network-enabled step. Phase 6 uses
-only the already installed Polars and DuckDB payload. Doctor reports
+Phase 3/4A/4B/5A/5B/6 processing and Phase 7A Fake semantic enrichment make no
+network request and do not call a configured LLM. Provisioning is the only
+network-enabled step in the current workflow. Phase 6/7A use only the already
+installed Polars, DuckDB, and standard-library payload. Doctor reports
 `PyMuPDF PASS`, `img2table PASS (candidate)`, `RapidOCR PASS`, `ONNX Runtime
 PASS`, `OCR models PASS`, `Polars PASS`, `Calamine PASS`, `DuckDB PASS`, and
-`LLM STATUS: NOT CONFIGURED` when no real config exists. Java/Tika is not a
+`LLM STATUS: NOT CONFIGURED / OPTIONAL` when no `.env` exists. Java/Tika is not a
 default route; GMFT and Docling are not next-phase requirements and can return
 only through later evidence. img2table's optional OCR extras are not installed;
 Phase 5B uses its own explicit RapidOCR model bundle and never downloads models
-at runtime. `process SOURCE` and `catalog` only read/write project-contained
-workspace state; they do not run `pip`, `uv sync`, Hugging Face, HTTP OCR, or an
-LLM endpoint. Phase 6 introduces no runtime-size increase; final bundle-size
-measurement must still be repeated after package cleanup.
+at runtime. `process SOURCE`, `catalog`, `semantic status`, and the Phase 7A
+Fake Provider only read/write project-contained workspace state; they do not
+run `pip`, `uv sync`, Hugging Face, HTTP OCR, or an LLM endpoint. Phase 6/7A
+introduce no runtime-size increase; final bundle-size measurement must still
+be repeated after package cleanup. The future `.env` is project-local and
+ignored by Git; the current Phase 7A guard rejects real provider execution
+even when it is filled.
 
 The standalone CPython image also contains its own project-local bootstrap tools `pip==26.1.2` and `setuptools==82.0.1` under `runtime\python`; they are not system packages and are not exposed through the venv because the venv does not use system site-packages. The package build isolation uses the exact `setuptools==80.10.2` requirement declared in `pyproject.toml`.

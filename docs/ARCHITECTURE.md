@@ -309,26 +309,41 @@ treated as accuracy, and `needs_review` assets remain cataloged. A cleaner
 failure records `cleaning_status=failed` and an issue while retaining the raw
 asset.
 
-Schema v4 adds `cleaning_runs`, `table_profiles`, `text_profiles`, and the
-`catalog_assets` view. The view joins source file/provenance, current raw and
-cleaned paths, profile/quality state, issue count, fallback source name, and
-`semantic_status=pending` until a future separately authorized semantic pass.
-Cleaning reuse is independent of extraction reuse: its identity includes asset,
-source SHA, raw artifact hash, cleaner/config/profile versions, and options.
+Schema v4 added `cleaning_runs`, `table_profiles`, `text_profiles`, and the
+`catalog_assets` view. Schema v5 adds `semantic_runs` and the additive
+`semantic_metadata` history fields (`semantic_run_id`, `input_hash`, and
+`current`), plus semantic issue provenance. The migration is additive and does
+not rewrite extraction or cleaning history. The view joins source/provenance,
+raw and cleaned paths, profile/quality state, fallback name, and the current
+semantic result. Cleaning and semantic reuse each have identities independent
+of extraction reuse.
 
 ## Semantic provider boundary
 
-`src/chongzu/semantic.py` defines a provider-neutral configuration and
-`SemanticEnrichmentProvider` protocol. DeepSeek may be configured for local
-development, while the expected company deployment is Qwen3.6-35B-A3B. The
-model is a config value, not a hard-coded exclusive choice. `config/llm.example.json`
-contains no credential. Real LLM config files are ignored by Git.
+`src/chongzu/semantic/` defines `SemanticRequest`/`SemanticResponse`, the
+provider protocol, versioned prompts, bounded input builders, strict local
+validation, the deterministic Fake Provider, and the standard-library
+OpenAI-compatible adapter. Phase 7A runs only the explicit Fake Provider. The
+HTTP adapter is hard-disabled by the Phase 7A runner, so even a filled `.env`
+cannot create a real request in this phase. There is no vendor-specific branch:
+DeepSeek may be used in a future authorized development test and the company
+may deploy Qwen3.6-35B-A3B, but both are configuration choices rather than
+ChongZu dependencies or contract types.
 
-No network client is implemented in this refactor. A future adapter may contact
-only the base URL the user explicitly configures, with no automatic public
-fallback. It must record model, prompt version, confidence, generation time,
-request/result status, and enough non-secret evidence for audit. API keys must
-never enter logs, DuckDB, prompt captures, or Git.
+The formal configuration source is the project-root `.env`, represented by
+`.env.example`; the tracked `config/llm.example.json` is documentation-only
+compatibility material. Missing values produce `LLM_STATUS=NOT_CONFIGURED` and
+are normal. No endpoint is guessed and no public fallback exists. The adapter
+supports bounded timeout/retry, JSON and response-size checks, and sanitized
+error categories; Phase 7A tests use only a monkeypatched local unit stub and
+never contact a live endpoint.
+
+Semantic input contains only controlled summaries of normalized assets:
+provenance, profile, quality hints, bounded representative table rows or text
+excerpts, and audit counts. File contents are explicitly marked untrusted
+reference data. Validated output is metadata/history or an open review
+suggestion; it cannot mutate raw/normalized artifacts, physical columns, issue
+status, or stable IDs. See [SEMANTIC_ENRICHMENT.md](SEMANTIC_ENRICHMENT.md).
 
 ## Embedded data catalog
 
@@ -337,7 +352,7 @@ ChongZu uses the embedded file
 process. DuckDB stores catalog metadata, provenance, policy and run state, and
 future query state. It directly queries large Parquet table artifacts.
 
-Schema v4 preserves Phase 2 `files`, `contents`, `scan_runs`, `file_attempts`,
+Schema v5 preserves Phase 2 `files`, `contents`, `scan_runs`, `file_attempts`,
 and `run_errors`, plus the v2/v3 policy/extraction foundation. It adds
 structured extraction identity, source ranges, metadata paths, current-asset
 state, and real run/table/issue metrics to:
@@ -347,6 +362,7 @@ state, and real run/table/issue metrics to:
 - `text_assets`
 - `text_chunks`
 - `semantic_metadata`
+- `semantic_runs`
 - `quality_issues`
 - `cleaning_runs`
 - `table_profiles`

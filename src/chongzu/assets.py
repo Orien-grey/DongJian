@@ -347,6 +347,9 @@ class SemanticMetadata:
     prompt_version: str
     confidence: float | None
     generated_at: datetime
+    semantic_run_id: str | None = None
+    input_hash: str | None = None
+    current: bool = True
 
     def __post_init__(self) -> None:
         for name in ("asset_id", "model", "prompt_version"):
@@ -355,6 +358,10 @@ class SemanticMetadata:
         object.__setattr__(self, "keywords", tuple(self.keywords))
         _confidence(self.confidence)
         _timestamp(self.generated_at, "generated_at")
+        if self.semantic_run_id is not None:
+            _required(self.semantic_run_id, "semantic_run_id")
+        if self.input_hash is not None:
+            _required(self.input_hash, "input_hash")
 
 
 @dataclass(frozen=True)

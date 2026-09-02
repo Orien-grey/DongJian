@@ -25,7 +25,9 @@ formal `extract SOURCE` pipeline. Images and scanned PDF pages may now emit
 independent TextAssets and TableAssets from one OCR pass. Phase 6 adds the
 formal `process SOURCE` route: deterministic cleaning, bounded profiling,
 quality status/issues, and a queryable `catalog_assets` view. No LLM,
-embedding, or frontend is part of the core route.
+embedding, or frontend is part of the core route. Phase 7A adds the offline
+semantic contract, bounded input builder, strict validator, Fake Provider, and
+versioned semantic run history; it does not enable real model calls.
 
 ## Product flow
 
@@ -74,9 +76,11 @@ Phase 5B OCR/image route and is not yet a permanent default extractor.
 `possible_table_candidate`
 is a weak heuristic routing hint, not table ground truth.
 
-The current runtime reports `LLM STATUS = NOT CONFIGURED` when no real config
-exists. This is normal: extraction never calls DeepSeek, Qwen, OpenAI, a vision
-API, an embedding API, or a public endpoint/fallback.
+The current runtime reports `LLM STATUS = NOT CONFIGURED` when no `.env` exists.
+This is normal: extraction never calls DeepSeek, Qwen, OpenAI, a vision API, an
+embedding API, or a public endpoint/fallback. Phase 7A's HTTP adapter is
+infrastructure only and is hard-disabled until a separately authorized Phase
+7B.
 
 ## Data safety and semantic boundary
 
@@ -89,14 +93,19 @@ API, an embedding API, or a public endpoint/fallback.
   suggestions or metadata for human review and cannot overwrite raw data.
 - `process SOURCE` writes separate cleaning manifests, normalized artifacts,
   profiles, and catalog metadata. Raw artifacts and source SHA-256 remain
-  unchanged; `semantic_status` is `pending` until a future authorized pass.
+  unchanged; `semantic_status` is `pending` until an explicit semantic pass.
+- `process` never calls the semantic provider. `semantic status` is read-only;
+  Phase 7A enrichment requires the explicit offline `--provider fake` switch.
+- Semantic output is metadata/history only. It cannot rename physical columns,
+  alter Parquet/text, resolve a quality issue, or change an asset ID.
 - The only future runtime network destination is an LLM base URL explicitly
   configured by the user. There is no automatic public fallback.
 
 See [Architecture](docs/ARCHITECTURE.md), [Data model](docs/DATA_MODEL.md),
 [Cleaning](docs/CLEANING.md), [Data Catalog](docs/DATA_CATALOG.md),
 [Unified extraction](docs/UNIFIED_EXTRACTION.md), [Registry](docs/REGISTRY.md),
-[AI semantics](docs/AI_SEMANTICS.md), [UI architecture](docs/UI_ARCHITECTURE.md),
+[AI semantics](docs/AI_SEMANTICS.md), [Semantic enrichment](docs/SEMANTIC_ENRICHMENT.md),
+[UI architecture](docs/UI_ARCHITECTURE.md),
 [Roadmap](docs/ROADMAP.md), and [Runtime](docs/RUNTIME.md).
 
 ## Repository layout
@@ -105,7 +114,8 @@ See [Architecture](docs/ARCHITECTURE.md), [Data model](docs/DATA_MODEL.md),
 | --- | --- |
 | `src/chongzu/` | Registry, detector, policy, asset/semantic/search contracts, and CLI |
 | `tests/` | Automated tests and synthetic fixtures only |
-| `config/` | Versioned non-secret examples; real `llm*.json` files are ignored |
+| `.env.example` | Blank provider-neutral semantic configuration example; `.env` is ignored |
+| `config/` | Legacy JSON example for documentation only; real files are ignored |
 | `scripts/` | Windows environment, bootstrap, doctor, and launcher scripts |
 | `docs/` | Architecture, contracts, roadmap, UI, and runtime records |
 | `runtime/` | Standalone CPython, production packages, dev venv, and uv payloads; ignored |
@@ -141,6 +151,8 @@ Formal portable launchers require no activation:
 .\chongzu.cmd catalog summary
 .\chongzu.cmd catalog list --type table --quality needs_review --limit 20
 .\chongzu.cmd catalog show <asset-id> --rows 20 --chars 2000
+.\chongzu.cmd semantic status
+.\chongzu.cmd semantic enrich --provider fake --asset <asset-id>
 .\chongzu.cmd benchmark pdf-consistency
 .\chongzu.cmd benchmark ocr "D:\Research Data\Project" --workers 2
 .\chongzu.cmd registry summary
@@ -173,4 +185,5 @@ dependencies of the table/OCR candidates. See
 [PDF extraction](docs/PDF_EXTRACTION.md), and
 [PDF table extraction](docs/PDF_TABLE_EXTRACTION.md), and
 [OCR foundation](docs/OCR_FOUNDATION.md), [unified extraction](docs/UNIFIED_EXTRACTION.md),
-[cleaning](docs/CLEANING.md), and [data catalog](docs/DATA_CATALOG.md).
+[cleaning](docs/CLEANING.md), [data catalog](docs/DATA_CATALOG.md), and
+[semantic enrichment](docs/SEMANTIC_ENRICHMENT.md).

@@ -29,6 +29,12 @@ from .extract.artifacts import artifact_absolute
 from .benchmark.pdf_real import run_real_pdf_benchmark
 from .benchmark.ocr_consistency import run_rendered_page_consistency
 from .clean import CleaningError, process_source
+from .semantic.runner import (
+    RealSemanticProviderDisabled,
+    SemanticNotConfigured,
+    enrich_catalog,
+    semantic_status,
+)
 
 
 def _print_summary(summary) -> None:
@@ -94,6 +100,24 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="drop exact duplicate rows in the derived normalized artifact",
     )
+
+    semantic_parser = sub.add_parser("semantic", help="explicit optional semantic enrichment")
+    semantic_sub = semantic_parser.add_subparsers(dest="semantic_command", required=True)
+    semantic_sub.add_parser("status", help="show provider configuration without making a network call")
+    semantic_enrich_parser = semantic_sub.add_parser(
+        "enrich", help="enrich catalog assets; Phase 7A permits only explicit --provider fake"
+    )
+    semantic_enrich_parser.add_argument("--source", type=Path, default=None)
+    semantic_enrich_parser.add_argument("--asset", dest="asset_id", default=None)
+    semantic_enrich_parser.add_argument("--type", dest="asset_type", choices=("table", "text"), default=None)
+    semantic_enrich_parser.add_argument(
+        "--provider",
+        choices=("openai-compatible", "fake"),
+        default="openai-compatible",
+        help="openai-compatible is disabled in Phase 7A; fake is an explicit offline test provider",
+    )
+    semantic_enrich_parser.add_argument("--force", action="store_true")
+    semantic_enrich_parser.add_argument("--limit", type=int, default=None)
 
     registry_parser = sub.add_parser("registry", help="inspect the local DuckDB registry")
     registry_sub = registry_parser.add_subparsers(dest="registry_command", required=True)
@@ -290,6 +314,25 @@ def _print_process_summary(summary) -> None:
     print(f"Total wall time: {summary.wall_time_ms:.2f} ms")
 
 
+def _print_semantic_summary(summary) -> None:
+    print(f"Provider: {summary.provider}")
+    print(f"Model: {summary.model}")
+    print(f"Assets considered: {summary.assets_considered}")
+    print(f"Attempted: {summary.attempted}")
+    print(f"Enriched: {summary.enriched}")
+    print(f"Reused: {summary.reused}")
+    print(f"Failed: {summary.failed}")
+    print(f"Warnings: {summary.warnings}")
+    print(f"Quality suggestions: {summary.quality_suggestions}")
+    print(f"Source chars: {summary.source_chars}")
+    print(f"Sent chars: {summary.sent_chars}")
+    print(f"Sampled rows: {summary.sampled_rows}")
+    print(f"Inputs truncated: {summary.input_truncated}")
+    print(f"Wall time: {summary.wall_time_ms:.2f} ms")
+    for failure in summary.failures[:20]:
+        print(f"Failure: {failure.get('asset_id')} [{failure.get('error_code')}] {failure.get('error')}")
+
+
 def _read_json_artifact(path_value: object):
     if not path_value:
         return None
@@ -403,6 +446,31 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
             _print_process_summary(summary)
             return 0 if summary.cleaning_failures == 0 else 0
+        if parsed.command == "semantic" and parsed.semantic_command == "status":
+            status = semantic_status()
+            print(f"Provider: {status['provider']}")
+            print(f"Model: {status['model']}")
+            print(f"LLM_STATUS = {status['llm_status']}")
+            print(f"Network calls: {'enabled' if status['network_calls'] else 'disabled'}")
+            return 0
+        if parsed.command == "semantic" and parsed.semantic_command == "enrich":
+            try:
+                summary = enrich_catalog(
+                    source=parsed.source,
+                    asset_id=parsed.asset_id,
+                    asset_type=parsed.asset_type,
+                    provider_name=parsed.provider,
+                    force=parsed.force,
+                    limit=parsed.limit,
+                )
+            except SemanticNotConfigured:
+                print("Semantic enrichment is not configured.")
+                return 0
+            except RealSemanticProviderDisabled as exc:
+                print(str(exc))
+                return 0
+            _print_semantic_summary(summary)
+            return 0
         if parsed.command == "benchmark" and parsed.benchmark_command == "scan":
             summary = scan_source(parsed.source, workers=parsed.workers, rehash=parsed.rehash)
             _print_summary(summary)

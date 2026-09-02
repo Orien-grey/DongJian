@@ -1,115 +1,187 @@
 # AI semantic enrichment
 
-## Role
+Phase 7A establishes the semantic layer without making it a dependency of
+extraction, deterministic cleaning, profiling, Catalog, or relocation. It
+consumes only a bounded summary of an already published normalized
+`TableAsset`/`TextAsset`; it never receives the source file, PDF page image, raw
+artifact, or complete large table.
 
-The future semantic layer interprets already extracted `TableAsset` and
-`TextAsset` records. It may propose human-facing names, categories, field
-meanings, summaries, quality explanations, and difficult visual/OCR judgments.
-It is optional and is never part of extraction correctness.
+The layer is provider/model neutral. DeepSeek may be used for a future
+explicitly authorized development test, and the company deployment may use
+`Qwen3.6-35B-A3B`, but neither name appears in business routing or contract
+logic. ChongZu does not select a public endpoint, fallback server, vision
+endpoint, or embedding endpoint.
 
-LLM and network-model calls are disabled unless the user has supplied a real
-provider configuration and explicitly authorized a test. Phase 4C, Phase 5A,
-and Phase 5B do not read an LLM configuration and make no model/API requests.
+## Phase 7A boundary
 
-The semantic layer is provider-neutral. During local development and semantic
-contract tests, a user may configure a DeepSeek OpenAI-compatible endpoint. The
-company deployment is expected to use a separately deployed
-`Qwen3.6-35B-A3B` service. These are deployment choices, not ChongZu runtime
-dependencies: neither the provider nor model is hard-coded into extraction,
-catalog, or quality logic.
+The current package is `src/chongzu/semantic/`:
 
-## Configuration contract
+| Module | Responsibility |
+| --- | --- |
+| `models.py` | `SemanticRequest`, `SemanticResponse`, validated metadata contracts and hashes. |
+| `provider.py` | Provider-neutral protocol and safe error taxonomy. |
+| `config.py` | Project-root `.env` parser and optional status. |
+| `prompts.py` | Versioned prompt sections and output contracts. |
+| `input_builder.py` | Normalized-artifact sampling, truncation, and audit metadata. |
+| `validator.py` | Strict local JSON/type/range/column validation. |
+| `fake_provider.py` | Deterministic no-network test provider. |
+| `openai_compatible.py` | Minimal standard-library text chat adapter, disabled in Phase 7A. |
+| `runner.py` | Cache identity, per-asset isolation, and Registry persistence. |
 
-The tracked `config/llm.example.json` is intentionally inactive:
+The flow is:
+
+```text
+normalized asset -> bounded SemanticRequest -> provider
+       -> strict validator -> SemanticMetadata / open review suggestion
+       -> semantic_runs + catalog_assets current projection
+```
+
+`raw`, `normalized`, and `semantic` remain separate. A semantic response can
+only add metadata or an open suggestion. It cannot rename a physical column,
+rewrite a Parquet/text artifact, change units, delete/merge rows, resolve a
+quality issue, or change an asset ID.
+
+## Configuration and status
+
+The only future runtime configuration source is the project-root `.env`:
+
+```text
+LLM_BASE_URL=
+LLM_API_KEY=
+LLM_MODEL=
+LLM_TIMEOUT_SECONDS=60
+LLM_MAX_RETRIES=2
+```
+
+`.env.example` contains no secret and `.env` is ignored by Git. The tracked
+`config/llm.example.json` is a legacy documentation example only; it is not an
+implicit runtime configuration source. With missing values:
+
+```text
+Provider: not configured
+Model: not configured
+LLM_STATUS = NOT_CONFIGURED
+Network calls: disabled
+```
+
+Doctor reports `LLM: NOT CONFIGURED / OPTIONAL` through its historical
+`LLM STATUS` label and remains successful. `semantic enrich` without
+configuration prints `Semantic enrichment is not configured.` and performs no
+request. In Phase 7A, even a filled `.env` cannot enable the real provider;
+Phase 7B requires a new explicit user authorization.
+
+## Input contract and exposure audit
+
+`SemanticRequest` contains asset ID/type, model, prompt version, semantic config
+version, normalized-artifact SHA-256, separate `instructions`, structured
+`reference_data`, and `output_contract`. Its input hash covers that bounded
+envelope and audit metadata. The reference section is explicitly
+untrusted reference data so text such as “Ignore previous instructions” cannot
+change the task.
+
+Table input includes source filename, sheet/page, original and normalized
+column names, row/column counts, physical profile, null/distinct/sample hints,
+quality issues, extraction provenance, and deterministic representative rows.
+The default table sample is at most 18 rows using head/middle/tail selection;
+each cell is capped at 240 characters. Text input includes provenance, profile,
+quality hints, selected chunks, and a bounded normalized excerpt capped at
+12,000 characters. No image/PDF binary is sent and no RAG is implemented.
+
+The request audit metadata records:
 
 ```json
 {
-  "base_url": "",
-  "api_key": "",
-  "model": "",
-  "timeout_seconds": 60
+  "source_chars": 12345,
+  "sent_chars": 2345,
+  "sampled_rows": 18,
+  "input_truncated": true,
+  "reference_bytes": 12000
 }
 ```
 
-Real `config/llm.json` and `config/llm.*.json` files are ignored. The example
-intentionally leaves endpoint, credential, and model values empty; it is not a
-runtime default or a hard-coded decision. A deployment can fill it with a
-DeepSeek model for local testing, the expected company Qwen service, or another
-OpenAI-compatible model.
-The standard-library `LLMConfig` loader validates an explicitly configured base
-URL, API key, model, and positive timeout before use. It does not select a
-default public URL, read a global OpenAI config, inspect `%USERPROFILE%`, or
-fall back to another endpoint.
+Reference data is compacted to a hard 48 KiB bound and the full request envelope
+to a 64 KiB bound. Truncation is deterministic and included in the input hash.
+The runner stores counts and hashes, not the API key or complete prompt, in
+`semantic_runs`.
 
-## Provider boundary
+## Prompt and JSON contracts
 
-`src/chongzu/semantic.py` contains only:
+Prompt versions are `table-semantic-v1` and `text-semantic-v1`. The sections
+`instructions`, `reference_data`, and `output_contract` are kept distinct.
+Changing a prompt version changes semantic identity and reruns only semantic
+enrichment.
 
-- `LLMConfig`;
-- `SemanticEnrichmentRequest`, which references an existing asset and a
-  versioned prompt contract;
-- `SemanticEnrichmentProvider`, a protocol returning `SemanticMetadata`.
+Table output must be strict JSON with:
 
-There is no HTTP SDK/client and no API call in the Architecture Refactor. A
-future adapter must remain replaceable and receive configuration explicitly.
-DeepSeek is not assumed to provide vision, and Qwen vision is not assumed to
-exist either. A future adapter must perform an explicit capability probe before
-requesting images or other multimodal inputs; model names alone never enable a
-capability.
+```json
+{
+  "display_name": "...",
+  "category": "...",
+  "description": "...",
+  "keywords": ["..."],
+  "summary": "...",
+  "semantic_fields": [
+    {
+      "source_column": "existing normalized name",
+      "semantic_name": "...",
+      "description": "...",
+      "semantic_type": "...",
+      "unit": null,
+      "aliases": [],
+      "confidence": 0.0
+    }
+  ],
+  "confidence": 0.0
+}
+```
 
-## Semantic operations
+Text uses the common fields without `semantic_fields`. Both may include the
+known optional `quality_suggestions` list. Unknown fields, including
+`corrected_rows`, are rejected. The validator checks required fields, JSON
+size, types, finite confidence in `[0,1]`, list contents, and table
+`source_column` membership in the actual normalized columns. Duplicate mappings
+are valid but produce a warning. Validation failure writes no
+`SemanticMetadata`.
 
-Candidate tasks include:
+Quality suggestions are persisted as `QualityIssue` rows with
+`detected_by=semantic`, `semantic_run_id`, and status `open`. Existing issue
+statuses are never changed and a suggestion is not an accepted human decision.
 
-- dataset/table/text display naming;
-- research-domain category and keyword assignment;
-- column/field descriptions and semantic types;
-- multi-row table-header interpretation;
-- synonym, unit, and related-table judgments;
-- text and asset summaries;
-- anomaly/quality explanations;
-- optional review of difficult OCR or visual extraction evidence.
+## Provider behavior
 
-The output is a new `SemanticMetadata`, `QualityIssue`, or proposed cleaning
-operation. The model cannot issue a direct write that replaces raw table cells,
-normalized Parquet, TextAsset text, source files, or provenance.
+`FakeSemanticProvider` is deterministic and has no socket/HTTP path. It is
+available only after an explicit `--provider fake` CLI switch or from tests.
+The OpenAI-compatible adapter uses Python standard library `urllib`, explicit
+`.env` values, `Authorization`, JSON, timeout, response-size limits, HTTP/error
+mapping, and at most `LLM_MAX_RETRIES` retries for bounded transient failures.
+It has no vendor branches and no fallback. The Phase 7A runner rejects real
+provider execution before constructing a request, so tests and current CLI
+smoke runs cannot contact DeepSeek, Qwen, OpenAI, localhost, or any other
+endpoint.
 
-## Deterministic versus semantic cleaning
+## Identity, history, and failure isolation
 
-Local deterministic code owns mechanical operations such as Unicode
-normalization, trim, empty rows/columns, duplicate rows, null handling,
-numeric/date inference, obvious encoding repair, and mechanical column-name
-normalization.
+Semantic reuse identity includes asset ID/type, normalized artifact identity,
+model, prompt version, semantic config version, provider, and input hash. The
+input hash covers the bounded prompt envelope and audit metadata. Same identity is
+`REUSE`; model or prompt changes create a new semantic run without extraction
+or cleaning. `semantic_runs` preserves successful, failed, and interrupted
+history. `semantic_metadata.current` marks the current successful result; old
+model/prompt results remain available.
 
-The model owns only interpretations that need context: actual header meaning,
-units, dataset identity/category, related tables, ambiguous anomalies, and
-hard OCR/visual review. A semantic suggestion must be accepted/modified/ignored
-through a review workflow before any later deterministic transformation is
-published.
+Provider, input-builder, and validation failures are isolated to one asset.
+They record a sanitized error/status in `semantic_runs` and leave Catalog,
+raw artifacts, normalized artifacts, source SHA-256, and existing quality issue
+statuses intact.
 
-## Audit and failure behavior
+## Commands and scope
 
-Every semantic record stores:
+```text
+.\chongzu.cmd semantic status
+.\chongzu.cmd semantic enrich --provider fake --asset <asset-id>
+.\chongzu.cmd semantic enrich --provider fake --type table --limit 10
+```
 
-- target asset ID/type;
-- model and prompt version;
-- generated time and confidence;
-- structured semantic fields rather than an opaque replacement blob.
-
-Future request/run logging must store outcome, timing, retry/error category,
-and non-secret request-contract hashes. API keys and authorization headers must
-never be logged. A timeout, invalid response, unavailable server, or refused
-request leaves extraction assets valid and records an isolated semantic
-failure. It never triggers a public-network fallback.
-
-## Future search and embeddings
-
-Structured questions will eventually select table candidates, ask the configured
-provider for restricted read-only SQL, validate the SQL, and query
-DuckDB/Parquet. Text questions will select TextChunks by keyword and later
-optional vector retrieval before synthesis.
-
-The embedding service is unknown. `src/chongzu/search.py` reserves only an
-`EmbeddingProvider` interface location. The project does not assume an
-embedding endpoint, add embedding fields to core assets, install a local model,
-or install a vector database in this phase.
+`process SOURCE` does not invoke semantic enrichment. No vision, embedding,
+vector database, frontend, GMFT, Docling, new OCR, or real model acceptance is
+part of Phase 7A. Phase 7B is **BLOCKED BY USER CONFIGURATION / NOT RUN**.

@@ -467,6 +467,32 @@ def test_relocated_copy_reanchors_runtime_registry_and_cache() -> None:
         table_payload = json.loads(table_show.stdout)
         assert len(table_payload["preview"]) <= 2
         assert table_payload["asset"]["asset_type"] == "table"
+        semantic_status = _run_cmd(
+            destination / "chongzu.cmd",
+            ["semantic", "status"],
+            destination,
+            clean_env,
+        )
+        assert semantic_status.returncode == 0, semantic_status.stdout + semantic_status.stderr
+        assert "LLM_STATUS = NOT_CONFIGURED" in semantic_status.stdout
+        fake_semantic = _run_cmd(
+            destination / "chongzu.cmd",
+            ["semantic", "enrich", "--provider", "fake", "--asset", table_rows[0]["asset_id"]],
+            destination,
+            clean_env,
+        )
+        assert fake_semantic.returncode == 0, fake_semantic.stdout + fake_semantic.stderr
+        assert "Enriched: 1" in fake_semantic.stdout
+        semantic_show = _run_cmd(
+            destination / "chongzu.cmd",
+            ["catalog", "show", table_rows[0]["asset_id"], "--rows", "2"],
+            destination,
+            clean_env,
+        )
+        assert semantic_show.returncode == 0, semantic_show.stdout + semantic_show.stderr
+        semantic_payload = json.loads(semantic_show.stdout)
+        assert semantic_payload["asset"]["semantic_status"] == "enriched"
+        assert semantic_payload["asset"]["effective_display_name"].startswith("Fake |")
 
         catalog_text_list = _run_cmd(
             destination / "chongzu.cmd",
