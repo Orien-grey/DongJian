@@ -106,13 +106,14 @@ artifacts are not pre-deleted and unrelated files continue processing.
 Native PDF text and candidate table extraction are independent cache identities.
 An unchanged PyMuPDF result can be reused while a changed img2table/config
 identity is rerun, and vice versa. `--force` applies to the selected route.
-Image-only/suspected-scanned pages are recorded as `deferred_to_ocr`; no OCR
-package or model is imported. The candidate's synthetic ground-truth scores do
-not stand in for a real-corpus quality decision.
+Image-only/suspected-scanned pages are recorded as `deferred_to_ocr` by the
+native table candidate; Phase 5A can later route the same profile-selected
+pages to the independent local RapidOCR extractor. The candidate's synthetic
+ground-truth scores do not stand in for a real-corpus quality decision.
 
 ## Known limitations
 
-- No OCR or image text recovery is implemented. Native PDF table detection is a
+- OCR is a separate Phase 5A route. Native PDF table detection remains a
   separate Phase 4B candidate and is intentionally not final/default yet.
 - Built-in block text is not a semantic section/header interpretation.
 - Page coverage estimates are bounding-box signals, not pixel-accurate unions.

@@ -32,6 +32,8 @@ def test_portable_doctor_passes_with_standalone_python() -> None:
         {
             "CHONGZU_PROJECT_ROOT": str(root),
             "CHONGZU_ROOT": str(root),
+            "CHONGZU_CACHE_TEMP": str(paths.TEMP_ROOT),
+            "CHONGZU_OCR_MODELS": str(paths.OCR_MODELS_ROOT),
             "PYTHONNOUSERSITE": "1",
             "PYTHONPATH": os.pathsep.join((str(paths.SRC_ROOT), str(paths.PACKAGES_ROOT))),
             "PYTHONPYCACHEPREFIX": str(paths.PYTHON_BYTECODE_CACHE),

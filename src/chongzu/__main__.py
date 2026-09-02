@@ -16,11 +16,14 @@ from .extract import (
     PDFExtractionError,
     PDFTableExtractionError,
     StructuredExtractionError,
+    OCRExtractionError,
     extract_pdf,
     extract_pdf_tables,
     extract_structured,
+    extract_ocr,
 )
 from .extract.pdf.table_quality import load_ground_truth
+from .benchmark.pdf_real import run_real_pdf_benchmark
 
 
 def _print_summary(summary) -> None:
@@ -66,6 +69,10 @@ def _build_parser() -> argparse.ArgumentParser:
     extract_pdf_table_parser.add_argument("--workers", type=int, default=None)
     extract_pdf_table_parser.add_argument("--force", action="store_true")
     extract_pdf_table_parser.add_argument("--ground-truth", type=Path, default=None)
+    extract_ocr_parser = extract_sub.add_parser("ocr", help="offline RapidOCR for images and scanned PDF pages")
+    extract_ocr_parser.add_argument("source", type=Path)
+    extract_ocr_parser.add_argument("--workers", type=int, default=None)
+    extract_ocr_parser.add_argument("--force", action="store_true")
 
     registry_parser = sub.add_parser("registry", help="inspect the local DuckDB registry")
     registry_sub = registry_parser.add_subparsers(dest="registry_command", required=True)
@@ -97,6 +104,18 @@ def _build_parser() -> argparse.ArgumentParser:
     benchmark_pdf_table.add_argument("--workers", type=int, default=None)
     benchmark_pdf_table.add_argument("--force", action="store_true")
     benchmark_pdf_table.add_argument("--ground-truth", type=Path, default=None)
+    benchmark_pdf_real = benchmark_sub.add_parser(
+        "pdf-real", help="profile a real PDF corpus and publish review artifacts"
+    )
+    benchmark_pdf_real.add_argument("source", type=Path)
+    benchmark_pdf_real.add_argument("--workers", type=int, default=None)
+    benchmark_pdf_real.add_argument("--max-samples", type=int, default=80)
+    benchmark_pdf_real.add_argument("--max-negative-samples", type=int, default=20)
+    benchmark_pdf_real.add_argument("--force", action="store_true")
+    benchmark_ocr = benchmark_sub.add_parser("ocr", help="benchmark offline RapidOCR image/scanned-page extraction")
+    benchmark_ocr.add_argument("source", type=Path)
+    benchmark_ocr.add_argument("--workers", type=int, default=None)
+    benchmark_ocr.add_argument("--force", action="store_true")
     return parser
 
 
@@ -156,6 +175,25 @@ def _load_ground_truth(path: Path | None):
     return load_ground_truth(path) if path is not None else None
 
 
+def _print_ocr_summary(summary) -> None:
+    print(f"Source: {summary.source_root}")
+    print("Extractor: RapidOCR + ONNX Runtime (offline, CPU)")
+    print(f"Files considered: {summary.files_considered}")
+    print(f"Images considered: {summary.images_considered}")
+    print(f"PDFs considered: {summary.pdfs_considered}")
+    print(f"Files attempted: {summary.files_attempted}")
+    print(f"Extracted: {summary.extracted}")
+    print(f"Reused: {summary.reused}")
+    print(f"Targets: {summary.targets}")
+    print(f"Pages OCRed: {summary.pages_ocred}")
+    print(f"Text assets produced: {summary.text_assets_produced}")
+    print(f"OCR chars: {summary.ocr_chars}")
+    print(f"Deferred to profile: {summary.deferred_to_profile}")
+    print(f"Quality issues: {summary.quality_issues}")
+    print(f"Failures: {summary.failures}")
+    print(f"Elapsed: {summary.wall_time_ms:.2f} ms")
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Dispatch diagnostics, registry inspection, and extraction commands."""
 
@@ -186,6 +224,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
             _print_pdf_table_summary(summary)
             return 0
+        if parsed.command == "extract" and parsed.extract_command == "ocr":
+            summary = extract_ocr(parsed.source, workers=parsed.workers, force=parsed.force)
+            _print_ocr_summary(summary)
+            return 0 if summary.failures == 0 else 0
         if parsed.command == "benchmark" and parsed.benchmark_command == "scan":
             summary = scan_source(parsed.source, workers=parsed.workers, rehash=parsed.rehash)
             _print_summary(summary)
@@ -219,6 +261,35 @@ def main(argv: Sequence[str] | None = None) -> int:
             for key, value in summary.benchmark_metrics().items():
                 print(f"{key}: {value:.3f}" if isinstance(value, float) else f"{key}: {value}")
             return 0
+        if parsed.command == "benchmark" and parsed.benchmark_command == "pdf-real":
+            result = run_real_pdf_benchmark(
+                parsed.source,
+                workers=parsed.workers,
+                max_samples=parsed.max_samples,
+                max_negative_samples=parsed.max_negative_samples,
+                force=parsed.force,
+            )
+            print(f"Source: {result.native_summary.source_root}")
+            print(f"Samples: {result.sample_count}")
+            print(f"Native-text PDFs: {result.native_summary.native_text_pdfs}")
+            print(f"Mixed PDFs: {result.native_summary.mixed_pdfs}")
+            print(f"Suspected-scanned PDFs: {result.native_summary.suspected_scanned_pdfs}")
+            print(f"Unknown PDFs: {result.native_summary.unknown_pdfs}")
+            print(f"Table candidate assets: {result.table_summary.table_assets}")
+            print(f"Table candidate failures: {result.table_summary.extraction_failures}")
+            print(f"Native reuse: {result.native_summary.reused}")
+            print(f"Table reuse: {result.table_summary.reused}")
+            print(f"Manifest: {result.manifest_path}")
+            print(f"Review CSV: {result.review_path}")
+            print(f"Report: {result.report_path}")
+            return 0
+        if parsed.command == "benchmark" and parsed.benchmark_command == "ocr":
+            summary = extract_ocr(parsed.source, workers=parsed.workers, force=parsed.force)
+            _print_ocr_summary(summary)
+            print("Benchmark:")
+            for key, value in summary.benchmark_metrics().items():
+                print(f"{key}: {value:.3f}" if isinstance(value, float) else f"{key}: {value}")
+            return 0
         if parsed.command == "registry":
             registry = Registry.open()
             try:
@@ -241,6 +312,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         StructuredExtractionError,
         PDFExtractionError,
         PDFTableExtractionError,
+        OCRExtractionError,
         RegistryError,
         ValueError,
         OSError,

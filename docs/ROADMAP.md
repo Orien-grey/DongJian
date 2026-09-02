@@ -114,16 +114,40 @@ decision is KEEP (default native route), FALLBACK (simple tables only), or
 REMOVE (benefit does not justify runtime cost); no synthetic score alone makes
 that decision.
 
-## Phase 5 - Image and scanned-document extraction
+## Phase 4C - Real PDF baseline
 
-- Benchmark RapidOCR with pinned ONNX Runtime and project-local models.
+Status: baseline run completed on the user-supplied read-only substitute corpus;
+human table ground truth remains pending.
+
+- Profile the complete PDF source with Registry, SHA-256, and PyMuPDF native
+  extraction before any table candidate run.
+- Select a deterministic stratified sample and publish only ignored-by-Git
+  manifests, review CSV, provenance, previews, and relevant page renders below
+  `workspace/benchmark/pdf-real-v1/`.
+- Measure native/mixed/scanned/unknown distribution, candidate distribution,
+  img2table throughput, zero/multiple-table counts, and reuse. Do not infer
+  KEEP/FALLBACK/REMOVE without human review.
+
+## Phase 5A - RapidOCR local OCR foundation
+
+- Provision RapidOCR 3.9.2 and ONNX Runtime 1.29.0 from Windows wheels, with
+  project-local models under `runtime/models/ocr/` and runtime downloads
+  disabled.
 - Extract page titles, body text, table text, source notes, and annotations from
   JPG/JPEG/PNG, including webpage screenshots.
 - Apply OCR only to scanned/image-only PDF pages selected by recorded signals.
 - Keep OCR/visual workers lazy, bounded, offline, and independently timed.
 
-Acceptance: images and scanned pages can emit both text and table candidates
-with coordinates, confidence, model/version, and source provenance.
+Acceptance: images and scanned pages emit traceable OCR TextAssets/TextChunks
+and block evidence with coordinates, confidence, model/version, and source
+provenance. OCR-to-table integration remains a separate Phase 5B benchmark.
+
+## Phase 5B - OCR/table integration benchmark
+
+- Benchmark OCR blocks as input evidence for the existing table candidate on
+  representative scanned pages.
+- Keep OCR text and table extraction independently reusable and separately
+  reviewable; do not assume a screenshot is only a table.
 
 ## Phase 6 - Complex table benchmark
 

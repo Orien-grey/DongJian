@@ -45,6 +45,8 @@ def _portable_env(root: Path, *, clean_host: bool = False) -> dict[str, str]:
             "CHONGZU_PROJECT_PYTHON": str(python_dir / "python.exe"),
             "CHONGZU_PACKAGES": str(packages),
             "CHONGZU_SRC": str(root / "src"),
+            "CHONGZU_CACHE_TEMP": str(temp),
+            "CHONGZU_OCR_MODELS": str(runtime / "models" / "ocr"),
             "CHONGZU_PROJECT_UV": str(runtime / "uv" / "uv.exe"),
             "PYTHONNOUSERSITE": "1",
             "PYTHONUTF8": "1",
@@ -168,6 +170,7 @@ def _build_relocated_copy(root: Path, destination: Path) -> None:
     )
     shutil.copytree(root / "runtime" / "packages", destination / "runtime" / "packages")
     shutil.copytree(root / "runtime" / "uv", destination / "runtime" / "uv")
+    shutil.copytree(root / "runtime" / "models" / "ocr", destination / "runtime" / "models" / "ocr")
     shutil.copytree(root / "src", destination / "src")
     shutil.copytree(root / "scripts", destination / "scripts")
     for filename in ("pyproject.toml", "uv.lock", "doctor.cmd", "chongzu.cmd"):
@@ -318,14 +321,35 @@ def test_relocated_copy_reanchors_runtime_registry_and_cache() -> None:
         assert "OCR: disabled" in table_extraction.stdout
         assert _sha256(table_pdf) == table_hash
 
+        ocr_source = destination / "workspace" / "ocr fixtures"
+        ocr_source.mkdir(parents=True, exist_ok=True)
+        from PIL import Image, ImageDraw
+
+        ocr_image = ocr_source / "image with spaces.png"
+        image = Image.new("RGB", (800, 260), "white")
+        ImageDraw.Draw(image).text((35, 90), "Moved OCR 123", fill="black")
+        image.save(ocr_image)
+        ocr_hash = _sha256(ocr_image)
+        ocr_extraction = _run_cmd(
+            destination / "chongzu.cmd",
+            ["extract", "ocr", str(ocr_source), "--workers", "1", "--force"],
+            destination,
+            clean_env,
+        )
+        assert ocr_extraction.returncode == 0, ocr_extraction.stdout + ocr_extraction.stderr
+        assert "Text assets produced: 1" in ocr_extraction.stdout
+        assert "Failures: 0" in ocr_extraction.stdout
+        assert _sha256(ocr_image) == ocr_hash
+
         probe_code = (
-            "import duckdb,json,polars,python_calamine,pymupdf,img2table,numpy,cv2,pypdfium2,sys,pathlib; "
+            "import duckdb,json,polars,python_calamine,pymupdf,img2table,numpy,cv2,pypdfium2,rapidocr,onnxruntime,sys,pathlib; "
             "c=duckdb.connect('workspace/state/registry.duckdb'); "
             "p=c.execute(\"select normalized_artifact_path from table_assets where is_current=true limit 1\").fetchone()[0]; "
             "f=polars.read_parquet(pathlib.Path('workspace')/p); "
             "print(json.dumps({'exe':sys.executable,'duckdb':duckdb.__file__,'polars':polars.__file__,"
             "'calamine':python_calamine.__file__,'pymupdf':pymupdf.__file__,"
-            "'img2table':img2table.__file__,'numpy':numpy.__file__,'cv2':cv2.__file__,'pypdfium2':pypdfium2.__file__,"
+                         "'img2table':img2table.__file__,'numpy':numpy.__file__,'cv2':cv2.__file__,'pypdfium2':pypdfium2.__file__,"
+                         "'rapidocr':rapidocr.__file__,'onnxruntime':onnxruntime.__file__,"
             "'text':c.execute(\"select normalized_artifact_path from text_assets where is_current=true and source_relative_path='native.pdf'\").fetchone()[0],"
             "'rows':f.height}))"
         )
@@ -342,13 +366,32 @@ def test_relocated_copy_reanchors_runtime_registry_and_cache() -> None:
         probe_result = json.loads(probe.stdout.strip().splitlines()[-1])
         assert probe_result["rows"] == 2
         assert Path(probe_result["exe"]).resolve() == destination / "runtime" / "python" / paths.PYTHON_RUNTIME_DIRNAME / "python.exe"
-        for module_name in ("duckdb", "polars", "calamine", "pymupdf", "img2table", "numpy", "cv2", "pypdfium2"):
+        for module_name in ("duckdb", "polars", "calamine", "pymupdf", "img2table", "numpy", "cv2", "pypdfium2", "rapidocr", "onnxruntime"):
             module_path = Path(probe_result[module_name]).resolve()
             assert module_path.is_relative_to((destination / "runtime" / "packages").resolve())
             assert "appdata" not in str(module_path).casefold()
         text_artifact = destination / "workspace" / probe_result["text"]
         assert text_artifact.is_file()
         assert "relocated native text" in text_artifact.read_text(encoding="utf-8")
+        ocr_code = (
+            "import duckdb,json,pathlib; "
+            "c=duckdb.connect('workspace/state/registry.duckdb'); "
+            "r=c.execute(\"select normalized_artifact_path from text_assets where extractor='rapidocr-onnx' limit 1\").fetchone()[0]; "
+            "print(json.dumps({'artifact':r,'text':(pathlib.Path('workspace')/r).read_text(encoding='utf-8')}))"
+        )
+        ocr_probe = subprocess.run(
+            [str(destination / "runtime" / "python" / paths.PYTHON_RUNTIME_DIRNAME / "python.exe"), "-c", ocr_code],
+            cwd=str(destination),
+            env=clean_env,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+        )
+        assert ocr_probe.returncode == 0, ocr_probe.stdout + ocr_probe.stderr
+        ocr_result = json.loads(ocr_probe.stdout.strip().splitlines()[-1])
+        assert ocr_result["artifact"].startswith("artifacts/text/")
+        assert "Moved" in ocr_result["text"]
     finally:
         if destination.exists():
             shutil.rmtree(destination)

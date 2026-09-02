@@ -22,6 +22,9 @@ depend on an LLM.
 - The core workflow is offline. The only future processing-time network target
   is an LLM base URL explicitly configured by the user. There is no public
   endpoint fallback and no implicit package/model download.
+- LLM/network model calls are disabled unless the user has explicitly supplied
+  configuration and explicitly authorized testing. This includes DeepSeek,
+  Qwen, OpenAI-compatible endpoints, vision calls, and embedding calls.
 - Missing project-local runtime components must produce actionable failures.
 
 ## Product processing boundary
@@ -137,9 +140,11 @@ CSV/TSV/XLS/XLSX and Parquet. Phase 4A uses the pinned PyMuPDF wheel only for
 native PDF page/text facts and profiling; it does not perform table extraction
 or OCR. Phase 4B provisions `img2table==2.0.0` as a native-text candidate with
 its locked NumPy, OpenCV-contrib, pypdfium2, BeautifulSoup, soupsieve,
-typing-extensions, and XlsxWriter transitive wheels; OCR extras remain
-disabled. RapidOCR is deferred to images/scans, and GMFT/Docling remain
-difficult-table benchmark candidates rather than default dependencies. Do not
+typing-extensions, and XlsxWriter transitive wheels. Phase 5A provisions
+RapidOCR 3.9.2 plus ONNX Runtime 1.29.0 and a project-local model bundle under
+`runtime/models/ocr`; OCR is CPU/offline only and its downloads are disabled.
+GMFT/Docling remain difficult-table benchmark candidates rather than default
+dependencies. Do not
 add Pandas, PyArrow, or OpenPyXL, and do not add direct NumPy/OpenCV
 dependencies outside the candidate tree, without representative-corpus
 evidence.

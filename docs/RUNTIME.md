@@ -89,12 +89,15 @@ and invoke the standalone executable directly. They never activate or invoke
 `runtime\venv`. In the standalone process `sys.prefix == sys.base_prefix` is
 expected; that is a normal, non-venv interpreter.
 
-Phase 3, Phase 4A, and the Phase 4B candidate production dependencies are
-installed into `runtime\packages` with
-project-private uv, the locked versions/hashes, and a wheel-only constraint:
+Phase 3, Phase 4A, the Phase 4B candidate, and the Phase 5A OCR foundation are
+installed into `runtime\packages` with project-private uv, the locked
+versions/hashes, and a wheel-only constraint. `scripts\bootstrap.ps1` performs
+the install in a temporary project-local staging venv, removes stale target
+payload, overlays the contrib OpenCV wheel last, and publishes the resulting
+site-packages payload:
 
 ```text
-runtime\uv\uv.exe pip install --target runtime\packages --python runtime\python\cpython-3.11.15-windows-x86_64-none\python.exe --only-binary=:all: --exact duckdb==1.5.5 polars==1.44.1 python-calamine==0.8.2 PyMuPDF==1.28.2 img2table==2.0.0
+runtime\uv\uv.exe pip install --python cache\temp\runtime-provision-staging\Scripts\python.exe --only-binary=:all: --exact duckdb==1.5.5 polars==1.44.1 python-calamine==0.8.2 PyMuPDF==1.28.2 img2table==2.0.0 rapidocr==3.9.2 onnxruntime==1.29.0 omegaconf==2.0.6
 ```
 
 | Package | Version | Source/constraint |
@@ -112,20 +115,24 @@ runtime\uv\uv.exe pip install --target runtime\packages --python runtime\python\
 | `soupsieve` | `2.9.2` | Pure Python transitive candidate dependency. |
 | `typing-extensions` | `4.16.0` | Pure Python transitive candidate dependency. |
 | `XlsxWriter` | `3.2.9` | Pure Python transitive candidate dependency. |
+| `rapidocr` | `3.9.2` | Pure Python OCR adapter; explicit local models are required. |
+| `onnxruntime` | `1.29.0` | CPython 3.11 Windows x64 CPU wheel. |
+| `omegaconf` | `2.0.6` | RapidOCR configuration dependency pinned for Windows wheel compatibility. |
+| `opencv-python` | `5.0.0.93` | RapidOCR dependency; the same-version `cv2` payload is shared with the candidate. |
+| `Pillow`, `Shapely`, `pyclipper`, `requests`, `PyYAML`, `tqdm`, `colorlog`, `certifi`, `charset-normalizer`, `idna`, `urllib3`, `flatbuffers`, `protobuf`, `packaging`, `colorama`, `six` | pinned in `uv.lock` | RapidOCR/ONNX transitive wheels. |
 
-On 2026-09-01 the installed `runtime\packages` payload measured **479,187,499
-bytes (456.99 MiB)**. Excluding the candidate distribution directories gives a
-baseline-equivalent **281,943,223 bytes (268.88 MiB)**; the candidate tree
-accounts for **197,244,276 bytes
-(188.11 MiB)**, dominated by `cv2` (144,722,910 bytes), NumPy plus
-`numpy.libs` (43,273,316 bytes), and `pypdfium2_raw` (7,416,049 bytes). The
-measurement excludes generated `__pycache__` files and the target-install
-lock marker. The wheel-only audit resolved exactly eight candidate distributions
-(the candidate plus seven transitive packages) for CPython 3.11 Windows x64;
-every selected artifact had a compatible wheel and provisioning performed no
-source build or local compilation. This is an observed Phase 4B portability
-cost, not a release-size guarantee; final packaging must repeat it after
-cleanup/compression.
+On 2026-09-02 the installed `runtime\packages` payload measured **546,149,953
+bytes (520.85 MiB)** after the Phase 5A refresh. The Phase 4B baseline was
+**479,187,499 bytes (456.99 MiB)**, so the OCR package increment is
+**66,962,454 bytes (63.86 MiB)**. The separate audited model bundle under
+`runtime\models\ocr` is **31,750,473 bytes (30.28 MiB, including its manifest)**;
+the combined Phase 5A increment is therefore **98,712,927 bytes (94.14 MiB)**.
+The package measurement excludes generated `__pycache__` files and the
+target-install lock marker. The wheel-only audit resolved 33 distributions for
+the complete production payload; every selected artifact had a compatible
+Windows x64 wheel and provisioning performed no source build or local
+compilation. This is an observed portability cost, not a release-size
+guarantee; final packaging must repeat it after cleanup/compression.
 
 The wheel-only audit selected these Windows x64 artifacts for the candidate
 tree (the remaining candidate dependencies are pure-Python wheels):
@@ -151,6 +158,15 @@ verified by portable doctor. The package directory is intentionally a target
 installation rather than an editable install, so it contains no reference to
 the original checkout path.
 
+Phase 5A adds three RapidOCR model files under `runtime\models\ocr`:
+`PP-OCRv6_det_small.onnx`, `ch_ppocr_mobile_v2.0_cls_mobile.onnx`, and
+`PP-OCRv6_rec_small.onnx`, plus `manifest.json` with file sizes and SHA-256
+digests. The current measured model payload is 31,749,509 bytes (30.28 MiB).
+The adapter always passes these paths explicitly; a missing or modified model
+fails doctor and OCR rather than triggering a network download. The bootstrap
+uses a project-local staging venv and publishes its wheel payload into
+`runtime\packages` to avoid the Windows target-installer trampoline-lock issue.
+
 All cache/temp variables remain process-local and are rooted below the current
 project directory. Relocating the bundle therefore re-anchors the runtime,
 package imports, registry, logs, and caches to the new root. The standalone
@@ -173,6 +189,7 @@ TMP / TEMP               E:\Desktop\ChongZu\cache\temp
 PYTHONPYCACHEPREFIX      E:\Desktop\ChongZu\cache\temp\pycache
 PYTHONNOUSERSITE         1
 PYTHONPATH               E:\Desktop\ChongZu\src;E:\Desktop\ChongZu\runtime\packages
+CHONGZU_OCR_MODELS       E:\Desktop\ChongZu\runtime\models\ocr
 UV_PYTHON_INSTALL_DIR    E:\Desktop\ChongZu\runtime\python
 UV_PROJECT_ENVIRONMENT   E:\Desktop\ChongZu\runtime\venv
 PIP_CONFIG_FILE          E:\Desktop\ChongZu\cache\pip\pip.ini
@@ -182,7 +199,7 @@ PIP_CONFIG_FILE          E:\Desktop\ChongZu\cache\pip\pip.ini
 
 Always load `scripts\env.ps1` before invoking uv. During this preparation, two initial bare uv probes demonstrated why: without the project variables uv attempted to initialize/open its default user paths under `%LOCALAPPDATA%\uv\cache` and `%APPDATA%\uv\python`; both probes failed before creating anything. Every successful download, lock, sync, and verification command then used the project-local variables.
 
-## Phase 1-4B Python packages
+## Phase 1-5A Python packages
 
 The lock file is [`uv.lock`](../uv.lock). `uv sync --locked` installs the
 development/test set into `runtime\venv`; the production subset is installed
@@ -208,19 +225,22 @@ as a target into `runtime\packages` with the same pinned versions:
 | `pluggy` | `1.6.0` | pytest dependency |
 | `pygments` | `2.21.0` | pytest dependency |
 
-The resolved Phase 3/4A/4B runtime tree adds Polars, its matching runtime
+The resolved Phase 3/4A/4B/5A runtime tree adds Polars, its matching runtime
 wheel, python-calamine, PyMuPDF, and the candidate dependency tree above. The
 wheel-only dry run and provisioning required no local compiler or source build.
-PyArrow, Pandas, OpenPyXL, RapidOCR, ONNX Runtime, GMFT, Docling, Torch, Java,
-and Tika remain absent. NumPy/OpenCV/pypdfium2 are present only for the
-candidate and are not OCR engines.
+PyArrow, Pandas, OpenPyXL, GMFT, Docling, Torch, Java, and Tika remain absent.
+RapidOCR/ONNX Runtime are present for offline OCR only; they do not create
+structured tables. NumPy/OpenCV/pypdfium2 are shared native dependencies of
+the candidate and OCR trees.
 Polars writes and reads Parquet using its bundled native runtime. PyMuPDF's
 native payload is loaded from `runtime\packages\pymupdf`; the development venv
 is not a production input.
 
-Phase 3/4A/4B processing makes no network request and does not call the
+Phase 3/4A/4B/5A processing makes no network request and does not call the
 configured LLM. Provisioning is the only network-enabled step. Java/Tika is not
 a default route; GMFT and Docling remain future benchmark candidates rather than
-portable-bundle requirements. img2table's optional OCR extras are not installed.
+portable-bundle requirements. img2table's optional OCR extras are not installed;
+Phase 5A uses its own explicit RapidOCR model bundle and never downloads models
+at runtime.
 
 The standalone CPython image also contains its own project-local bootstrap tools `pip==26.1.2` and `setuptools==82.0.1` under `runtime\python`; they are not system packages and are not exposed through the venv because the venv does not use system site-packages. The package build isolation uses the exact `setuptools==80.10.2` requirement declared in `pyproject.toml`.

@@ -25,12 +25,16 @@ BEAUTIFULSOUP4_VERSION = "4.15.0"
 SOUPSIEVE_VERSION = "2.9.2"
 TYPING_EXTENSIONS_VERSION = "4.16.0"
 XLSXWRITER_VERSION = "3.2.9"
+RAPIDOCR_VERSION = "3.9.2"
+ONNXRUNTIME_VERSION = "1.29.0"
 PIPELINE_VERSION = "phase4a-pdf-native-text"
 PDF_TABLE_PIPELINE_VERSION = "phase4b-pdf-table-candidate"
+OCR_PIPELINE_VERSION = "phase5a-rapidocr-local"
 STRUCTURED_CONFIG_VERSION = "structured-v1"
 PDF_CONFIG_VERSION = "pdf-native-text-v1"
 TEXT_CHUNK_CONFIG_VERSION = "text-chunk-v1"
 PDF_TABLE_CONFIG_VERSION = "pdf-table-v1"
+OCR_CONFIG_VERSION = "ocr-v1"
 REGISTRY_SCHEMA_NAME = "chongzu_file_registry"
 REGISTRY_SCHEMA_VERSION = 3
 
@@ -81,8 +85,13 @@ TEMP_ROOT = CACHE_ROOT / "temp"
 PYTHON_BYTECODE_CACHE = TEMP_ROOT / "pycache"
 PIP_CONFIG_FILE = PIP_CACHE_DIR / "pip.ini"
 
+# OCR models are part of the portable runtime payload.  Keeping them beside
+# ``runtime\packages`` makes the bundle self-contained after it is moved to a
+# different Windows directory.  Docling remains a future candidate and keeps
+# its historical project-level placeholder for now.
 MODELS_ROOT = PROJECT_ROOT / "models"
-OCR_MODELS_ROOT = MODELS_ROOT / "ocr"
+RUNTIME_MODELS_ROOT = RUNTIME_ROOT / "models"
+OCR_MODELS_ROOT = RUNTIME_MODELS_ROOT / "ocr"
 DOCLING_MODELS_ROOT = MODELS_ROOT / "docling"
 
 WORKSPACE_ROOT = PROJECT_ROOT / "workspace"
@@ -116,6 +125,7 @@ CORE_DIRECTORIES = {
     "cache_temp": TEMP_ROOT,
     "cache_python_bytecode": PYTHON_BYTECODE_CACHE,
     "models": MODELS_ROOT,
+    "runtime_models": RUNTIME_MODELS_ROOT,
     "models_ocr": OCR_MODELS_ROOT,
     "models_docling": DOCLING_MODELS_ROOT,
     "workspace": WORKSPACE_ROOT,
@@ -139,6 +149,8 @@ CONTROLLED_ENV_PATHS = {
     "CHONGZU_DEV_PYTHON": VENV_PYTHON_EXE,
     "CHONGZU_PACKAGES": PACKAGES_ROOT,
     "CHONGZU_SRC": SRC_ROOT,
+    "CHONGZU_CACHE_TEMP": TEMP_ROOT,
+    "CHONGZU_OCR_MODELS": OCR_MODELS_ROOT,
     "UV_CACHE_DIR": UV_CACHE_DIR,
     "PIP_CACHE_DIR": PIP_CACHE_DIR,
     "HF_HOME": HUGGINGFACE_HOME,

@@ -89,6 +89,13 @@ limitation is recorded rather than guessed.
 | `normalized_artifact_path` | `str | None` | Workspace-relative deterministic normalized text artifact. |
 | `metadata_artifact_path` | `str | None` | Workspace-relative block/page provenance metadata. |
 
+Phase 5A OCR TextAssets use `source_kind=image` for standalone images and
+`source_kind=page` for rendered scanned PDF pages. Their metadata artifact
+stores ordered OCR blocks, pixel/PDF-point coordinate space, and per-block
+confidence when available. The `extractor` value is `rapidocr-onnx`, so these
+rows remain independent from native `pymupdf-native-text` rows for the same
+file/page.
+
 ## TextChunk
 
 | Field | Type | Contract |

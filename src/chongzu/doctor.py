@@ -361,6 +361,8 @@ def _check_portable_imports(report: DoctorReport) -> None:
         ("soupsieve candidate", "soupsieve", "soupsieve", paths.SOUPSIEVE_VERSION),
         ("typing-extensions candidate", "typing_extensions", "typing-extensions", paths.TYPING_EXTENSIONS_VERSION),
         ("XlsxWriter candidate", "xlsxwriter", "xlsxwriter", paths.XLSXWRITER_VERSION),
+        ("RapidOCR", "rapidocr", "rapidocr", paths.RAPIDOCR_VERSION),
+        ("ONNX Runtime", "onnxruntime", "onnxruntime", paths.ONNXRUNTIME_VERSION),
     )
     for display_name, module_name, distribution_name, required_version in candidate_dependencies:
         try:
@@ -466,6 +468,8 @@ def _check_uv(report: DoctorReport) -> None:
 
 
 def _check_optional_tools(report: DoctorReport) -> None:
+    executable = Path(sys.executable).resolve()
+    strict = executable == paths.PYTHON_EXE.resolve()
     git = shutil.which("git")
     if git:
         report.add("Git (optional)", "INFO", f"available at {git}")
@@ -479,7 +483,30 @@ def _check_optional_tools(report: DoctorReport) -> None:
         report.add("Java/Tika", "INFO", "NOT INSTALLED / NOT A DEFAULT DEPENDENCY")
 
     report.add("Docling", "INFO", "NOT INSTALLED / FUTURE BENCHMARK CANDIDATE ONLY")
-    report.add("OCR/RapidOCR", "INFO", "NOT INSTALLED / DEFERRED TO PHASE 5 BENCHMARK")
+    for display_name, module_name in (("RapidOCR", "rapidocr"), ("ONNX Runtime", "onnxruntime")):
+        try:
+            module = __import__(module_name)
+            report.add(display_name, "PASS", f"{Path(module.__file__).resolve()}")
+        except Exception as exc:  # pragma: no cover - depends on provisioning state
+            report.add(display_name, "FAIL", str(exc), fatal=strict)
+
+    # Validate the complete local model contract, including manifest hashes and
+    # the explicit runtime-download prohibition.  A missing/tampered model is
+    # fatal even for development diagnostics after Phase 5A is accepted: the
+    # production bundle cannot run OCR without this evidence.
+    try:
+        from .extract.ocr.rapidocr_engine import validate_ocr_models
+
+        validate_ocr_models()
+    except Exception as exc:  # pragma: no cover - depends on provisioning state
+        report.add("OCR models", "FAIL", str(exc), fatal=True)
+        report.add("Runtime download disabled", "FAIL", "OCR model validation did not pass", fatal=True)
+    else:
+        report.add("OCR models", "PASS", str(paths.OCR_MODELS_ROOT))
+        report.add("Runtime download disabled", "PASS", "OCR model paths are explicit project-local files")
+    # Keep the Phase 2 diagnostic label for scripts that grep historical
+    # doctor output; the authoritative Phase 5 checks above are PASS/FAIL.
+    report.add("OCR/RapidOCR", "INFO", "RapidOCR is provisioned; see RapidOCR, ONNX Runtime, and OCR models checks")
 
 
 def run_checks() -> DoctorReport:

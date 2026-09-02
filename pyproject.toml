@@ -18,6 +18,11 @@ dependencies = [
     "python-calamine==0.8.2",
     "PyMuPDF==1.28.2",
     "img2table==2.0.0",
+    "rapidocr==3.9.2",
+    "onnxruntime==1.29.0",
+    # RapidOCR 3.9.2 works with this wheel-only OmegaConf line on Windows;
+    # 2.3.x adds an antlr runtime that is not required by the OCR path.
+    "omegaconf==2.0.6",
 ]
 
 [dependency-groups]

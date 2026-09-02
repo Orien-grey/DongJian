@@ -417,8 +417,15 @@ def extract_pdf_tables(
     workspace_root: Path | str | None = None,
     ground_truth: dict[str, tuple[ExpectedTable, ...]] | None = None,
     config: PDFTableConfig | None = None,
+    selected_relative_paths: set[str] | None = None,
 ) -> PDFTableExtractionSummary:
-    """Ensure Phase 4A facts exist, then run the img2table candidate."""
+    """Ensure Phase 4A facts exist, then run the img2table candidate.
+
+    ``selected_relative_paths`` is a benchmark-only filter.  The source is
+    still scanned as a whole and no files are copied into a staging folder;
+    only the registry-backed candidate jobs listed by this set are submitted.
+    The default ``None`` preserves the normal full-source extraction command.
+    """
 
     wall_started = time.perf_counter_ns()
     worker_count = normalize_pdf_table_workers(workers)
@@ -447,6 +454,8 @@ def extract_pdf_tables(
     try:
         registry.recover_incomplete_extractions(source_root)
         rows = registry.pdf_candidates(source_root)
+        if selected_relative_paths is not None:
+            rows = [row for row in rows if str(row["relative_path"]) in selected_relative_paths]
         summary.pdfs_considered = len(rows)
         summary.total_bytes = sum(int(row["size_bytes"] or 0) for row in rows)
         sources = iter(_source_from_row(row, workspace) for row in rows)

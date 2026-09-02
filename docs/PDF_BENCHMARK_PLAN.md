@@ -1,5 +1,12 @@
 # PDF table benchmark plan (Phase 4B)
 
+Phase 4C runs this plan against a user-supplied real corpus without changing
+the candidate extractor. The full source is profiled first; a deterministic
+stratified sample is then written to `workspace/benchmark/pdf-real-v1/` with a
+blank `review.csv`. Candidate output is evidence for human review, not its own
+ground truth. The current substitute corpus is small and table-light, so its
+zero/low table count is not a KEEP/REMOVE decision.
+
 Phase 4A is the control path: PyMuPDF supplies page inventory, native text
 blocks, coordinates, image/drawing signals, and a reproducible profile. Phase
 4B now provides a wheel-provisioned `img2table==2.0.0` candidate for native-text

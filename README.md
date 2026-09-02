@@ -19,7 +19,11 @@ content/version-based reuse, and atomic publication below `workspace/`. It does
 not extract images/Office text, call an LLM, create embeddings, or provide a
 frontend. Phase 4A adds the native PDF facts path: PyMuPDF page inventories,
 native text blocks, page/block provenance, deterministic chunks, and PDF
-profiles. It deliberately does not create PDF table assets or run OCR.
+profiles. Phase 4B keeps `img2table` as a measured native-text table candidate;
+Phase 4C records a read-only real-corpus baseline. Phase 5A adds a local,
+offline RapidOCR + ONNX Runtime foundation for JPG/JPEG/PNG and only the
+scanned pages selected by the PyMuPDF profile. OCR assets are independent from
+native text assets and never overwrite them.
 
 ## Product flow
 
@@ -87,7 +91,8 @@ See [Architecture](docs/ARCHITECTURE.md), [Data model](docs/DATA_MODEL.md),
 | `scripts/` | Windows environment, bootstrap, doctor, and launcher scripts |
 | `docs/` | Architecture, contracts, roadmap, UI, and runtime records |
 | `runtime/` | Standalone CPython, production packages, dev venv, and uv payloads; ignored |
-| `models/`, `cache/` | Future model artifacts and all controlled caches; ignored |
+| `runtime/models/ocr/` | Pinned RapidOCR ONNX models and integrity manifest; ignored |
+| `models/`, `cache/` | Future model placeholders and all controlled caches; ignored |
 | `workspace/input/` | Immutable real source evidence; ignored |
 | `workspace/staging/` | Recoverable intermediate work; ignored |
 | `workspace/artifacts/` | Stable raw/normalized Parquet and provenance metadata; ignored |
@@ -111,6 +116,8 @@ Formal portable launchers require no activation:
 .\chongzu.cmd benchmark pdf "D:\Research Data\Project"
 .\chongzu.cmd extract pdf-table "D:\Research Data\Project" --workers 2
 .\chongzu.cmd benchmark pdf-table "D:\Research Data\Project" --ground-truth reference.json
+.\chongzu.cmd extract ocr "D:\Research Data\Project" --workers 2
+.\chongzu.cmd benchmark ocr "D:\Research Data\Project" --workers 2
 .\chongzu.cmd registry summary
 ```
 
@@ -130,11 +137,14 @@ reusable extraction. The registry is `workspace\state\registry.duckdb`.
 
 Pinned production packages are DuckDB 1.5.5, Polars 1.44.1 (with its
 `polars-runtime-32` 1.44.1 Windows wheel), python-calamine 0.8.2, PyMuPDF
-1.28.2, and the Phase 4B candidate `img2table` 2.0.0 with its locked native
-dependencies. They live in `runtime\packages`; PyArrow, Pandas, OpenPyXL,
-OCR engines, Docling, Torch, Java, and Tika are not installed. NumPy,
-OpenCV-contrib, pypdfium2, BeautifulSoup, soupsieve, typing-extensions, and
-XlsxWriter are present only because the candidate requires them. See
+1.28.2, the Phase 4B candidate `img2table` 2.0.0, RapidOCR 3.9.2, and ONNX
+Runtime 1.29.0 with locked native dependencies. They live in
+`runtime\packages`; the three RapidOCR ONNX models and their SHA-256 manifest
+live in `runtime\models\ocr`. PyArrow, Pandas, OpenPyXL, Docling, Torch, Java,
+and Tika are not installed. NumPy, OpenCV, pypdfium2, Pillow, Shapely,
+pyclipper, requests, and the other small packages are transitive runtime
+dependencies of the table/OCR candidates. See
 [Structured extraction](docs/STRUCTURED_EXTRACTION.md),
 [PDF extraction](docs/PDF_EXTRACTION.md), and
-[PDF table extraction](docs/PDF_TABLE_EXTRACTION.md).
+[PDF table extraction](docs/PDF_TABLE_EXTRACTION.md), and
+[OCR foundation](docs/OCR_FOUNDATION.md).

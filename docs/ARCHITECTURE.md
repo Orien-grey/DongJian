@@ -10,7 +10,8 @@ separate layers.
 
 The source directory is immutable. All mutable state and derived artifacts are
 root-relative below `workspace/`; runtime and cache state is root-relative
-below `runtime/`, `cache/`, and `models/`.
+below `runtime/`, `cache/`, and `models/`. RapidOCR's portable ONNX model
+bundle is under `runtime/models/ocr/` beside the package payload.
 
 ## System flow
 
@@ -168,6 +169,37 @@ Synthetic scores validate the machinery; retention of img2table is deferred to
 a 30--100-file sanitized real-corpus benchmark. The candidate may be KEEP,
 FALLBACK, or REMOVE after that measurement. OCR, GMFT, Docling, Qwen, and
 embedding remain outside this phase.
+
+### Phase 4C real-corpus baseline
+
+`benchmark pdf-real` composes the existing Phase 4A and Phase 4B routes without
+changing either extractor. It snapshots source SHA-256 values, profiles the
+complete read-only PDF directory, selects a deterministic stratified sample,
+and writes only manifest, profile, table-preview, provenance, page-render, and
+blank human-review artifacts below `workspace/benchmark/pdf-real-v1/`. It never
+copies or writes beside a source PDF. `review.csv` leaves expected counts and
+quality fields empty until a human reviewer fills them; no KEEP/FALLBACK/REMOVE
+decision is inferred from candidate output.
+
+### Phase 5A offline OCR foundation
+
+`src/chongzu/extract/ocr/` contains a lazy RapidOCR adapter and a bounded
+coordinator. Images are one OCR target each; a PDF first reuses/establishes the
+Phase 4A profile and sends only pages without reliable native text to OCR. A
+native page and a scanned page in one PDF therefore publish separate
+`pymupdf-native-text` and `rapidocr-onnx` TextAssets. OCR blocks retain pixel or
+PDF-point bounding boxes and per-block confidence in metadata; normalized text
+is mechanical NFC/line-ending/control cleanup only. The raw OCR text, normalized
+text, metadata, and chunks use the same text artifact contract as native PDF
+text.
+
+RapidOCR is local and CPU-oriented. The production bundle pins RapidOCR 3.9.2,
+ONNX Runtime 1.29.0, and wheel-only transitive dependencies; three PP-OCR ONNX
+files plus a SHA-256 manifest live in `runtime/models/ocr/`. The adapter passes
+explicit string model paths (including the Windows OmegaConf compatibility
+workaround) and never invokes RapidOCR's download command. Missing or altered
+models are a doctor failure. No OCR backend is enabled in the Phase 4B
+`img2table` candidate, and OCR does not yet infer a TableAsset.
 
 Stable table/text/chunk IDs are derived from extraction provenance. Semantic
 display names, categories, model responses, and UI edits never participate in

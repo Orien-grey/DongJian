@@ -50,6 +50,8 @@ $env:CHONGZU_SRC = Join-Path -Path $projectRoot -ChildPath 'src'
 $env:CHONGZU_DEV_PYTHON = $venvPython
 $env:CHONGZU_PROJECT_PYTHON = $pythonExe
 $env:CHONGZU_PROJECT_UV = $uvExe
+$env:CHONGZU_CACHE_TEMP = $tempRoot
+$env:CHONGZU_OCR_MODELS = Join-Path -Path $runtimeRoot -ChildPath 'models\ocr'
 
 $env:UV_CACHE_DIR = $uvCache
 $env:UV_PYTHON_INSTALL_DIR = $pythonRuntimeRoot
