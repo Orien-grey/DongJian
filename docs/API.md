@@ -1,6 +1,6 @@
 # Local API v1
 
-Phase 8 ships a small localhost API implemented with Python's standard
+Phases 8 and 9 ship a small localhost API implemented with Python's standard
 library `ThreadingHTTPServer`. It binds to `127.0.0.1` by default on port
 `18765`; it is not a network service and does not listen on `0.0.0.0`.
 
@@ -19,6 +19,9 @@ browser contract.
 | GET | `/api/v1/assets/{asset-id}` | Unified asset metadata, provenance, profile, issues, and semantic history. |
 | GET | `/api/v1/assets/{asset-id}/table-preview` | Bounded Parquet preview with `layer=raw\|normalized`, `limit`, `offset`. |
 | GET | `/api/v1/assets/{asset-id}/text-preview` | Bounded text window with `limit`, `offset`. |
+| GET | `/api/v1/search` | Offline lexical search with `q`, `type`, `format`, `quality`, `match`, `limit`, `offset`. |
+| POST | `/api/v1/query/schema` | Return aliases and bounded schemas for explicitly selected table asset IDs. |
+| POST | `/api/v1/query/sql` | Execute one bounded read-only SQL statement over the selected temporary relations. |
 | GET | `/api/v1/quality/issues` | Review queue with `status`, `severity`, `asset_id`, `limit`, `offset`. |
 | PATCH | `/api/v1/quality/issues/{issue-id}` | Set review status to `open`, `accepted`, `ignored`, or `resolved`. |
 | POST | `/api/v1/process` | Validate a directory and queue `{ "source": "..." }`. Returns `202` and `taskId`. |
@@ -29,6 +32,51 @@ Catalog and issue list responses contain `items` and `pagination`. Table
 previews are hard capped at 200 rows; text previews are hard capped at 20,000
 characters. The service resolves artifact paths only from a Registry asset ID;
 there is no `file?path=` endpoint.
+
+## Search
+
+`GET /api/v1/search` is lexical-only. An empty `q` returns zero results and
+does not scan the full text store. `type` is `all`, `table`, or `text`; `match`
+is `all` or `phrase`. Queries use Unicode NFC, case-insensitive Latin matching,
+continuous substring matching for no-space Chinese, and whitespace token
+matching when the user supplies spaces. Results contain `resultId`, `assetId`,
+optional `chunkId`, display/source/location fields, `matchKind`, a bounded plain
+text `snippet`, match offsets, a local ordinal `score`, and complete
+provenance. Scores are not relevance probabilities. The live backend is
+`duckdb-live-catalog` / `lexical-live-v1`; no DuckDB FTS extension or rebuild is
+required. A single asset contributes at most three results.
+
+The endpoint caps `q` at 512 characters, `limit` at 100, and `offset` at
+10,000,000. It searches catalog names, source fields, sheet names, columns,
+bounded profile samples, semantic metadata when present, and normalized
+TextChunks. It does not scan every cell in a large Parquet table.
+
+## Safe SQL
+
+`POST /api/v1/query/schema` accepts `{ "assetIds": ["..."] }` and maps the
+selected current TableAssets to `t1`, `t2`, ... in request order. It returns
+column names/types and row counts without exposing Parquet paths.
+
+`POST /api/v1/query/sql` accepts the same IDs and a SQL string. The response
+contains `columns`, bounded object `rows`, `rowCount`, `truncated`,
+`executionMs`, relation mappings, and the sandbox version. The service loads
+only selected normalized artifacts with Polars, copies them by parameterized
+batch insertion into a fresh in-memory DuckDB connection, and closes the
+Registry connection before user SQL executes. This avoids the PyArrow bridge,
+which is intentionally not a dependency.
+
+The current limits are at most 8 assets, 50,000 selected input rows, 32 KiB SQL,
+500 returned rows, 2 MiB JSON, 512 MiB DuckDB memory, one worker thread, and a
+10 second interruptible execution bound. Input above the row limit is rejected
+before loading; it is not silently truncated. Only one `SELECT` or `WITH ...
+SELECT` statement is accepted.
+DDL, DML, `COPY`, `ATTACH`, `INSTALL`, `LOAD`, `PRAGMA`, `SET`, `CALL`,
+`VACUUM`, generator functions, external file functions, catalog/system
+relations, and unselected relations are rejected. DuckDB also runs with
+`enable_external_access=false`; adversarial tests execute real file functions
+on a temporary connection and verify that they fail. SQL never receives the
+Registry connection and cannot read arbitrary local paths, extensions, or the
+network.
 
 ## Task model
 

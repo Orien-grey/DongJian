@@ -1,6 +1,6 @@
 # Local frontend
 
-Phase 8's UI is a compact, Chinese-first desktop catalog for 1366×768 and
+The Phase 8/9 UI is a compact, Chinese-first desktop catalog for 1366×768 and
 larger screens. It uses React `18.3.1`, ReactDOM `18.3.1`, TypeScript
 `5.7.3`, Vite `6.0.7`, and `@vitejs/plugin-react` `4.3.4`. There is no UI
 component framework, chart library, CDN, remote font, external image, or
@@ -39,10 +39,27 @@ CSS, and HTML and is served by the Python backend.
   accept/ignore/resolve controls.
 - **处理任务**: directory input, asynchronous stage progress, counts, and
   failure summary.
+- **数据检索**: explicit lexical search over catalog metadata and TextChunks,
+  with type/format/quality filters, bounded snippets, match offsets, and links
+  to the originating asset.
+- **数据查询**: explicit TableAsset selection, visible `t1`/`t2` relation
+  mapping, a plain SQL textarea, bounded results, execution time, and sandbox
+  status. SQL is never generated automatically.
 
 The AI semantic tab is intentionally disabled in practice and says that a
-model is not configured. Search, Chat, RAG, SQL Agent, Vision, Embedding, and
-real model calls are not present in this phase.
+model is not configured. Search is lexical-only. Chat, RAG, SQL Agent, Vision,
+Embedding, and real model calls are not present.
+
+Search distinguishes three empty states: no query has been entered, a submitted
+query has no matching result, and the Catalog has not been populated. A text
+result opens its asset detail and retains the page/chunk provenance in the API
+contract. The UI highlights match offsets in the returned plain-text snippet;
+the backend never returns HTML.
+
+The SQL workbench only sends selected asset IDs and SQL to the local API. It
+never sends a filesystem path, opens DuckDB itself, or exposes the Registry
+schema. It displays the service-generated relation mapping and a truncation
+notice when the 500-row or response-size limit is reached.
 
 ## UI/data boundary
 

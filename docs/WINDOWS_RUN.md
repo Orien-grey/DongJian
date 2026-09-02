@@ -46,6 +46,24 @@ clean/profile -> catalog. A later process can reuse unchanged extraction and
 cleaning identities. Unsupported files remain in the Registry and one bad file
 does not cancel the rest.
 
+## Search and query
+
+After processing, use **数据检索** to search filenames, catalog metadata,
+columns, bounded profile samples, and TextChunks. The command-line equivalent
+is:
+
+```text
+.\chongzu.cmd search "北京大学" --type text --limit 20
+```
+
+Use **数据查询** only after selecting one or more table assets. The service
+shows aliases such as `t1` and runs read-only SQL in a private in-memory
+connection. It rejects external file functions, extensions, writes, system
+catalog access, and unselected relations; no Registry or source path is
+available to the query. The selected input is bounded to 50,000 total rows and
+is rejected above that limit rather than silently truncated. Search and SQL
+are local deterministic features and do not call the semantic provider.
+
 ## Portable release contents
 
 A runnable release needs the standalone Python/runtime packages, OCR models,

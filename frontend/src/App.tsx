@@ -7,6 +7,10 @@ import type {
   Page,
   QualityIssue,
   QualityStatus,
+  SearchResponse,
+  SearchResult,
+  SqlQueryResponse,
+  SqlSchemaResponse,
   TablePreview,
   Task,
   TextPreview,
@@ -79,6 +83,24 @@ function App() {
   const [catalogQuality, setCatalogQuality] = useState<"" | QualityStatus>("");
   const [catalogFormat, setCatalogFormat] = useState("");
   const [catalogQuery, setCatalogQuery] = useState("");
+  const [searchInput, setSearchInput] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
+  const [searchTotal, setSearchTotal] = useState(0);
+  const [searchOffset, setSearchOffset] = useState(0);
+  const [searchType, setSearchType] = useState<"all" | "table" | "text">("all");
+  const [searchQuality, setSearchQuality] = useState<"" | QualityStatus>("");
+  const [searchFormat, setSearchFormat] = useState("");
+  const [searchMatch, setSearchMatch] = useState<"all" | "phrase">("all");
+  const [searchSubmitted, setSearchSubmitted] = useState(false);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [queryAssets, setQueryAssets] = useState<AssetSummary[]>([]);
+  const [querySelectedIds, setQuerySelectedIds] = useState<string[]>([]);
+  const [querySchema, setQuerySchema] = useState<SqlSchemaResponse | null>(null);
+  const [querySql, setQuerySql] = useState("SELECT * FROM t1 LIMIT 20");
+  const [queryResult, setQueryResult] = useState<SqlQueryResponse | null>(null);
+  const [queryLoading, setQueryLoading] = useState(false);
+  const [queryError, setQueryError] = useState("");
   const [issues, setIssues] = useState<QualityIssue[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [selected, setSelected] = useState<AssetDetail | null>(null);
@@ -136,6 +158,33 @@ function App() {
     }
   }, []);
 
+  const refreshSearch = useCallback(async (offset = 0, value = searchQuery) => {
+    if (!value.trim()) return;
+    setSearchLoading(true);
+    try {
+      const params = new URLSearchParams({ q: value, type: searchType, match: searchMatch, limit: "30", offset: String(offset) });
+      if (searchQuality) params.set("quality", searchQuality);
+      if (searchFormat) params.set("format", searchFormat);
+      const result: SearchResponse = await api.search(params);
+      setSearchResults(result.results);
+      setSearchTotal(result.total);
+      setSearchOffset(result.offset);
+    } catch (cause) {
+      setError(errorText(cause));
+    } finally {
+      setSearchLoading(false);
+    }
+  }, [searchFormat, searchMatch, searchQuality, searchQuery, searchType]);
+
+  const refreshQueryAssets = useCallback(async () => {
+    try {
+      const result = await api.catalog(new URLSearchParams({ type: "table", limit: "100", offset: "0" }));
+      setQueryAssets(result.items);
+    } catch (cause) {
+      setQueryError(errorText(cause));
+    }
+  }, []);
+
   useEffect(() => {
     void refreshOverview();
     void refreshCatalog();
@@ -179,10 +228,66 @@ function App() {
     return () => window.clearInterval(timer);
   }, [refreshOverview, refreshTasks, tasks]);
 
+  useEffect(() => {
+    if (page === "query") void refreshQueryAssets();
+  }, [page, refreshQueryAssets]);
+
+  useEffect(() => {
+    if (page !== "search" || !searchSubmitted || !searchQuery.trim()) return;
+    setSearchOffset(0);
+    void refreshSearch(0);
+  }, [page, refreshSearch, searchQuery, searchSubmitted]);
+
+  useEffect(() => {
+    if (page !== "query" || !querySelectedIds.length) {
+      setQuerySchema(null);
+      return;
+    }
+    setQueryLoading(true);
+    void api.querySchema(querySelectedIds)
+      .then(setQuerySchema)
+      .catch((cause) => setQueryError(errorText(cause)))
+      .finally(() => setQueryLoading(false));
+  }, [page, querySelectedIds]);
+
   const openAsset = (assetId: string) => {
     setSelectedId(assetId);
     setDetailTab("data");
     setPage("detail");
+  };
+
+  const openSearchResult = (result: SearchResult) => {
+    openAsset(result.assetId);
+  };
+
+  const submitSearch = () => {
+    const value = searchInput.trim();
+    setSearchQuery(value);
+    setSearchOffset(0);
+    setSearchSubmitted(true);
+    if (value) void refreshSearch(0, value);
+    else {
+      setSearchResults([]);
+      setSearchTotal(0);
+    }
+  };
+
+  const toggleQueryAsset = (assetId: string) => {
+    setQueryResult(null);
+    setQuerySelectedIds((current) => current.includes(assetId) ? current.filter((value) => value !== assetId) : [...current, assetId].slice(0, 8));
+  };
+
+  const runSql = async () => {
+    setQueryError("");
+    setQueryLoading(true);
+    try {
+      setQueryResult(await api.querySql(querySelectedIds, querySql));
+    } catch (cause) {
+      setQueryError(errorText(cause));
+      setQueryResult(null);
+    } finally {
+      setQueryLoading(false);
+    }
   };
 
   const startProcess = async () => {
@@ -228,6 +333,8 @@ function App() {
         <nav className="main-nav" aria-label="主导航">
           <NavButton active={page === "overview"} onClick={() => setPage("overview")}>概览</NavButton>
           <NavButton active={page === "catalog" || page === "detail"} onClick={() => setPage("catalog")}>数据目录</NavButton>
+          <NavButton active={page === "search"} onClick={() => setPage("search")}>数据检索</NavButton>
+          <NavButton active={page === "query"} onClick={() => setPage("query")}>数据查询</NavButton>
           <NavButton active={page === "quality"} onClick={() => setPage("quality")}>质量检查{overview.openQualityIssues ? <span className="nav-count">{overview.openQualityIssues}</span> : null}</NavButton>
           <NavButton active={page === "tasks"} onClick={() => setPage("tasks")}>处理任务</NavButton>
         </nav>
@@ -238,6 +345,8 @@ function App() {
         {error ? <div className="error-banner" role="alert"><span>{error}</span><button onClick={() => setError("")}>关闭</button></div> : null}
         {page === "overview" ? <OverviewPage overview={overview} tasks={tasks} onProcess={() => setShowProcess(true)} onNavigate={setPage} onOpenAsset={openAsset} /> : null}
         {page === "catalog" ? <CatalogPage assets={assets} total={catalogTotal} offset={catalogOffset} loading={loading} type={catalogType} quality={catalogQuality} format={catalogFormat} query={catalogQuery} formats={overview.formats} onType={(value) => resetCatalog(() => setCatalogType(value))} onQuality={(value) => resetCatalog(() => setCatalogQuality(value))} onFormat={(value) => resetCatalog(() => setCatalogFormat(value))} onQuery={(value) => { setCatalogOffset(0); setCatalogQuery(value); }} onOffset={setCatalogOffset} onOpen={openAsset} onProcess={() => setShowProcess(true)} /> : null}
+        {page === "search" ? <SearchPage input={searchInput} query={searchQuery} results={searchResults} total={searchTotal} offset={searchOffset} loading={searchLoading} submitted={searchSubmitted} hasAssets={overview.tableAssets + overview.textAssets > 0} type={searchType} quality={searchQuality} format={searchFormat} match={searchMatch} formats={overview.formats} onInput={setSearchInput} onSubmit={submitSearch} onType={(value) => { setSearchType(value); setSearchOffset(0); }} onQuality={(value) => { setSearchQuality(value); setSearchOffset(0); }} onFormat={(value) => { setSearchFormat(value); setSearchOffset(0); }} onMatch={(value) => { setSearchMatch(value); setSearchOffset(0); }} onOffset={(value) => { setSearchOffset(value); void refreshSearch(value); }} onOpen={openSearchResult} /> : null}
+        {page === "query" ? <QueryPage assets={queryAssets} selectedIds={querySelectedIds} schema={querySchema} sql={querySql} result={queryResult} loading={queryLoading} error={queryError} onToggle={toggleQueryAsset} onSql={setQuerySql} onRun={runSql} onOpen={openAsset} /> : null}
         {page === "quality" ? <QualityPage issues={issues} onUpdate={updateIssue} onOpen={openAsset} /> : null}
         {page === "tasks" ? <TasksPage tasks={tasks} onProcess={() => setShowProcess(true)} onOpenCatalog={() => setPage("catalog")} /> : null}
         {page === "detail" && selected ? <DetailPage detail={selected} tab={detailTab} onTab={setDetailTab} tableLayer={tableLayer} onTableLayer={setTableLayer} tableOffset={tableOffset} onTableOffset={setTableOffset} tablePreview={tablePreview} textPreview={textPreview} onBack={() => setPage("catalog")} onUpdateIssue={updateIssue} /> : null}
@@ -300,6 +409,85 @@ function TasksPage({ tasks, onProcess, onOpenCatalog }: { tasks: Task[]; onProce
 function TaskRow({ task }: { task: Task }) { return <div className="task-row"><span className={`task-status-dot ${task.status}`} /><div className="task-row-source">{task.source}</div><div className="task-row-stage">{STAGE_LABELS[task.currentStage] || task.currentStage}</div><div className="task-row-progress"><span style={{ width: `${task.progress * 100}%` }} /></div><div className="task-row-status">{task.status === "succeeded" ? "完成" : task.status === "failed" ? "失败" : `${Math.round(task.progress * 100)}%`}</div></div>; }
 
 function TaskCard({ task, onOpenCatalog }: { task: Task; onOpenCatalog: () => void }) { return <article className="task-card"><div className="task-card-header"><div><span className={`task-status-dot ${task.status}`} /> <strong>{task.status === "succeeded" ? "处理完成" : task.status === "failed" ? "处理失败" : "处理中"}</strong></div><span className="task-time">{formatDate(task.startedAt)}</span></div><div className="task-source">{task.source}</div><div className="progress-track"><span style={{ width: `${task.progress * 100}%` }} /></div><div className="task-card-footer"><span>{STAGE_LABELS[task.currentStage] || task.currentStage} · {Math.round(task.progress * 100)}%</span>{task.status === "succeeded" ? <button className="text-button" onClick={onOpenCatalog}>查看资产 →</button> : null}{task.errorSummary ? <span className="task-error">{task.errorSummary}</span> : null}</div>{task.counts.tableAssets != null ? <div className="task-counts"><span>文件 {number(task.counts.filesDiscovered)}</span><span>表格 {number(task.counts.tableAssets)}</span><span>文本 {number(task.counts.textAssets)}</span><span>质量问题 {number(task.counts.qualityIssues)}</span></div> : null}</article>; }
+
+type SearchPageProps = {
+  input: string;
+  query: string;
+  results: SearchResult[];
+  total: number;
+  offset: number;
+  loading: boolean;
+  submitted: boolean;
+  hasAssets: boolean;
+  type: "all" | "table" | "text";
+  quality: "" | QualityStatus;
+  format: string;
+  match: "all" | "phrase";
+  formats: Record<string, number>;
+  onInput: (value: string) => void;
+  onSubmit: () => void;
+  onType: (value: "all" | "table" | "text") => void;
+  onQuality: (value: "" | QualityStatus) => void;
+  onFormat: (value: string) => void;
+  onMatch: (value: "all" | "phrase") => void;
+  onOffset: (value: number) => void;
+  onOpen: (result: SearchResult) => void;
+};
+
+function SearchPage({ input, query, results, total, offset, loading, submitted, hasAssets, type, quality, format, match, formats, onInput, onSubmit, onType, onQuality, onFormat, onMatch, onOffset, onOpen }: SearchPageProps) {
+  return <section className="page-section"><div className="page-heading"><div><div className="eyebrow">LOCAL RETRIEVAL</div><h1>数据检索</h1><p className="heading-note">本地 lexical 检索：文件、表格元数据与 TextChunk；不使用模型改写或 rerank</p></div></div>
+    <form className="search-command" onSubmit={(event) => { event.preventDefault(); onSubmit(); }}><span className="search-command-icon">⌕</span><input aria-label="搜索资料" value={input} onChange={(event) => onInput(event.target.value)} placeholder="搜索资料、表格、正文、列名……" /><button className="primary-button" type="submit">搜索</button></form>
+    <div className="filter-panel search-filters"><div className="segmented"><button className={type === "all" ? "selected" : ""} onClick={() => onType("all")} type="button">全部</button><button className={type === "table" ? "selected" : ""} onClick={() => onType("table")} type="button">表格</button><button className={type === "text" ? "selected" : ""} onClick={() => onType("text")} type="button">文本</button></div><select value={quality} onChange={(event) => onQuality(event.target.value as "" | QualityStatus)}><option value="">全部质量</option><option value="ready">Ready</option><option value="needs_review">Needs review</option><option value="unusable">Unusable</option></select><select value={format} onChange={(event) => onFormat(event.target.value)}><option value="">全部格式</option>{Object.keys(formats).sort().map((item) => <option key={item} value={item}>{item.toUpperCase()}</option>)}</select><select value={match} onChange={(event) => onMatch(event.target.value as "all" | "phrase")}><option value="all">按词匹配</option><option value="phrase">完整短语</option></select></div>
+    {loading ? <div className="loading-box search-loading">正在检索本地目录……</div> : !submitted ? <EmptyState title="尚未输入搜索内容" body="输入关键词后，ChongZu 会在本地目录与 TextChunk 中检索。" /> : !query ? <EmptyState title="尚未输入搜索内容" body="搜索框为空；不会执行全库扫描。" /> : !hasAssets ? <EmptyState title="当前尚未处理任何资料" body="先处理一个本地资料目录，建立 Catalog 后再进行检索。" /> : !results.length ? <EmptyState title="没有找到匹配结果" body={`没有找到与“${query}”匹配的资料、列名或正文片段。`} /> : <><div className="list-meta"><span>{number(total)} 个结果</span><span>结果按本地确定性分数排序；每个资产最多显示 3 条</span></div><div className="search-results">{results.map((result) => <SearchResultItem key={result.resultId} result={result} onOpen={onOpen} />)}</div>{total > 30 ? <Pagination offset={offset} limit={30} total={total} onOffset={onOffset} /> : null}</>}
+  </section>;
+}
+
+function SearchResultItem({ result, onOpen }: { result: SearchResult; onOpen: (result: SearchResult) => void }) {
+  const location = [result.pageNumber != null ? `Page ${result.pageNumber}` : "", result.sheetName ? `Sheet ${result.sheetName}` : ""].filter(Boolean).join(" / ");
+  return <button className="search-result" onClick={() => onOpen(result)}><div className={`asset-type-mark ${result.assetType}`}>{result.assetType === "table" ? "表" : "文"}</div><div className="search-result-main"><div className="search-result-title">{result.displayName}</div><div className="search-result-source">{result.sourceFile}{location ? ` · ${location}` : ""} · {result.sourceFormat?.toUpperCase() || "UNKNOWN"}</div><div className="search-snippet"><HighlightedSnippet result={result} /></div></div><div className="search-result-meta"><span className="search-match-kind">{result.matchKind}</span><span className={`quality-pill ${result.qualityStatus}`}>{qualityLabel(result.qualityStatus)}</span><span className="search-score">{result.score.toFixed(1)}</span></div><span className="chevron">›</span></button>;
+}
+
+function HighlightedSnippet({ result }: { result: SearchResult }) {
+  const ranges = result.matchOffsets.filter((range) => range.length === 2 && range[1] > range[0]).sort((left, right) => left[0] - right[0]);
+  if (!ranges.length) return <>{result.snippet}</>;
+  const pieces: React.ReactNode[] = [];
+  let cursor = 0;
+  ranges.forEach(([start, end], index) => {
+    const safeStart = Math.max(cursor, Math.min(start, result.snippet.length));
+    const safeEnd = Math.max(safeStart, Math.min(end, result.snippet.length));
+    if (safeStart > cursor) pieces.push(<span key={`text-${index}`}>{result.snippet.slice(cursor, safeStart)}</span>);
+    if (safeEnd > safeStart) pieces.push(<mark key={`mark-${index}`}>{result.snippet.slice(safeStart, safeEnd)}</mark>);
+    cursor = safeEnd;
+  });
+  if (cursor < result.snippet.length) pieces.push(<span key="tail">{result.snippet.slice(cursor)}</span>);
+  return <>{pieces}</>;
+}
+
+type QueryPageProps = {
+  assets: AssetSummary[];
+  selectedIds: string[];
+  schema: SqlSchemaResponse | null;
+  sql: string;
+  result: SqlQueryResponse | null;
+  loading: boolean;
+  error: string;
+  onToggle: (assetId: string) => void;
+  onSql: (value: string) => void;
+  onRun: () => void;
+  onOpen: (assetId: string) => void;
+};
+
+function QueryPage({ assets, selectedIds, schema, sql, result, loading, error, onToggle, onSql, onRun, onOpen }: QueryPageProps) {
+  return <section className="page-section"><div className="page-heading"><div><div className="eyebrow">SAFE SQL WORKBENCH</div><h1>数据查询</h1><p className="heading-note">只读查询专用内存连接；只能访问明确选中的 normalized TableAsset</p></div></div>
+    <div className="query-layout"><aside className="query-sidebar panel"><div className="panel-title"><h2>选择表格资产</h2><span>{selectedIds.length} / {schema?.limits.maxSelectedAssets ?? 8}</span></div>{assets.length ? <div className="query-asset-list">{assets.map((asset) => <label className="query-asset" key={asset.assetId}><input type="checkbox" checked={selectedIds.includes(asset.assetId)} onChange={() => onToggle(asset.assetId)} /><span className="query-asset-copy"><strong>{asset.effectiveDisplayName || asset.fallbackDisplayName}</strong><small>{asset.source.relativePath} · {dimensions(asset)}</small></span><button type="button" className="text-button" onClick={() => onOpen(asset.assetId)}>查看</button></label>)}</div> : <EmptyState compact title="暂无表格资产" body="先处理一个本地资料目录。" />}</aside>
+      <div className="query-workspace">{error ? <div className="query-error" role="alert">{error}</div> : null}<div className="panel query-panel"><div className="panel-title"><div><h2>SQL</h2><span className="panel-note">禁止 DDL/DML、文件函数、扩展和多语句；结果最多 500 行；选中表总行数超过 {schema?.limits.maxInputRows ?? 50000} 时会拒绝执行</span></div><button className="primary-button" disabled={!selectedIds.length || !sql.trim() || loading} onClick={onRun}>{loading ? "执行中…" : "运行查询"}</button></div>{schema?.relations.length ? <div className="relation-map">{schema.relations.map((relation) => <div className="relation-chip" key={relation.alias}><b>{relation.alias}</b><span>{relation.displayName}</span></div>)}</div> : <div className="query-hint">请选择 1～8 个表格资产，系统会映射为 t1、t2……</div>}<textarea className="sql-editor" value={sql} onChange={(event) => onSql(event.target.value)} spellCheck={false} aria-label="SQL 查询" placeholder="SELECT * FROM t1 LIMIT 20" />{result ? <QueryResult result={result} /> : <div className="query-empty">查询结果会显示在这里。当前不会自动生成 SQL。</div>}</div></div>
+    </div>
+  </section>;
+}
+
+function QueryResult({ result }: { result: SqlQueryResponse }) {
+  return <div className="query-result"><div className="query-result-meta"><span>{number(result.rowCount)} 行 · {result.executionMs.toFixed(1)} ms</span>{result.truncated ? <strong>结果已截断（受本地上限限制）</strong> : null}<span className="sandbox-label">{result.sandbox}</span></div><div className="table-wrap"><table><thead><tr>{result.columns.map((column) => <th key={column}>{column}</th>)}</tr></thead><tbody>{result.rows.map((row, index) => <tr key={index}>{result.columns.map((column) => <td key={column} title={displayValue(row[column])}>{displayValue(row[column])}</td>)}</tr>)}</tbody></table></div></div>;
+}
 
 function DetailPage({ detail, tab, onTab, tableLayer, onTableLayer, tableOffset, onTableOffset, tablePreview, textPreview, onBack, onUpdateIssue }: { detail: AssetDetail; tab: "data" | "profile" | "quality" | "source" | "semantic"; onTab: (value: "data" | "profile" | "quality" | "source" | "semantic") => void; tableLayer: "raw" | "normalized"; onTableLayer: (value: "raw" | "normalized") => void; tableOffset: number; onTableOffset: (value: number) => void; tablePreview: TablePreview | null; textPreview: TextPreview | null; onBack: () => void; onUpdateIssue: (issue: QualityIssue, status: QualityIssue["status"]) => void }) {
   return <section className="page-section detail-section"><button className="back-button" onClick={onBack}>← 数据目录</button><div className="detail-heading"><div className={`asset-type-mark large ${detail.assetType}`}>{detail.assetType === "table" ? "表" : "文"}</div><div><div className="eyebrow">{typeLabel(detail.assetType)}资产</div><h1>{detail.displayName}</h1><div className="detail-source">{detail.source.relativePath} <span>·</span> {detail.source.format?.toUpperCase()}</div></div><div className={`quality-pill ${detail.qualityStatus}`}>{qualityLabel(detail.qualityStatus)}</div></div><div className="detail-tabs">{([["data", "数据"], ["profile", "画像"], ["quality", `质量${detail.qualityIssues.length ? ` · ${detail.qualityIssues.length}` : ""}`], ["source", "来源"], ["semantic", "AI语义"]] as const).map(([key, label]) => <button key={key} className={tab === key ? "active" : ""} onClick={() => onTab(key)}>{label}</button>)}</div>{tab === "data" ? detail.assetType === "table" ? <TableData detail={detail} layer={tableLayer} onLayer={onTableLayer} offset={tableOffset} onOffset={onTableOffset} preview={tablePreview} /> : <TextData detail={detail} preview={textPreview} /> : null}{tab === "profile" ? <ProfileView detail={detail} /> : null}{tab === "quality" ? <DetailQuality detail={detail} onUpdate={onUpdateIssue} /> : null}{tab === "source" ? <SourceView detail={detail} /> : null}{tab === "semantic" ? <SemanticView detail={detail} /> : null}</section>;

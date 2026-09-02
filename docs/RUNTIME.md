@@ -277,4 +277,18 @@ API has no arbitrary path/file route. `start.cmd` records only its own server
 PID below `workspace\state`, and `stop.cmd` uses that exact PID rather than
 terminating all Python processes. See [WINDOWS_RUN.md](WINDOWS_RUN.md).
 
+Phase 9 keeps the same runtime footprint and adds no package or model. Local
+Search uses DuckDB catalog/chunk queries and standard-library matching; it does
+not install or load FTS or any other extension. The SQL workbench uses Polars
+to load selected normalized Parquet data and a fresh in-memory DuckDB connection
+with `enable_external_access=false`, one thread, a 512 MiB memory setting, and
+a 10 second interruptible bound. User SQL never receives the Registry
+connection or an artifact path. PyArrow remains intentionally absent; temporary
+relations are populated through parameterized batches.
+
+The runtime network guard covers process, Search, SQL, and the static frontend.
+No model download, pip/uv operation, Hugging Face access, HTTP OCR, external
+SQL file function, or public endpoint is part of the product route. `LLM_STATUS
+= NOT_CONFIGURED` remains a normal optional state.
+
 The standalone CPython image also contains its own project-local bootstrap tools `pip==26.1.2` and `setuptools==82.0.1` under `runtime\python`; they are not system packages and are not exposed through the venv because the venv does not use system site-packages. The package build isolation uses the exact `setuptools==80.10.2` requirement declared in `pyproject.toml`.

@@ -110,6 +110,11 @@ tab is intentionally read-only. `chongzu process SOURCE` and the local API
 process task never invoke this layer. The local UI has no model endpoint,
 vision upload, embedding route, chat surface, or public fallback.
 
+Phase 9's local Search and SQL workbench do not change this boundary. Lexical
+retrieval consumes local Catalog and TextChunk data, while SQL is explicit
+selected-table read-only execution. Neither path calls the semantic provider or
+creates embeddings.
+
 Phase 7B is **BLOCKED BY USER CONFIGURATION / NOT RUN**. It requires the user
 to fill `.env` and explicitly authorize a controlled test before any real
 provider request is permitted.

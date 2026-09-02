@@ -184,8 +184,7 @@ Acceptance: every transformation is traceable and raw assets remain immutable.
 
 ## Phase 7A - Semantic Enrichment Infrastructure
 
-- Status: implementation complete for this round; changes intentionally remain
-  uncommitted for review.
+- Status: committed in `1b92ca14bd0254423e8cd0a0ceb96f981e365954`.
 - Add the provider-neutral `SemanticRequest`/`SemanticResponse` boundary, the
   versioned `table-semantic-v1` and `text-semantic-v1` prompts, bounded table
   sampling/text excerpts, strict local JSON validation, and semantic run/cache
@@ -218,8 +217,7 @@ neutral. Phase 8 can proceed without completing this phase.
 
 ## Phase 8 - Local Frontend
 
-- Status: implementation complete for this round; changes intentionally remain
-  uncommitted for review.
+- Status: committed in `1b92ca14bd0254423e8cd0a0ceb96f981e365954`.
 - Serve a self-contained React + TypeScript + Vite build from `frontend/dist`
   through the Python standard-library localhost server. No FastAPI, Electron,
   Tauri, CDN, remote font, or external asset is used.
@@ -237,15 +235,26 @@ statuses without direct database manipulation or source-file mutation.
 
 ## Phase 9 - Search, SQL, and Text Retrieval
 
-- Add structured catalog selection and validated read-only DuckDB SQL.
-- Add deterministic keyword retrieval over TextChunks.
-- Evaluate a user-supplied embedding service only after its contract is known;
-  add vector retrieval without making it a core correctness dependency.
-- Combine retrieved evidence with configured semantic answers and citations
-  back to assets/chunks.
+- Status: deterministic implementation complete for this round; changes remain
+  uncommitted for review.
+- Add provider-neutral SearchQuery, SearchResult, RetrievalReference, and
+  RetrievalService contracts.
+- Search current Catalog metadata and TextChunks with bounded snippets, Chinese
+  substring/token matching, provenance, stable local ranking, filters,
+  pagination, and a per-asset result cap. No full-table cell scan is used.
+- Add a safe SQL workbench that accepts only explicitly selected TableAssets,
+  maps them to temporary t1... relations, uses an isolated in-memory DuckDB
+  connection with external access disabled, and enforces statement, time,
+  memory, response, asset, and row limits.
+- Expose Search and SQL through the local API, CLI, and frontend. The process
+  pipeline remains extraction/cleaning/catalog only and never calls a model.
+- Keep embeddings, vector retrieval, query rewrite, reranking, SQL generation,
+  Chat, and RAG as future interfaces only.
 
-Acceptance: structured and text answers are read-only, evidence-linked, and
-safe against unrestricted generated SQL.
+Acceptance: local search and text retrieval are deterministic and provenance-
+linked; SQL is read-only, evidence-linked, and cannot access the Registry,
+arbitrary files, extensions, or the network. The production API and relocated
+bundle are exercised end to end.
 
 ## Phase 10 - End-to-End Acceptance
 

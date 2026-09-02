@@ -3,6 +3,9 @@ import type {
   CatalogResponse,
   Overview,
   QualityResponse,
+  SearchResponse,
+  SqlQueryResponse,
+  SqlSchemaResponse,
   TablePreview,
   Task,
   TasksResponse,
@@ -46,6 +49,7 @@ export const api = {
   health: () => request<Record<string, unknown>>("/api/v1/health"),
   overview: () => request<Overview>("/api/v1/overview"),
   catalog: (params: URLSearchParams) => request<CatalogResponse>(`/api/v1/catalog?${params.toString()}`),
+  search: (params: URLSearchParams) => request<SearchResponse>(`/api/v1/search?${params.toString()}`),
   asset: (assetId: string) => request<AssetDetail>(`/api/v1/assets/${encodeURIComponent(assetId)}`),
   tablePreview: (assetId: string, layer: "raw" | "normalized", limit: number, offset: number) =>
     request<TablePreview>(
@@ -68,4 +72,14 @@ export const api = {
     }),
   tasks: () => request<TasksResponse>("/api/v1/tasks?limit=20"),
   task: (taskId: string) => request<Task>(`/api/v1/tasks/${encodeURIComponent(taskId)}`),
+  querySchema: (assetIds: string[]) =>
+    request<SqlSchemaResponse>("/api/v1/query/schema", {
+      method: "POST",
+      body: JSON.stringify({ assetIds }),
+    }),
+  querySql: (assetIds: string[], sql: string) =>
+    request<SqlQueryResponse>("/api/v1/query/sql", {
+      method: "POST",
+      body: JSON.stringify({ assetIds, sql }),
+    }),
 };

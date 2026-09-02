@@ -138,3 +138,52 @@ def test_catalog_filter_and_static_path_traversal_are_bounded(api_server) -> Non
     status, payload = _request(base, "/%2e%2e/%2e%2e/secret.txt")
     assert status == 404
     assert payload["error"]["code"] == "not_found"
+
+
+def test_search_and_safe_sql_api_contract(api_server) -> None:
+    base, source = api_server
+    status, queued = _request(base, "/api/v1/process", method="POST", payload={"source": str(source)})
+    assert status == 202
+    task_id = queued["taskId"]
+    task = queued["task"]
+    deadline = time.monotonic() + 40
+    while task["status"] in {"queued", "running"} and time.monotonic() < deadline:
+        time.sleep(0.2)
+        status, task = _request(base, f"/api/v1/tasks/{task_id}")
+    assert status == 200
+    assert task["status"] == "succeeded", task
+
+    status, search = _request(base, "/api/v1/search?q=clean&type=table&limit=10")
+    assert status == 200
+    assert search["query"] == "clean"
+    assert search["results"]
+    assert search["results"][0]["assetType"] == "table"
+    assert search["results"][0]["provenance"]["contentSha256"]
+
+    status, catalog = _request(base, "/api/v1/catalog?type=table&limit=100")
+    assert status == 200
+    table_ids = [item["assetId"] for item in catalog["items"]]
+    assert table_ids
+    status, schema = _request(base, "/api/v1/query/schema", method="POST", payload={"assetIds": [table_ids[0]]})
+    assert status == 200
+    assert schema["relations"][0]["alias"] == "t1"
+    assert schema["relations"][0]["columns"]
+
+    status, result = _request(
+        base,
+        "/api/v1/query/sql",
+        method="POST",
+        payload={"assetIds": [table_ids[0]], "sql": "SELECT * FROM t1 LIMIT 2"},
+    )
+    assert status == 200
+    assert result["rowCount"] <= 2
+    assert result["sandbox"].startswith("duckdb-memory-")
+
+    status, rejected = _request(
+        base,
+        "/api/v1/query/sql",
+        method="POST",
+        payload={"assetIds": [table_ids[0]], "sql": "SELECT * FROM read_csv_auto('C:\\\\outside.csv')"},
+    )
+    assert status == 400
+    assert rejected["error"]["code"] == "external_access_denied"

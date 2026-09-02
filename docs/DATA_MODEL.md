@@ -266,3 +266,17 @@ they are not semantic metadata and never participate in stable IDs.
 normalized-artifact identity, input hash, status, bounded-input audit metadata,
 warnings, and sanitized failure code. `semantic_metadata.current` identifies
 the current successful result; older model/prompt results remain queryable.
+
+## Local retrieval contracts
+
+Phase 9 does not add an embedding or vector field to any asset contract.
+`SearchResult` is a read-only result envelope with an asset ID, optional
+TextChunk ID, bounded snippet, local ordinal score, location, and complete
+source/extraction provenance. `RetrievalReference` is the corresponding future
+evidence envelope. Search results never become new assets and never alter
+normalized artifacts.
+
+The SQL workbench also creates no persistent asset table. It resolves selected
+TableAsset IDs and exposes temporary aliases in a private in-memory connection
+for the duration of one query. Raw/normalized paths, registry tables, and
+source files remain outside the user SQL scope.

@@ -1,10 +1,12 @@
-# Local Data Catalog (Phase 6 / Phase 7A / Phase 8)
+# Local Data Catalog (Phase 6 / Phase 7A / Phase 8 / Phase 9)
 
 The Catalog is the read model over current extracted assets. It is stored in
 the embedded DuckDB file `workspace/state/registry.duckdb`; large table values
 remain in Parquet. There is no MySQL service and no network dependency.
 
 Phase 8 exposes this read model through `CatalogService` and `/api/v1/catalog`.
+Phase 9 adds a live lexical retrieval read path and a separate safe SQL query
+service; neither changes Catalog asset identity or raw/normalized artifacts.
 The browser receives bounded metadata and preview windows only; it never sees
 DuckDB schema or arbitrary filesystem access. `effective_display_name` remains
 the semantic name when available, otherwise the source-derived fallback.
@@ -97,6 +99,9 @@ GET  /api/v1/assets/{asset-id}/table-preview?layer=raw|normalized&limit=&offset=
 GET  /api/v1/assets/{asset-id}/text-preview?limit=&offset=
 GET  /api/v1/quality/issues?status=&severity=&asset_id=&limit=&offset=
 PATCH /api/v1/quality/issues/{issue-id}  {"status":"open|accepted|ignored|resolved"}
+GET  /api/v1/search?q=&type=all|table|text&format=&quality=&match=&limit=&offset=
+POST /api/v1/query/schema  {"assetIds":["..."]}
+POST /api/v1/query/sql  {"assetIds":["..."],"sql":"SELECT ... FROM t1"}
 ```
 
 Table preview is capped at 200 rows and text preview at 20,000 characters.
@@ -104,6 +109,24 @@ Quality updates change only the review status in DuckDB; they do not alter
 source files or raw/normalized artifacts. The fallback name, provenance,
 profile, artifact references, and semantic-pending state are all returned as
 separate fields.
+
+## Phase 9 retrieval and query read paths
+
+Search uses the current `catalog_assets` view, current `text_chunks`, bounded
+column/profile samples, and semantic metadata when it exists. Its backend is
+`duckdb-live-catalog` / `lexical-live-v1`; it stores no duplicate full-text
+Parquet copy and has no DuckDB FTS extension. New assets are visible on the
+next query without rebuilding or rerunning extraction/cleaning. Search results
+carry asset/file/content-SHA/page/sheet/chunk/extractor provenance and an
+ordinal deterministic score. Each asset is capped at three returned results.
+
+The SQL workbench is deliberately outside the Catalog connection. A request
+selects at most eight current TableAssets by stable asset ID, and the service
+maps them to temporary `t1`... relations in a fresh in-memory DuckDB connection.
+Only normalized table values are copied into that connection. User SQL cannot
+see Catalog tables, the registry file, source paths, arbitrary file functions,
+extensions, or the network. See [Search](SEARCH.md) and [Safe SQL](SQL_QUERY.md)
+for the exact limits and validation boundary.
 
 ## Boundaries
 

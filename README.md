@@ -31,7 +31,10 @@ versioned semantic run history; it does not enable real model calls.
 Phase 8 adds a localhost-only Python API, a self-contained React/Vite catalog
 frontend, asynchronous process tasks, and root-derived Windows start/stop
 launchers. The product UI is usable with `AI semantic: Not configured`; Phase
-7B is not run.
+7B is not run. Phase 9 adds offline lexical retrieval over catalog metadata and
+TextChunks plus a read-only SQL workbench over explicitly selected normalized
+TableAssets. It does not add embeddings, a vector database, query rewriting,
+SQL generation, or any model call.
 
 ## Product flow
 
@@ -43,14 +46,17 @@ File Registry -> Processing Policy -> Table Extraction -> TableAsset ----+
                                                                            Profiling / Quality
                                                                                 |
                                                                                 v
-                                                                            Data Catalog
-                                                                        DuckDB + Parquet
-                                                                                |
-                                                                                v
-                                                                    Local API + Frontend
-                                                                                 |
-                                                                                 v
-                                                                        Future Semantic Layer
+                                                                             Data Catalog
+                                                                         DuckDB + Parquet
+                                                                          /          \\
+                                                                         v            v
+                                                                   Local Search    Safe SQL
+                                                                         \            /
+                                                                          v          v
+                                                                     Local Frontend
+                                                                          |
+                                                                          v
+                                                                  Future Semantic Layer
 ```
 
 Table and text extraction are independent. A single PDF, image, Word file, or
@@ -166,6 +172,9 @@ Formal portable launchers require no activation:
 .\chongzu.cmd catalog show <asset-id> --rows 20 --chars 2000
 .\chongzu.cmd semantic status
 .\chongzu.cmd semantic enrich --provider fake --asset <asset-id>
+.\chongzu.cmd search "北京大学" --type text --limit 20
+.\chongzu.cmd benchmark search
+.\chongzu.cmd benchmark sql
 .\chongzu.cmd benchmark pdf-consistency
 .\chongzu.cmd benchmark ocr "D:\Research Data\Project" --workers 2
 .\chongzu.cmd registry summary
@@ -183,9 +192,10 @@ The frontend is built during development with the project-local Node tool and
 is served as static files by the Python standard-library server. No Node/npm,
 Vite, CDN, remote font, or remote image is needed after `frontend/dist` is
 built. The local UI exposes catalog metadata, bounded raw/normalized previews,
-profiles, provenance, quality review, and task progress. It does not expose
-arbitrary file reads, DuckDB SQL, Search, Chat, RAG, Vision, Embedding, or
-real LLM calls.
+profiles, provenance, quality review, task progress, local lexical search, and
+the safe SQL workbench. SQL is executed in a separate in-memory DuckDB
+connection and cannot read arbitrary files, the Registry, extensions, or the
+network. Search and SQL never call an LLM.
 
 For development under Windows PowerShell 5.1, load the repository-local
 environment. If local script policy blocks it, invoke a child PowerShell with
@@ -215,4 +225,13 @@ dependencies of the table/OCR candidates. See
 [PDF table extraction](docs/PDF_TABLE_EXTRACTION.md), and
 [OCR foundation](docs/OCR_FOUNDATION.md), [unified extraction](docs/UNIFIED_EXTRACTION.md),
 [cleaning](docs/CLEANING.md), [data catalog](docs/DATA_CATALOG.md), and
-[semantic enrichment](docs/SEMANTIC_ENRICHMENT.md).
+[semantic enrichment](docs/SEMANTIC_ENRICHMENT.md), [search](docs/SEARCH.md),
+and [safe SQL](docs/SQL_QUERY.md).
+
+Phase 9 also adds no Python or frontend dependency. Search uses live DuckDB
+catalog/chunk reads and no FTS extension, so newly cataloged assets are visible
+without a rebuild. SQL uses Polars plus parameterized insertion into temporary
+in-memory DuckDB relations because PyArrow is intentionally absent. Its
+`enable_external_access=false` setting and allowlisted temporary relations are
+verified by adversarial tests; the Registry connection is never exposed to
+user SQL.

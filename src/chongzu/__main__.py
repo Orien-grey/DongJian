@@ -29,6 +29,8 @@ from .extract.artifacts import artifact_absolute
 from .benchmark.pdf_real import run_real_pdf_benchmark
 from .benchmark.ocr_consistency import run_rendered_page_consistency
 from .clean import CleaningError, process_source
+from .search import SearchQuery, SearchService, run_search_benchmark
+from .services.sql import SqlQueryService, run_sql_benchmark
 from .semantic.runner import (
     RealSemanticProviderDisabled,
     SemanticNotConfigured,
@@ -145,6 +147,16 @@ def _build_parser() -> argparse.ArgumentParser:
     catalog_show_parser.add_argument("--rows", type=int, default=20)
     catalog_show_parser.add_argument("--chars", type=int, default=2000)
 
+    search_parser = sub.add_parser("search", help="search local catalog metadata and text chunks")
+    search_parser.add_argument("query")
+    search_parser.add_argument("--type", dest="asset_type", choices=("all", "table", "text"), default="all")
+    search_parser.add_argument("--format", dest="source_format", default=None)
+    search_parser.add_argument(
+        "--quality", dest="quality_status", choices=("ready", "needs_review", "unusable"), default=None
+    )
+    search_parser.add_argument("--match", choices=("all", "phrase"), default="all")
+    search_parser.add_argument("--limit", type=int, default=30)
+
     benchmark_parser = sub.add_parser("benchmark", help="measure extraction throughput")
     benchmark_sub = benchmark_parser.add_subparsers(dest="benchmark_command", required=True)
     benchmark_scan = benchmark_sub.add_parser("scan")
@@ -192,6 +204,10 @@ def _build_parser() -> argparse.ArgumentParser:
     benchmark_cleaning.add_argument("--workers", type=int, default=None)
     benchmark_cleaning.add_argument("--force", action="store_true")
     benchmark_cleaning.add_argument("--drop-exact-duplicates", action="store_true")
+    benchmark_search = benchmark_sub.add_parser("search", help="benchmark local lexical retrieval")
+    benchmark_search.add_argument("queries", nargs="*", default=None)
+    benchmark_search.add_argument("--format", dest="source_format", default=None)
+    benchmark_sub.add_parser("sql", help="benchmark bounded local SQL")
     return parser
 
 
@@ -391,6 +407,22 @@ def _print_catalog_summary(summary: dict[str, int]) -> None:
     print(f"Unusable: {summary.get('unusable', 0)}")
     print(f"Quality issues: {summary.get('quality_issues', 0)}")
     print(f"Semantic pending: {summary.get('semantic_pending', 0)}")
+
+
+def _print_search_results(response) -> None:
+    print(f"Query: {response.query}")
+    print(f"Results: {len(response.results)} / {response.total}")
+    for result in response.results:
+        location = []
+        if result.page_number is not None:
+            location.append(f"page {result.page_number}")
+        if result.sheet_name:
+            location.append(f"sheet {result.sheet_name}")
+        location_text = f" ({', '.join(location)})" if location else ""
+        print(f"[{result.match_kind}] {result.display_name} [{result.asset_id}]")
+        print(f"  {result.source_file}{location_text} | score={result.score:.2f}")
+        if result.snippet:
+            print(f"  {result.snippet}")
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -600,6 +632,34 @@ def main(argv: Sequence[str] | None = None) -> int:
                 return 0
             finally:
                 registry.close()
+        if parsed.command == "search":
+            service = SearchService()
+            response = service.search(
+                SearchQuery(
+                    parsed.query,
+                    asset_type=parsed.asset_type,
+                    source_format=parsed.source_format,
+                    quality_status=parsed.quality_status,
+                    limit=parsed.limit,
+                    match=parsed.match,
+                )
+            )
+            _print_search_results(response)
+            return 0
+        if parsed.command == "benchmark" and parsed.benchmark_command == "search":
+            service = SearchService()
+            query_values = tuple(parsed.queries) if parsed.queries else ("data", "pdf", "表", "")
+            benchmark = run_search_benchmark(service, queries=query_values, source_format=parsed.source_format)
+            print("Search benchmark:")
+            for key, value in benchmark.as_dict().items():
+                print(f"{key}: {value:.3f}" if isinstance(value, float) else f"{key}: {value}")
+            return 0
+        if parsed.command == "benchmark" and parsed.benchmark_command == "sql":
+            benchmark = run_sql_benchmark(SqlQueryService())
+            print("SQL benchmark:")
+            for key, value in benchmark.as_dict().items():
+                print(f"{key}: {value:.3f}" if isinstance(value, float) else f"{key}: {value}")
+            return 0
         if parsed.command == "registry":
             registry = Registry.open()
             try:

@@ -8,6 +8,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import time
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from chongzu import paths
@@ -108,6 +109,47 @@ def test_moved_project_start_process_catalog_stop() -> None:
         text_preview = _json_request(base, f"/api/v1/assets/{text['assetId']}/text-preview?limit=200")
         assert table_preview["rows"]
         assert text_preview["text"]
+
+        search = _json_request(base, "/api/v1/search?q=relocated&limit=20")
+        assert search["query"] == "relocated"
+        assert search["results"]
+        assert all(item["provenance"]["contentSha256"] for item in search["results"])
+        query_schema = _json_request(
+            base,
+            "/api/v1/query/schema",
+            method="POST",
+            payload={"assetIds": [table["assetId"]]},
+        )
+        assert query_schema["relations"][0]["alias"] == "t1"
+        assert query_schema["relations"][0]["columns"]
+        query_result = _json_request(
+            base,
+            "/api/v1/query/sql",
+            method="POST",
+            payload={"assetIds": [table["assetId"]], "sql": "SELECT * FROM t1 LIMIT 2"},
+        )
+        assert query_result["rowCount"] <= 2
+        assert query_result["sandbox"].startswith("duckdb-memory-")
+        hostile_request = Request(
+            f"{base}/api/v1/query/sql",
+            data=json.dumps(
+                {
+                    "assetIds": [table["assetId"]],
+                    "sql": "SELECT * FROM read_csv_auto('C:\\\\outside.csv')",
+                },
+                ensure_ascii=False,
+            ).encode("utf-8"),
+            method="POST",
+            headers={"Content-Type": "application/json"},
+        )
+        try:
+            urlopen(hostile_request, timeout=15)
+        except HTTPError as error:
+            hostile_payload = json.loads(error.read().decode("utf-8"))
+            assert error.code == 400
+            assert hostile_payload["error"]["code"] == "external_access_denied"
+        else:
+            raise AssertionError("external file SQL unexpectedly succeeded")
         assert before_hashes == {path.name: _sha256(path) for path in source.iterdir()}
     finally:
         if server_started:

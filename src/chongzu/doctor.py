@@ -513,6 +513,19 @@ def _check_optional_tools(report: DoctorReport) -> None:
     else:
         report.add("frontend production bundle", "INFO", "not built; run frontend npm build before start.cmd")
     try:
+        from .search import SEARCH_BACKEND, SEARCH_INDEX_VERSION
+
+        report.add("Local Search", "PASS", f"{SEARCH_BACKEND}; {SEARCH_INDEX_VERSION}; no extension")
+    except Exception as exc:  # pragma: no cover - depends on runtime imports
+        report.add("Local Search", "FAIL", str(exc), fatal=True)
+    try:
+        from .services.sql import SQL_SANDBOX_VERSION, verify_sql_sandbox
+
+        verify_sql_sandbox()
+        report.add("SQL Sandbox", "PASS", SQL_SANDBOX_VERSION)
+    except Exception as exc:  # pragma: no cover - depends on DuckDB build
+        report.add("SQL Sandbox", "FAIL", str(exc), fatal=True)
+    try:
         from .semantic.config import load_semantic_config
 
         semantic_config = load_semantic_config()

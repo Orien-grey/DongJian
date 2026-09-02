@@ -26,7 +26,9 @@ Overview
   |
   +-- Quality Review -- Accept / Modify / Ignore
   |
-  +-- Search / Analysis -- reserved for Phase 9, disabled in Phase 8
+  +-- Data Retrieval -- lexical local search over metadata/TextChunks
+  |
+  +-- Data Query -- selected-table read-only SQL
 ```
 
 TableAsset and TextAsset are peers in one catalog. The UI must never imply that
@@ -134,29 +136,30 @@ AI is never authorized to click/execute acceptance on behalf of the user.
 
 ## Search and Analysis
 
-The future page offers four modes:
+The delivered Phase 9 pages provide two local modes:
 
 - dataset/table catalog lookup;
 - text and TextChunk lookup;
 - read-only SQL analysis in DuckDB over catalog/Parquet;
-- natural-language questions over selected evidence.
+- Future natural-language questions over selected evidence (not implemented).
 
 Structured flow:
 
 ```text
-question -> candidate TableAssets -> validated read-only SQL -> DuckDB -> result
+selected TableAssets -> validated read-only SQL -> private DuckDB -> result
 ```
 
 Text flow:
 
 ```text
-question -> keyword/future vector TextChunks -> cited evidence -> Qwen response
+query -> lexical TextChunks -> cited evidence -> asset detail
 ```
 
-Generated SQL must be visible, restricted to read-only statements, validated,
-time/resource limited, and executed against an explicitly scoped catalog. Text
-answers link back to chunk and source provenance. Vector search is hidden or
-disabled until an embedding provider has been deliberately configured.
+Generated SQL is not implemented. User-entered SQL is visible, restricted to
+read-only statements, validated, time/resource limited, and executed against
+explicitly selected temporary relations. Search results link back to chunk and
+source provenance. Vector search remains absent until a future retrieval
+backend is deliberately implemented.
 
 ## Local application boundaries
 
@@ -171,7 +174,7 @@ root. The frontend must start through a root-derived Windows launcher and work
 without admin rights or external CDNs. If the configured Qwen service is
 offline, extraction/catalog browsing and deterministic review remain usable.
 
-## Phase 8 delivered surface
+## Phase 8 and Phase 9 delivered surface
 
 The first product navigation is **概览**, **数据目录**, **质量检查**, and
 **处理任务**. Asset detail is opened from the catalog and provides 数据、画像、
@@ -186,8 +189,16 @@ states. Quality controls update only `open`, `accepted`, `ignored`, or
 `resolved` review status. The AI tab remains `尚未配置模型`; Phase 7B and all
 network calls are disabled.
 
+Phase 9 adds **数据检索** and **数据查询** to the navigation. Data retrieval
+uses the local lexical Search API and displays bounded plain-text snippets,
+match kind, quality, source location, and an asset-detail link. Data Query
+requires explicit table selection, shows the service-generated `t1`/`t2`
+relation mapping, and submits only the SQL text plus asset IDs. Its result
+table is bounded and reports truncation, execution time, and sandbox identity.
+There is no query rewrite, SQL generation, embedding, Chat, RAG, or model call.
+
 ## Delivery sequence
 
-Phase 9 adds deterministic keyword/text retrieval, scoped read-only SQL, and
-future search surfaces. Semantic acceptance remains an explicitly authorized
-separate operation and does not gate the local frontend.
+Phase 9 adds deterministic keyword/text retrieval and scoped read-only SQL.
+Semantic acceptance remains an explicitly authorized separate operation and
+does not gate the local frontend.

@@ -1,4 +1,4 @@
-export type Page = "overview" | "catalog" | "quality" | "tasks" | "detail";
+export type Page = "overview" | "catalog" | "search" | "query" | "quality" | "tasks" | "detail";
 export type AssetType = "table" | "text";
 export type QualityStatus = "ready" | "needs_review" | "unusable";
 export type TaskStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled";
@@ -66,6 +66,71 @@ export interface Pagination {
 export interface CatalogResponse {
   items: AssetSummary[];
   pagination: Pagination;
+}
+
+export interface SearchResult {
+  resultId: string;
+  assetId: string;
+  assetType: AssetType;
+  chunkId: string | null;
+  displayName: string;
+  sourceFile: string;
+  sourceFormat: string | null;
+  pageNumber: number | null;
+  sheetName: string | null;
+  matchKind: string;
+  snippet: string;
+  score: number;
+  qualityStatus: QualityStatus;
+  matchOffsets: number[][];
+  provenance: Record<string, unknown>;
+}
+
+export interface SearchResponse {
+  query: string;
+  total: number;
+  limit: number;
+  offset: number;
+  results: SearchResult[];
+  backend: string;
+  indexVersion: string;
+}
+
+export interface SqlColumn {
+  name: string;
+  physicalType: string;
+}
+
+export interface SqlRelation {
+  alias: string;
+  assetId: string;
+  displayName: string;
+  sourceFile: string;
+  sourceFormat: string | null;
+  columns: SqlColumn[];
+  rowCount: number | null;
+}
+
+export interface SqlSchemaResponse {
+  relations: SqlRelation[];
+  limits: {
+    maxSelectedAssets: number;
+    maxInputRows: number;
+    maxResultRows: number;
+    maxSqlChars: number;
+    timeoutSeconds: number;
+  };
+  sandbox: string;
+}
+
+export interface SqlQueryResponse {
+  columns: string[];
+  rows: Array<Record<string, unknown>>;
+  rowCount: number;
+  truncated: boolean;
+  executionMs: number;
+  relations: SqlRelation[];
+  sandbox: string;
 }
 
 export interface QualityIssue {

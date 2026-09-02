@@ -16,11 +16,15 @@ from urllib.parse import parse_qs, unquote, urlsplit
 from uuid import uuid4
 
 from chongzu import paths
+from chongzu.search import SearchQuery, SearchService, SearchValidationError
 from chongzu.semantic.config import load_semantic_config
 from chongzu.services import (
     CatalogService,
     ProcessTaskManager,
     QualityService,
+    SqlQueryService,
+    SqlServiceError,
+    SqlTimeoutError,
     SourceValidationError,
 )
 
@@ -75,6 +79,8 @@ class BackendApp:
         self.frontend_dist = Path(frontend_dist or self.project_root / "frontend" / "dist").resolve()
         self.catalog = CatalogService(registry_path=self.registry_path, workspace_root=self.workspace_root)
         self.quality = QualityService(registry_path=self.registry_path)
+        self.search = SearchService(registry_path=self.registry_path)
+        self.sql = SqlQueryService(registry_path=self.registry_path, workspace_root=self.workspace_root)
         self.tasks = task_manager or ProcessTaskManager.for_paths(
             registry_path=self.registry_path,
             workspace_root=self.workspace_root,
@@ -149,6 +155,39 @@ class BackendApp:
                         offset=offset,
                     ),
                 )
+            if path == "/api/v1/search" and method == "GET":
+                request = SearchQuery(
+                    query=query.get("q", [""])[0],
+                    asset_type=query.get("type", ["all"])[0],
+                    source_format=query.get("format", [None])[0],
+                    quality_status=query.get("quality", [None])[0],
+                    limit=_int_param(query, "limit", 30, maximum=100),
+                    offset=_int_param(query, "offset", 0, maximum=10_000_000),
+                    match=query.get("match", ["all"])[0],
+                )
+                try:
+                    return ApiResponse(200, self.search.search(request).as_dict())
+                except SearchValidationError as exc:
+                    raise ApiError("invalid_search", str(exc)) from exc
+            if path == "/api/v1/query/schema" and method == "POST":
+                value = self._body_object(body)
+                asset_ids = value.get("assetIds", value.get("asset_ids"))
+                try:
+                    return ApiResponse(200, self.sql.schema(asset_ids).as_dict())
+                except SqlServiceError as exc:
+                    raise ApiError(exc.code, exc.message) from exc
+            if path == "/api/v1/query/sql" and method == "POST":
+                value = self._body_object(body)
+                asset_ids = value.get("assetIds", value.get("asset_ids"))
+                sql = value.get("sql")
+                if not isinstance(sql, str):
+                    raise ApiError("invalid_sql", "sql must be a string")
+                try:
+                    return ApiResponse(200, self.sql.execute(asset_ids, sql))
+                except SqlTimeoutError as exc:
+                    raise ApiError(exc.code, exc.message, 408) from exc
+                except SqlServiceError as exc:
+                    raise ApiError(exc.code, exc.message) from exc
             if path == "/api/v1/quality/issues" and method == "GET":
                 limit = _int_param(query, "limit", 50, maximum=100)
                 offset = _int_param(query, "offset", 0, maximum=10_000_000)

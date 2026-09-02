@@ -19,6 +19,13 @@ standard-library `ThreadingHTTPServer` bound to `127.0.0.1`. Browser requests
 go through `/api/v1/` and application services; handlers do not contain
 catalog SQL or extractor logic.
 
+Phase 9 adds a `RetrievalService` for deterministic lexical search and a
+separate `SqlQueryService` for explicitly selected TableAssets. Search reads
+current Catalog metadata and bounded TextChunk content; it does not scan all
+Parquet cells or install a DuckDB extension. SQL resolves asset IDs through the
+Registry, copies only normalized Parquet data into temporary in-memory tables,
+and then runs on a fresh DuckDB connection with external access disabled.
+
 ## System flow
 
 ```text
@@ -46,13 +53,16 @@ TableAsset              TextAsset/TextChunk
                  v
             Data Catalog
          DuckDB + Parquet
+             /            \\
+            v              v
+   Local Retrieval       Safe SQL
+      Search API        Query API
+            \\            /
+             v          v
+          Local Frontend
                  |
                  v
        Future Semantic Enrichment
-                 |
-                 v
-            Future Search
-         SQL + Text Retrieval
 ```
 
 The arrows from policy to extraction are independent. For every registered
@@ -422,17 +432,35 @@ policy status for existing file rows. See [REGISTRY.md](REGISTRY.md).
   need them. Processing never downloads missing artifacts.
 - Arbitrarily large inputs are streamed or processed in bounded pages/batches.
 
-## Future search boundary
+## Phase 9 local retrieval boundary
 
-Structured search will locate candidate table assets in the catalog, ask the
-configured model for restricted read-only SQL, validate it, and execute it in
-DuckDB against catalog/Parquet data.
+`SearchService` implements lexical-only retrieval over the live
+`catalog_assets` view, bounded table metadata/profile samples, semantic metadata
+when present, and current `text_chunks`. It normalizes queries with Unicode NFC,
+uses case-insensitive Latin matching, preserves no-space Chinese substrings,
+and treats whitespace-separated input as deterministic tokens. Ranking weights
+are centralized in `src/chongzu/search.py`; scores are ordinal local ranking
+values, not semantic probabilities. Results retain file, SHA, asset, page/sheet,
+chunk, extractor, and extraction-run provenance. Each asset is capped at three
+results so a document's chunks cannot flood the result page.
 
-Text search will locate `TextChunk` candidates through deterministic keyword
-retrieval and, later, an injected vector-retrieval implementation before Qwen
-synthesis. `src/chongzu/search.py` reserves `TextRetriever` and
-`EmbeddingProvider` interfaces only. No embedding endpoint, local model, vector
-database, or embedding field is assumed.
+The current backend is `duckdb-live-catalog` (`lexical-live-v1`), not a
+materialized full-text index. There is no `INSTALL fts`, `LOAD fts`, embedding,
+vector database, query rewrite, rerank, or model call. New Catalog rows become
+searchable on the next query without rebuilding extraction or cleaning.
+
+`SqlQueryService` accepts only one bounded `SELECT`/`WITH ... SELECT` statement
+and a list of at most eight selected table asset IDs. It exposes those assets as
+service-generated `t1`, `t2`, ... temporary relations. The Registry connection
+is closed before user SQL runs. `enable_external_access=false`, allowlisted
+relations, forbidden-operation scanning, a 32 KiB SQL cap, 500-row response
+cap, 2 MiB JSON cap, 512 MiB memory setting, one thread, and a 10 second
+interruptible worker bound the query. See [safe SQL](SQL_QUERY.md).
+
+`TextRetriever` and `EmbeddingProvider` remain provider-neutral future
+interfaces; Phase 9 uses only the lexical backend. `RetrievalReference` is a
+stable evidence object for future semantic/RAG consumers, but no prompt or
+model request is created here.
 
 ## Removed and benchmark-only routes
 
