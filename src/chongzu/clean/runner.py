@@ -7,7 +7,7 @@ import hashlib
 import json
 from pathlib import Path
 import time
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 from uuid import uuid4
 
 from chongzu import paths
@@ -22,6 +22,7 @@ from ..extract.artifacts import artifact_absolute
 
 
 MAX_CLEANING_WORKERS = 4
+ProgressCallback = Callable[[str, float], None]
 
 
 class CleaningError(RuntimeError):
@@ -177,6 +178,7 @@ def clean_source(
     registry_path: Path | str | None = None,
     workspace_root: Path | str | None = None,
     extraction_summary: UnifiedExtractionSummary | None = None,
+    progress_callback: ProgressCallback | None = None,
 ) -> CleaningSummary:
     """Clean and profile current assets for one source without re-extracting."""
 
@@ -304,6 +306,8 @@ def clean_source(
                         summary.cleaned += 1
     finally:
         registry.close()
+    if progress_callback is not None:
+        progress_callback("profile", 0.78)
     summary.cleaning_wall_time_ms = (time.perf_counter_ns() - wall_started) / 1_000_000
     summary.wall_time_ms = summary.cleaning_wall_time_ms
     registry = Registry.open(registry_file)
@@ -311,6 +315,8 @@ def clean_source(
         catalog, rows, chars = _summary_catalog(registry, source_root)
     finally:
         registry.close()
+    if progress_callback is not None:
+        progress_callback("catalog", 0.94)
     summary.rows = rows
     summary.chars = chars
     summary.table_assets = int(catalog.get("table_assets", summary.table_assets))
@@ -331,6 +337,7 @@ def process_source(
     drop_exact_duplicates: bool = False,
     registry_path: Path | str | None = None,
     workspace_root: Path | str | None = None,
+    progress_callback: ProgressCallback | None = None,
 ) -> CleaningSummary:
     """Run scan, independent extraction, deterministic cleaning, and profiling."""
 
@@ -338,6 +345,8 @@ def process_source(
     worker_count = normalize_cleaning_workers(workers)
     registry_file = Path(registry_path or paths.REGISTRY_PATH).resolve()
     workspace = Path(workspace_root or paths.WORKSPACE_ROOT).resolve()
+    if progress_callback is not None:
+        progress_callback("scan", 0.02)
     extraction = extract_unified(
         source,
         workers=min(worker_count, 2),
@@ -345,6 +354,9 @@ def process_source(
         registry_path=registry_file,
         workspace_root=workspace,
     )
+    if progress_callback is not None:
+        progress_callback("extract", 0.30)
+        progress_callback("clean", 0.45)
     summary = clean_source(
         source,
         workers=worker_count,
@@ -353,6 +365,7 @@ def process_source(
         registry_path=registry_file,
         workspace_root=workspace,
         extraction_summary=extraction,
+        progress_callback=progress_callback,
     )
     summary.wall_time_ms = (time.perf_counter_ns() - wall_started) / 1_000_000
     return summary

@@ -507,6 +507,11 @@ def _check_optional_tools(report: DoctorReport) -> None:
     # Keep the Phase 2 diagnostic label for scripts that grep historical
     # doctor output; the authoritative Phase 5 checks above are PASS/FAIL.
     report.add("OCR/RapidOCR", "INFO", "RapidOCR is provisioned; see RapidOCR, ONNX Runtime, and OCR models checks")
+    frontend_dist = paths.PROJECT_ROOT / "frontend" / "dist"
+    if (frontend_dist / "index.html").is_file():
+        report.add("frontend production bundle", "PASS", str(frontend_dist))
+    else:
+        report.add("frontend production bundle", "INFO", "not built; run frontend npm build before start.cmd")
     try:
         from .semantic.config import load_semantic_config
 

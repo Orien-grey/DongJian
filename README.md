@@ -28,6 +28,10 @@ quality status/issues, and a queryable `catalog_assets` view. No LLM,
 embedding, or frontend is part of the core route. Phase 7A adds the offline
 semantic contract, bounded input builder, strict validator, Fake Provider, and
 versioned semantic run history; it does not enable real model calls.
+Phase 8 adds a localhost-only Python API, a self-contained React/Vite catalog
+frontend, asynchronous process tasks, and root-derived Windows start/stop
+launchers. The product UI is usable with `AI semantic: Not configured`; Phase
+7B is not run.
 
 ## Product flow
 
@@ -40,9 +44,12 @@ File Registry -> Processing Policy -> Table Extraction -> TableAsset ----+
                                                                                 |
                                                                                 v
                                                                             Data Catalog
-                                                                         DuckDB + Parquet
+                                                                        DuckDB + Parquet
                                                                                 |
                                                                                 v
+                                                                    Local API + Frontend
+                                                                                 |
+                                                                                 v
                                                                         Future Semantic Layer
 ```
 
@@ -106,6 +113,7 @@ See [Architecture](docs/ARCHITECTURE.md), [Data model](docs/DATA_MODEL.md),
 [Unified extraction](docs/UNIFIED_EXTRACTION.md), [Registry](docs/REGISTRY.md),
 [AI semantics](docs/AI_SEMANTICS.md), [Semantic enrichment](docs/SEMANTIC_ENRICHMENT.md),
 [UI architecture](docs/UI_ARCHITECTURE.md),
+[API](docs/API.md), [Frontend](docs/FRONTEND.md), [Windows run](docs/WINDOWS_RUN.md),
 [Roadmap](docs/ROADMAP.md), and [Runtime](docs/RUNTIME.md).
 
 ## Repository layout
@@ -113,6 +121,9 @@ See [Architecture](docs/ARCHITECTURE.md), [Data model](docs/DATA_MODEL.md),
 | Path | Purpose |
 | --- | --- |
 | `src/chongzu/` | Registry, detector, policy, asset/semantic/search contracts, and CLI |
+| `frontend/src/` | React + TypeScript local catalog UI source |
+| `frontend/package.json`, `frontend/package-lock.json` | Development/build contract; `node_modules/` is ignored |
+| `frontend/dist/` | Generated self-contained production UI; ignored in Git but required in a release bundle |
 | `tests/` | Automated tests and synthetic fixtures only |
 | `.env.example` | Blank provider-neutral semantic configuration example; `.env` is ignored |
 | `config/` | Legacy JSON example for documentation only; real files are ignored |
@@ -137,6 +148,8 @@ Formal portable launchers require no activation:
 
 ```text
 .\doctor.cmd
+.\start.cmd
+.\stop.cmd
 .\chongzu.cmd scan "D:\Research Data\Project"
 .\chongzu.cmd extract structured "D:\Research Data\Project" --workers 4
 .\chongzu.cmd benchmark structured "D:\Research Data\Project"
@@ -157,6 +170,22 @@ Formal portable launchers require no activation:
 .\chongzu.cmd benchmark ocr "D:\Research Data\Project" --workers 2
 .\chongzu.cmd registry summary
 ```
+
+Phase 8's normal user flow is `start.cmd` -> browser at
+`http://127.0.0.1:18765/` -> **处理新目录** -> Catalog. The server binds only
+to localhost and calls `process_source()` in a bounded background task; it
+does not spawn a second CLI process. `stop.cmd` terminates only the PID recorded
+in `workspace/state/server.pid` (using its private local control token first).
+See [API](docs/API.md),
+[Frontend](docs/FRONTEND.md), and [Windows run](docs/WINDOWS_RUN.md).
+
+The frontend is built during development with the project-local Node tool and
+is served as static files by the Python standard-library server. No Node/npm,
+Vite, CDN, remote font, or remote image is needed after `frontend/dist` is
+built. The local UI exposes catalog metadata, bounded raw/normalized previews,
+profiles, provenance, quality review, and task progress. It does not expose
+arbitrary file reads, DuckDB SQL, Search, Chat, RAG, Vision, Embedding, or
+real LLM calls.
 
 For development under Windows PowerShell 5.1, load the repository-local
 environment. If local script policy blocks it, invoke a child PowerShell with

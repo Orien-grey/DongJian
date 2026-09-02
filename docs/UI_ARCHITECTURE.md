@@ -12,8 +12,10 @@ from:
 - OpenRefine: cleaning suggestions with explicit human confirmation;
 - DuckDB UI: table browsing and SQL exploration.
 
-This phase contains design only. No frontend framework, server, package, or
-generated demo data is added.
+Phase 8 implements the local read-only product shell described here. The
+production bundle is a self-contained React/Vite build served by the Python
+localhost API; no CDN, remote font, external image, or generated demo data is
+used.
 
 ## Navigation model
 
@@ -24,7 +26,7 @@ Overview
   |
   +-- Quality Review -- Accept / Modify / Ignore
   |
-  +-- Search / Analysis -- Dataset / Text / SQL / Questions
+  +-- Search / Analysis -- reserved for Phase 9, disabled in Phase 8
 ```
 
 TableAsset and TextAsset are peers in one catalog. The UI must never imply that
@@ -169,9 +171,23 @@ root. The frontend must start through a root-derived Windows launcher and work
 without admin rights or external CDNs. If the configured Qwen service is
 offline, extraction/catalog browsing and deterministic review remain usable.
 
+## Phase 8 delivered surface
+
+The first product navigation is **概览**, **数据目录**, **质量检查**, and
+**处理任务**. Asset detail is opened from the catalog and provides 数据、画像、
+质量、来源、AI语义 tabs. The data tab requests only bounded normalized/raw
+table pages or a bounded normalized text excerpt. The source tab displays
+provenance and artifact references rather than serving arbitrary local files.
+
+The process dialog accepts a pasted existing directory path. A POST creates a
+background task; the browser polls it once per second and never blocks on the
+pipeline. Empty registry/catalog/quality/task states are explicit empty
+states. Quality controls update only `open`, `accepted`, `ignored`, or
+`resolved` review status. The AI tab remains `尚未配置模型`; Phase 7B and all
+network calls are disabled.
+
 ## Delivery sequence
 
-Phase 9 should first deliver read-only Overview, Catalog, Asset Detail, and
-provenance. Quality decisions come next with durable audit records. Search and
-analysis arrive in Phase 10 after extraction/catalog contracts and restricted
-query rules are stable.
+Phase 9 adds deterministic keyword/text retrieval, scoped read-only SQL, and
+future search surfaces. Semantic acceptance remains an explicitly authorized
+separate operation and does not gate the local frontend.

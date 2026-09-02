@@ -1,8 +1,13 @@
-# Local Data Catalog (Phase 6 / Phase 7A)
+# Local Data Catalog (Phase 6 / Phase 7A / Phase 8)
 
 The Catalog is the read model over current extracted assets. It is stored in
 the embedded DuckDB file `workspace/state/registry.duckdb`; large table values
 remain in Parquet. There is no MySQL service and no network dependency.
+
+Phase 8 exposes this read model through `CatalogService` and `/api/v1/catalog`.
+The browser receives bounded metadata and preview windows only; it never sees
+DuckDB schema or arbitrary filesystem access. `effective_display_name` remains
+the semantic name when available, otherwise the source-derived fallback.
 
 ## Schema v5
 
@@ -79,6 +84,26 @@ provenance, metadata, profile, current quality issues, and a bounded preview
 large Parquet table. `show` also includes semantic history and effective-name
 selection. The Fake Provider is an explicit offline test path; the HTTP
 provider is disabled in Phase 7A.
+
+## Local API and UI read model
+
+The production UI uses these bounded operations:
+
+```text
+GET  /api/v1/overview
+GET  /api/v1/catalog?type=&quality=&format=&q=&limit=&offset=
+GET  /api/v1/assets/{asset-id}
+GET  /api/v1/assets/{asset-id}/table-preview?layer=raw|normalized&limit=&offset=
+GET  /api/v1/assets/{asset-id}/text-preview?limit=&offset=
+GET  /api/v1/quality/issues?status=&severity=&asset_id=&limit=&offset=
+PATCH /api/v1/quality/issues/{issue-id}  {"status":"open|accepted|ignored|resolved"}
+```
+
+Table preview is capped at 200 rows and text preview at 20,000 characters.
+Quality updates change only the review status in DuckDB; they do not alter
+source files or raw/normalized artifacts. The fallback name, provenance,
+profile, artifact references, and semantic-pending state are all returned as
+separate fields.
 
 ## Boundaries
 

@@ -13,6 +13,12 @@ root-relative below `workspace/`; runtime and cache state is root-relative
 below `runtime/`, `cache/`, and `models/`. RapidOCR's portable ONNX model
 bundle is under `runtime/models/ocr/` beside the package payload.
 
+Phase 8 adds a product shell around these services without changing the data
+contracts: a React/Vite build is served from `frontend/dist` by a Python
+standard-library `ThreadingHTTPServer` bound to `127.0.0.1`. Browser requests
+go through `/api/v1/` and application services; handlers do not contain
+catalog SQL or extractor logic.
+
 ## System flow
 
 ```text
@@ -239,6 +245,35 @@ key, so one file failure does not cancel other files or erase an independent
 asset type. The formal user workflow is `chongzu process SOURCE`, which calls
 that extractor and then the Phase 6 cleaning/profile/catalog coordinator. See
 [UNIFIED_EXTRACTION.md](UNIFIED_EXTRACTION.md).
+
+## Phase 8 local application boundary
+
+The production path is:
+
+```text
+start.cmd
+  -> project-local standalone Python
+  -> ThreadingHTTPServer (127.0.0.1:18765)
+  -> /api/v1 application services
+       -> CatalogService -> Registry + bounded Parquet/text preview
+       -> QualityService -> review-only status updates
+       -> ProcessTaskManager -> process_source(source)
+  -> frontend/dist static React application
+```
+
+`BackendApp` is HTTP-independent and is tested in-process. `CatalogService`
+owns safe asset-ID-to-artifact resolution, `QualityService` owns the four
+review statuses, and `ProcessTaskManager` owns one background process queue.
+The core coordinator receives a small `(stage, progress)` callback seam; it
+does not import HTTP code. A task exposes coarse `scan`, `extract`, `clean`,
+`profile`, and `catalog` events plus final counts instead of streaming per-file
+logs.
+
+The API only accepts an existing non-empty directory for processing. It never
+accepts a browser-supplied arbitrary file path for reading. Static resolution
+is contained below `frontend/dist`, and missing frontend output produces an
+actionable `frontend_not_built` error. JSON failures have a request ID while
+tracebacks are written to `workspace/logs/server.log`.
 
 Stable table/text/chunk IDs are derived from extraction provenance. Semantic
 display names, categories, model responses, and UI edits never participate in

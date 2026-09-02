@@ -100,6 +100,15 @@ the install in a temporary project-local staging venv, removes stale target
 payload, overlays the contrib OpenCV wheel last, and publishes the resulting
 site-packages payload:
 
+Phase 8 also adds no Python dependency. Its production server uses only
+`http.server`, `threading`, `urllib`, and the existing catalog/extraction
+services. Node 22.14.0 and npm 10.9.2 were provisioned only as project-local
+development tools under `runtime\node-dev` because this machine had no Node
+on PATH. They are ignored and are not part of the production runtime contract;
+`frontend/dist` is the required release payload. npm's cache is redirected to
+`cache\npm`, no system PATH is changed, and the final server never runs npm or
+Vite.
+
 ```text
 runtime\uv\uv.exe pip install --python cache\temp\runtime-provision-staging\Scripts\python.exe --only-binary=:all: --exact duckdb==1.5.5 polars==1.44.1 python-calamine==0.8.2 PyMuPDF==1.28.2 img2table==2.0.0 rapidocr==3.9.2 onnxruntime==1.29.0 omegaconf==2.0.6
 ```
@@ -261,5 +270,11 @@ introduce no runtime-size increase; final bundle-size measurement must still
 be repeated after package cleanup. The future `.env` is project-local and
 ignored by Git; the current Phase 7A guard rejects real provider execution
 even when it is filled.
+
+The Phase 8 server is localhost-only (`127.0.0.1`) and its process task calls
+the Python coordinator directly. Frontend assets are static local files; the
+API has no arbitrary path/file route. `start.cmd` records only its own server
+PID below `workspace\state`, and `stop.cmd` uses that exact PID rather than
+terminating all Python processes. See [WINDOWS_RUN.md](WINDOWS_RUN.md).
 
 The standalone CPython image also contains its own project-local bootstrap tools `pip==26.1.2` and `setuptools==82.0.1` under `runtime\python`; they are not system packages and are not exposed through the venv because the venv does not use system site-packages. The package build isolation uses the exact `setuptools==80.10.2` requirement declared in `pyproject.toml`.

@@ -218,14 +218,22 @@ neutral. Phase 8 can proceed without completing this phase.
 
 ## Phase 8 - Local Frontend
 
-- Implement Overview, Data Catalog, Asset Detail, and Quality Review surfaces
-  described in `UI_ARCHITECTURE.md`.
-- Support raw-versus-extracted comparison and human confirmation of semantic
-  advice.
-- Keep the frontend local, relocatable, and independent of a database service.
+- Status: implementation complete for this round; changes intentionally remain
+  uncommitted for review.
+- Serve a self-contained React + TypeScript + Vite build from `frontend/dist`
+  through the Python standard-library localhost server. No FastAPI, Electron,
+  Tauri, CDN, remote font, or external asset is used.
+- Provide `/api/v1/` health, overview, catalog, bounded asset previews, quality
+  review, and asynchronous process-task endpoints above application services.
+- Implement Overview, Data Catalog, Asset Detail, Quality Review, and task
+  progress surfaces. Raw/normalized data, profile, provenance, and semantic
+  pending state remain separate.
+- Keep `start.cmd`/`stop.cmd` root-derived and PID-scoped; production does not
+  require Node/npm/Vite after `frontend/dist` is built.
 
-Acceptance: users can inspect provenance and review suggestions without direct
-database manipulation or source-file mutation.
+Acceptance: users can start the local workbench, process a directory without
+blocking the browser, inspect bounded assets/provenance, and review issue
+statuses without direct database manipulation or source-file mutation.
 
 ## Phase 9 - Search, SQL, and Text Retrieval
 

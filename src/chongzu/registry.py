@@ -2917,10 +2917,14 @@ class Registry:
         asset_type: str | None = None,
         quality_status: str | None = None,
         source_format: str | None = None,
+        query: str | None = None,
         limit: int = 100,
+        offset: int = 0,
     ) -> list[dict[str, Any]]:
         if limit < 1 or limit > 100_000:
             raise ValueError("limit must be between 1 and 100000")
+        if offset < 0:
+            raise ValueError("offset must be non-negative")
         clauses = ["1=1"]
         params: list[Any] = []
         for column, value in (
@@ -2932,12 +2936,152 @@ class Registry:
             if value is not None:
                 clauses.append(f"{column}=?")
                 params.append(value)
+        if query is not None and query.strip():
+            clauses.append(
+                "(effective_display_name ILIKE ? OR fallback_display_name ILIKE ? OR source_file ILIKE ?)"
+            )
+            needle = f"%{query.strip()}%"
+            params.extend((needle, needle, needle))
         cursor = self.connection.execute(
-            f"SELECT * FROM catalog_assets WHERE {' AND '.join(clauses)} ORDER BY source_file, asset_type, asset_id LIMIT {int(limit)}",
-            params,
+            f"SELECT * FROM catalog_assets WHERE {' AND '.join(clauses)} ORDER BY source_file, asset_type, asset_id LIMIT ? OFFSET ?",
+            [*params, int(limit), int(offset)],
         )
         columns = [item[0] for item in cursor.description]
         return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+    def count_catalog_assets(
+        self,
+        *,
+        source_root: str | None = None,
+        asset_type: str | None = None,
+        quality_status: str | None = None,
+        source_format: str | None = None,
+        query: str | None = None,
+    ) -> int:
+        """Count catalog rows using the same bounded metadata filters as listing."""
+
+        clauses = ["1=1"]
+        params: list[Any] = []
+        for column, value in (
+            ("source_root", source_root),
+            ("asset_type", asset_type),
+            ("quality_status", quality_status),
+            ("source_format", source_format),
+        ):
+            if value is not None:
+                clauses.append(f"{column}=?")
+                params.append(value)
+        if query is not None and query.strip():
+            clauses.append(
+                "(effective_display_name ILIKE ? OR fallback_display_name ILIKE ? OR source_file ILIKE ?)"
+            )
+            needle = f"%{query.strip()}%"
+            params.extend((needle, needle, needle))
+        row = self.connection.execute(
+            f"SELECT COUNT(*) FROM catalog_assets WHERE {' AND '.join(clauses)}",
+            params,
+        ).fetchone()
+        return int(row[0] or 0)
+
+    def list_quality_issues(
+        self,
+        *,
+        status: str | None = None,
+        severity: str | None = None,
+        asset_id: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        if limit < 1 or limit > 100_000:
+            raise ValueError("limit must be between 1 and 100000")
+        if offset < 0:
+            raise ValueError("offset must be non-negative")
+        clauses = ["1=1"]
+        params: list[Any] = []
+        for column, value in (("q.status", status), ("q.severity", severity), ("q.asset_id", asset_id)):
+            if value is not None:
+                clauses.append(f"{column}=?")
+                params.append(value)
+        cursor = self.connection.execute(
+            f"""
+            SELECT q.issue_id, q.extraction_run_id, q.cleaning_run_id, q.semantic_run_id,
+                   q.asset_id, q.severity, q.issue_type, q.description, q.evidence_json,
+                   q.detected_by, q.suggested_action, q.status, q.created_at,
+                   c.asset_type, c.effective_display_name, c.fallback_display_name,
+                   c.source_file, c.source_format
+            FROM quality_issues q
+            LEFT JOIN catalog_assets c ON c.asset_id=q.asset_id
+            WHERE {' AND '.join(clauses)}
+            ORDER BY q.created_at DESC, q.issue_id
+            LIMIT ? OFFSET ?
+            """,
+            [*params, int(limit), int(offset)],
+        )
+        columns = [item[0] for item in cursor.description]
+        result: list[dict[str, Any]] = []
+        for row in cursor.fetchall():
+            item = dict(zip(columns, row))
+            evidence = item.pop("evidence_json", None)
+            if isinstance(evidence, str):
+                try:
+                    item["evidence"] = json.loads(evidence)
+                except json.JSONDecodeError:
+                    item["evidence"] = evidence
+            else:
+                item["evidence"] = evidence
+            result.append(item)
+        return result
+
+    def count_quality_issues(
+        self,
+        *,
+        status: str | None = None,
+        severity: str | None = None,
+        asset_id: str | None = None,
+    ) -> int:
+        clauses = ["1=1"]
+        params: list[Any] = []
+        for column, value in (("status", status), ("severity", severity), ("asset_id", asset_id)):
+            if value is not None:
+                clauses.append(f"{column}=?")
+                params.append(value)
+        row = self.connection.execute(
+            f"SELECT COUNT(*) FROM quality_issues WHERE {' AND '.join(clauses)}",
+            params,
+        ).fetchone()
+        return int(row[0] or 0)
+
+    def update_quality_issue_status(self, issue_id: str, status: str) -> dict[str, Any] | None:
+        if status not in {"open", "accepted", "ignored", "resolved"}:
+            raise ValueError("quality issue status must be open, accepted, ignored, or resolved")
+        exists = self.connection.execute(
+            "SELECT issue_id FROM quality_issues WHERE issue_id=?",
+            [issue_id],
+        ).fetchone()
+        if exists is None:
+            return None
+        self.connection.execute(
+            "UPDATE quality_issues SET status=? WHERE issue_id=?",
+            [status, issue_id],
+        )
+        cursor = self.connection.execute(
+            "SELECT issue_id, asset_id, severity, issue_type, description, evidence_json, detected_by, suggested_action, status, created_at FROM quality_issues WHERE issue_id=?",
+            [issue_id],
+        )
+        columns = [item[0] for item in cursor.description]
+        row = cursor.fetchone()
+        if row is None:
+            return None
+        item = dict(zip(columns, row))
+        evidence = item.pop("evidence_json", None)
+        if isinstance(evidence, str):
+            try:
+                item["evidence"] = json.loads(evidence)
+            except json.JSONDecodeError:
+                item["evidence"] = evidence
+        else:
+            item["evidence"] = evidence
+        return item
 
     def catalog_asset_details(self, asset_id: str) -> dict[str, Any] | None:
         cursor = self.connection.execute("SELECT * FROM catalog_assets WHERE asset_id=?", [asset_id])

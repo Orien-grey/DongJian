@@ -105,6 +105,11 @@ runner rejects real-provider execution before any HTTP call, even if `.env` is
 filled. Vision, file upload, embedding, vector retrieval, GMFT, Docling, new
 OCR, and frontend work are outside this phase.
 
+Phase 8's frontend may display `AI semantic: Not configured` and the semantic
+tab is intentionally read-only. `chongzu process SOURCE` and the local API
+process task never invoke this layer. The local UI has no model endpoint,
+vision upload, embedding route, chat surface, or public fallback.
+
 Phase 7B is **BLOCKED BY USER CONFIGURATION / NOT RUN**. It requires the user
 to fill `.env` and explicitly authorize a controlled test before any real
 provider request is permitted.

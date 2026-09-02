@@ -10,6 +10,8 @@ __pycache__/
 htmlcov/
 build/
 dist/
+frontend/node_modules/
+frontend/.vite/
 *.egg-info/
 .venv/
 venv/
@@ -76,6 +78,10 @@ config/llm.*.json
 *.tar
 *.tar.gz
 *.tgz
+
+# Frontend development cache and local portable build tools
+/cache/npm/
+/runtime/node-dev/
 
 # Windows filesystem noise
 Thumbs.db

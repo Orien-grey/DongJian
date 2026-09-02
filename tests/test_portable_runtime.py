@@ -173,7 +173,8 @@ def _build_relocated_copy(root: Path, destination: Path) -> None:
     shutil.copytree(root / "runtime" / "models" / "ocr", destination / "runtime" / "models" / "ocr")
     shutil.copytree(root / "src", destination / "src")
     shutil.copytree(root / "scripts", destination / "scripts")
-    for filename in ("pyproject.toml", "uv.lock", "doctor.cmd", "chongzu.cmd"):
+    shutil.copytree(root / "frontend" / "dist", destination / "frontend" / "dist")
+    for filename in ("pyproject.toml", "uv.lock", "doctor.cmd", "chongzu.cmd", "start.cmd", "stop.cmd"):
         shutil.copy2(root / filename, destination / filename)
     for relative in (
         "cache/uv",
