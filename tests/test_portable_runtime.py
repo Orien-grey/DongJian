@@ -188,6 +188,7 @@ def _build_relocated_copy(root: Path, destination: Path) -> None:
         "workspace/input",
         "workspace/staging",
         "workspace/artifacts",
+        "workspace/artifacts/cleaning",
         "workspace/output",
         "workspace/quarantine",
         "workspace/state",
@@ -419,6 +420,73 @@ def test_relocated_copy_reanchors_runtime_registry_and_cache() -> None:
         unified_catalog_data = json.loads(unified_catalog.stdout)
         assert unified_catalog_data["catalog"]["table_assets"] >= 3
         assert unified_catalog_data["catalog"]["text_assets"] >= 5
+
+        unified_process = _run_cmd(
+            destination / "chongzu.cmd",
+            ["process", str(unified_source), "--workers", "1"],
+            destination,
+            clean_env,
+        )
+        assert unified_process.returncode == 0, unified_process.stdout + unified_process.stderr
+        assert "Files supported: 7" in unified_process.stdout
+        assert "Files unsupported: 1" in unified_process.stdout
+        assert "Cleaned:" in unified_process.stdout
+        assert "Semantic pending:" in unified_process.stdout
+        assert unified_hashes == {
+            path.relative_to(unified_source).as_posix(): _sha256(path)
+            for path in unified_source.iterdir()
+        }
+
+        catalog_summary = _run_cmd(
+            destination / "chongzu.cmd",
+            ["catalog", "summary", "--source", str(unified_source)],
+            destination,
+            clean_env,
+        )
+        assert catalog_summary.returncode == 0, catalog_summary.stdout + catalog_summary.stderr
+        assert "TableAssets:" in catalog_summary.stdout
+        assert "TextAssets:" in catalog_summary.stdout
+        assert "Semantic pending:" in catalog_summary.stdout
+
+        catalog_table_list = _run_cmd(
+            destination / "chongzu.cmd",
+            ["catalog", "list", "--source", str(unified_source), "--type", "table", "--limit", "1"],
+            destination,
+            clean_env,
+        )
+        assert catalog_table_list.returncode == 0, catalog_table_list.stdout + catalog_table_list.stderr
+        table_rows = json.loads(catalog_table_list.stdout)
+        assert len(table_rows) == 1
+        table_show = _run_cmd(
+            destination / "chongzu.cmd",
+            ["catalog", "show", table_rows[0]["asset_id"], "--rows", "2"],
+            destination,
+            clean_env,
+        )
+        assert table_show.returncode == 0, table_show.stdout + table_show.stderr
+        table_payload = json.loads(table_show.stdout)
+        assert len(table_payload["preview"]) <= 2
+        assert table_payload["asset"]["asset_type"] == "table"
+
+        catalog_text_list = _run_cmd(
+            destination / "chongzu.cmd",
+            ["catalog", "list", "--source", str(unified_source), "--type", "text", "--limit", "1"],
+            destination,
+            clean_env,
+        )
+        assert catalog_text_list.returncode == 0, catalog_text_list.stdout + catalog_text_list.stderr
+        text_rows = json.loads(catalog_text_list.stdout)
+        assert len(text_rows) == 1
+        text_show = _run_cmd(
+            destination / "chongzu.cmd",
+            ["catalog", "show", text_rows[0]["asset_id"], "--chars", "80"],
+            destination,
+            clean_env,
+        )
+        assert text_show.returncode == 0, text_show.stdout + text_show.stderr
+        text_payload = json.loads(text_show.stdout)
+        assert len(text_payload["normalized_text_preview"]) <= 80
+        assert text_payload["asset"]["asset_type"] == "text"
 
         probe_code = (
             "import duckdb,json,polars,python_calamine,pymupdf,img2table,numpy,cv2,pypdfium2,rapidocr,onnxruntime,sys,pathlib; "

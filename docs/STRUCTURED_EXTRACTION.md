@@ -99,7 +99,7 @@ Reuse identity hashes:
 
 ```text
 file_id + content_sha256 + business_format + extractor name/version
-+ structured config version + registry schema version
++ structured config version + stable extraction identity schema version
 ```
 
 All matching artifacts must still exist. Changed content, extractor/config

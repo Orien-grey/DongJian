@@ -201,7 +201,7 @@ def ocr_extraction_identity(source: StructuredSource, targets: list[OCRTarget]) 
         "config_version": paths.OCR_CONFIG_VERSION,
         "pipeline_version": paths.OCR_PIPELINE_VERSION,
         "targets": [target.as_dict() for target in targets],
-        "registry_schema_version": paths.REGISTRY_SCHEMA_VERSION,
+            "registry_schema_version": paths.EXTRACTION_IDENTITY_SCHEMA_VERSION,
     }
     return hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
 

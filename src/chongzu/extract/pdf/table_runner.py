@@ -60,7 +60,10 @@ def pdf_table_extraction_identity(source: StructuredSource, config: PDFTableConf
             "extractor_version": EXTRACTOR_VERSION,
             "config_version": paths.PDF_TABLE_CONFIG_VERSION,
             "config": config.as_dict(),
-            "registry_schema_version": paths.REGISTRY_SCHEMA_VERSION,
+            # Registry migrations are additive metadata changes.  Keep raw
+            # extraction identities stable so a Catalog upgrade never forces
+            # native PDF table candidates to be recomputed.
+            "registry_schema_version": paths.EXTRACTION_IDENTITY_SCHEMA_VERSION,
         },
         sort_keys=True,
         separators=(",", ":"),

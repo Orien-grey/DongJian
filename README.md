@@ -2,12 +2,12 @@
 
 ChongZu is a fully relocatable, Windows x64 local research-data organization
 workbench. It inventories one scientific project directory, independently
-extracts tables and text, preserves source-level provenance, and catalogs the
-results in embedded DuckDB plus Parquet. A user-configured OpenAI-compatible
-service (DeepSeek may be used during development; Qwen3.6-35B-A3B is the
-expected company deployment) will later add semantic names, categories, field
+extracts tables and text, deterministically cleans/profiles the derived assets,
+and catalogs the results in embedded DuckDB plus Parquet. A user-configured
+OpenAI-compatible service may later add semantic names, categories, field
 explanations, summaries, and complex quality suggestions without overwriting
-extracted data.
+extracted data. No LLM or network endpoint is configured or called in the
+current core workflow.
 
 The fixed development root is `E:\Desktop\ChongZu`; launchers derive the root
 from their own location, so a prepared bundle can be moved as a directory.
@@ -22,18 +22,26 @@ keeps `img2table` as a measured native-text table candidate; Phase 4C records a
 read-only real-corpus baseline. Phase 5A adds a local, offline RapidOCR + ONNX
 Runtime foundation, and Phase 5B connects it to the image table adapter and
 formal `extract SOURCE` pipeline. Images and scanned PDF pages may now emit
-independent TextAssets and TableAssets from one OCR pass. No LLM, embedding, or
-frontend is part of the core extraction route.
+independent TextAssets and TableAssets from one OCR pass. Phase 6 adds the
+formal `process SOURCE` route: deterministic cleaning, bounded profiling,
+quality status/issues, and a queryable `catalog_assets` view. No LLM,
+embedding, or frontend is part of the core route.
 
 ## Product flow
 
 ```text
 File Registry -> Processing Policy -> Table Extraction -> TableAsset ----+
-                                  \-> Text Extraction  -> TextAsset -----+-> Semantic Enrichment
-                                                        -> TextChunk ----+        |
-                                                                                  v
-                                                                           Data Catalog
-                                                                        DuckDB + Parquet
+                                  \-> Text Extraction  -> TextAsset -----+-> Deterministic Cleaning
+                                                        -> TextChunk ----+       |
+                                                                                v
+                                                                           Profiling / Quality
+                                                                                |
+                                                                                v
+                                                                            Data Catalog
+                                                                         DuckDB + Parquet
+                                                                                |
+                                                                                v
+                                                                        Future Semantic Layer
 ```
 
 Table and text extraction are independent. A single PDF, image, Word file, or
@@ -79,13 +87,17 @@ API, an embedding API, or a public endpoint/fallback.
 - Data is separated into `raw`, `normalized`, and `semantic` layers.
 - Deterministic cleaning may normalize mechanics; semantic cleaning produces
   suggestions or metadata for human review and cannot overwrite raw data.
+- `process SOURCE` writes separate cleaning manifests, normalized artifacts,
+  profiles, and catalog metadata. Raw artifacts and source SHA-256 remain
+  unchanged; `semantic_status` is `pending` until a future authorized pass.
 - The only future runtime network destination is an LLM base URL explicitly
   configured by the user. There is no automatic public fallback.
 
 See [Architecture](docs/ARCHITECTURE.md), [Data model](docs/DATA_MODEL.md),
-[Registry](docs/REGISTRY.md), [AI semantics](docs/AI_SEMANTICS.md),
-[UI architecture](docs/UI_ARCHITECTURE.md), [Roadmap](docs/ROADMAP.md), and
-[Runtime](docs/RUNTIME.md).
+[Cleaning](docs/CLEANING.md), [Data Catalog](docs/DATA_CATALOG.md),
+[Unified extraction](docs/UNIFIED_EXTRACTION.md), [Registry](docs/REGISTRY.md),
+[AI semantics](docs/AI_SEMANTICS.md), [UI architecture](docs/UI_ARCHITECTURE.md),
+[Roadmap](docs/ROADMAP.md), and [Runtime](docs/RUNTIME.md).
 
 ## Repository layout
 
@@ -124,6 +136,11 @@ Formal portable launchers require no activation:
 .\chongzu.cmd benchmark pdf-table "D:\Research Data\Project" --ground-truth reference.json
 .\chongzu.cmd extract ocr "D:\Research Data\Project" --workers 2
 .\chongzu.cmd extract "D:\Research Data\Project" --workers 2
+.\chongzu.cmd process "D:\Research Data\Project" --workers 2
+.\chongzu.cmd benchmark cleaning "D:\Research Data\Project" --workers 2
+.\chongzu.cmd catalog summary
+.\chongzu.cmd catalog list --type table --quality needs_review --limit 20
+.\chongzu.cmd catalog show <asset-id> --rows 20 --chars 2000
 .\chongzu.cmd benchmark pdf-consistency
 .\chongzu.cmd benchmark ocr "D:\Research Data\Project" --workers 2
 .\chongzu.cmd registry summary
@@ -136,7 +153,7 @@ the same temporary bypass used by the `.cmd` launchers.
 ```powershell
 . .\scripts\env.ps1
 & $env:CHONGZU_DEV_PYTHON -m pytest
-& $env:CHONGZU_PROJECT_UV lock --check
+& $env:CHONGZU_PROJECT_UV lock --check --offline
 ```
 
 `extract structured` automatically performs an incremental registry scan, so
@@ -155,5 +172,5 @@ dependencies of the table/OCR candidates. See
 [Structured extraction](docs/STRUCTURED_EXTRACTION.md),
 [PDF extraction](docs/PDF_EXTRACTION.md), and
 [PDF table extraction](docs/PDF_TABLE_EXTRACTION.md), and
-[OCR foundation](docs/OCR_FOUNDATION.md), and
-[unified extraction](docs/UNIFIED_EXTRACTION.md).
+[OCR foundation](docs/OCR_FOUNDATION.md), [unified extraction](docs/UNIFIED_EXTRACTION.md),
+[cleaning](docs/CLEANING.md), and [data catalog](docs/DATA_CATALOG.md).

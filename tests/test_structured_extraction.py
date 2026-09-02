@@ -165,7 +165,7 @@ def test_incremental_reuse_change_force_and_catalog_runs(tmp_path: Path, monkeyp
 
     registry = Registry.open(_registry(tmp_path))
     try:
-        assert registry.schema_version() == 3
+        assert registry.schema_version() == 4
         assert registry.connection.execute("SELECT COUNT(*) FROM extraction_runs").fetchone()[0] == 4
         current = registry.connection.execute("SELECT COUNT(*) FROM table_assets WHERE is_current=TRUE").fetchone()[0]
         assert current == 1

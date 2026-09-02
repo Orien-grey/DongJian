@@ -8,7 +8,7 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from . import __version__
+from . import __version__, paths
 from .doctor import main as doctor_main
 from .registry import Registry, RegistryError, canonical_source_root
 from .scan import ScanError, benchmark_metrics, scan_source
@@ -25,8 +25,10 @@ from .extract import (
     extract_unified,
 )
 from .extract.pdf.table_quality import load_ground_truth
+from .extract.artifacts import artifact_absolute
 from .benchmark.pdf_real import run_real_pdf_benchmark
 from .benchmark.ocr_consistency import run_rendered_page_consistency
+from .clean import CleaningError, process_source
 
 
 def _print_summary(summary) -> None:
@@ -83,6 +85,16 @@ def _build_parser() -> argparse.ArgumentParser:
     extract_unified_parser.add_argument("--workers", type=int, default=None)
     extract_unified_parser.add_argument("--force", action="store_true")
 
+    process_parser = sub.add_parser("process", help="extract, clean, profile, and catalog a source")
+    process_parser.add_argument("source", type=Path)
+    process_parser.add_argument("--workers", type=int, default=None)
+    process_parser.add_argument("--force", action="store_true")
+    process_parser.add_argument(
+        "--drop-exact-duplicates",
+        action="store_true",
+        help="drop exact duplicate rows in the derived normalized artifact",
+    )
+
     registry_parser = sub.add_parser("registry", help="inspect the local DuckDB registry")
     registry_sub = registry_parser.add_subparsers(dest="registry_command", required=True)
     summary_parser = registry_sub.add_parser("summary")
@@ -91,6 +103,23 @@ def _build_parser() -> argparse.ArgumentParser:
     files_parser.add_argument("--source", type=Path, default=None)
     files_parser.add_argument("--state", default=None)
     files_parser.add_argument("--limit", type=int, default=1000)
+
+    catalog_parser = sub.add_parser("catalog", help="query the local cleaned asset catalog")
+    catalog_sub = catalog_parser.add_subparsers(dest="catalog_command", required=True)
+    catalog_summary_parser = catalog_sub.add_parser("summary")
+    catalog_summary_parser.add_argument("--source", type=Path, default=None)
+    catalog_list_parser = catalog_sub.add_parser("list")
+    catalog_list_parser.add_argument("--source", type=Path, default=None)
+    catalog_list_parser.add_argument("--type", dest="asset_type", choices=("table", "text"), default=None)
+    catalog_list_parser.add_argument(
+        "--quality", dest="quality_status", choices=("ready", "needs_review", "unusable"), default=None
+    )
+    catalog_list_parser.add_argument("--format", dest="source_format", default=None)
+    catalog_list_parser.add_argument("--limit", type=int, default=100)
+    catalog_show_parser = catalog_sub.add_parser("show")
+    catalog_show_parser.add_argument("asset_id")
+    catalog_show_parser.add_argument("--rows", type=int, default=20)
+    catalog_show_parser.add_argument("--chars", type=int, default=2000)
 
     benchmark_parser = sub.add_parser("benchmark", help="measure extraction throughput")
     benchmark_sub = benchmark_parser.add_subparsers(dest="benchmark_command", required=True)
@@ -132,6 +161,13 @@ def _build_parser() -> argparse.ArgumentParser:
     benchmark_ocr.add_argument("source", type=Path)
     benchmark_ocr.add_argument("--workers", type=int, default=None)
     benchmark_ocr.add_argument("--force", action="store_true")
+    benchmark_cleaning = benchmark_sub.add_parser(
+        "cleaning", help="benchmark deterministic cleaning and profiling"
+    )
+    benchmark_cleaning.add_argument("source", type=Path)
+    benchmark_cleaning.add_argument("--workers", type=int, default=None)
+    benchmark_cleaning.add_argument("--force", action="store_true")
+    benchmark_cleaning.add_argument("--drop-exact-duplicates", action="store_true")
     return parser
 
 
@@ -233,6 +269,87 @@ def _print_unified_summary(summary) -> None:
     print(f"Wall time: {summary.wall_time_ms:.2f} ms")
 
 
+def _print_process_summary(summary) -> None:
+    print(f"Source: {summary.source_root}")
+    print(f"Files discovered: {summary.files_discovered}")
+    print(f"Files supported: {summary.files_supported}")
+    print(f"Files unsupported: {summary.files_unsupported}")
+    print(f"Extracted: {summary.extracted}")
+    print(f"Reused extraction: {summary.reused_extraction}")
+    print(f"Extraction failures: {summary.extraction_failures}")
+    print(f"Table assets: {summary.table_assets}")
+    print(f"Text assets: {summary.text_assets}")
+    print(f"Cleaned: {summary.cleaned}")
+    print(f"Reused cleaning: {summary.reused_cleaning}")
+    print(f"Cleaning failures: {summary.cleaning_failures}")
+    print(f"Ready: {summary.ready}")
+    print(f"Needs review: {summary.needs_review}")
+    print(f"Unusable: {summary.unusable}")
+    print(f"Quality issues: {summary.quality_issues}")
+    print(f"Semantic pending: {summary.semantic_pending}")
+    print(f"Total wall time: {summary.wall_time_ms:.2f} ms")
+
+
+def _read_json_artifact(path_value: object):
+    if not path_value:
+        return None
+    try:
+        path = artifact_absolute(str(path_value), paths.WORKSPACE_ROOT)
+        if path.is_file():
+            return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, json.JSONDecodeError):
+        return None
+    return None
+
+
+def _catalog_show_payload(details: dict[str, object], *, rows: int, chars: int) -> dict[str, object]:
+    if rows < 1 or rows > 1000 or chars < 1 or chars > 100_000:
+        raise ValueError("preview limits must be between 1 and 1000 rows or 100000 characters")
+    payload: dict[str, object] = {
+        "asset": details,
+        "metadata": _read_json_artifact(details.get("metadata_artifact_path")),
+        "profile": details.get("profile"),
+        "quality_issues": details.get("quality_issues", []),
+    }
+    if details.get("asset_type") == "table":
+        normalized = details.get("normalized_artifact_path")
+        preview: list[object] = []
+        if normalized:
+            try:
+                import polars as pl
+
+                path = artifact_absolute(str(normalized), paths.WORKSPACE_ROOT)
+                if path.is_file():
+                    preview = pl.scan_parquet(path).head(rows).collect().to_dicts()
+            except (OSError, ValueError, RuntimeError):
+                preview = []
+        payload["preview"] = preview
+    else:
+        normalized = details.get("normalized_artifact_path")
+        preview = ""
+        if normalized:
+            try:
+                path = artifact_absolute(str(normalized), paths.WORKSPACE_ROOT)
+                if path.is_file():
+                    preview = path.read_text(encoding="utf-8")[:chars]
+            except (OSError, ValueError, UnicodeError):
+                preview = ""
+        payload["normalized_text_preview"] = preview
+    return payload
+
+
+def _print_catalog_summary(summary: dict[str, int]) -> None:
+    print(f"Files: {summary.get('files', 0)}")
+    print(f"TableAssets: {summary.get('table_assets', 0)}")
+    print(f"TextAssets: {summary.get('text_assets', 0)}")
+    print(f"TextChunks: {summary.get('text_chunks', 0)}")
+    print(f"Ready: {summary.get('ready', 0)}")
+    print(f"Needs review: {summary.get('needs_review', 0)}")
+    print(f"Unusable: {summary.get('unusable', 0)}")
+    print(f"Quality issues: {summary.get('quality_issues', 0)}")
+    print(f"Semantic pending: {summary.get('semantic_pending', 0)}")
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Dispatch diagnostics, registry inspection, and extraction commands."""
 
@@ -277,6 +394,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             summary = extract_unified(parsed.source, workers=parsed.workers, force=parsed.force)
             _print_unified_summary(summary)
             return 0
+        if parsed.command == "process":
+            summary = process_source(
+                parsed.source,
+                workers=parsed.workers,
+                force=parsed.force,
+                drop_exact_duplicates=parsed.drop_exact_duplicates,
+            )
+            _print_process_summary(summary)
+            return 0 if summary.cleaning_failures == 0 else 0
         if parsed.command == "benchmark" and parsed.benchmark_command == "scan":
             summary = scan_source(parsed.source, workers=parsed.workers, rehash=parsed.rehash)
             _print_summary(summary)
@@ -362,6 +488,50 @@ def main(argv: Sequence[str] | None = None) -> int:
             for key, value in summary.benchmark_metrics().items():
                 print(f"{key}: {value:.3f}" if isinstance(value, float) else f"{key}: {value}")
             return 0
+        if parsed.command == "benchmark" and parsed.benchmark_command == "cleaning":
+            summary = process_source(
+                parsed.source,
+                workers=parsed.workers,
+                force=parsed.force,
+                drop_exact_duplicates=parsed.drop_exact_duplicates,
+            )
+            _print_process_summary(summary)
+            print("Benchmark:")
+            for key, value in summary.benchmark_metrics().items():
+                print(f"{key}: {value:.3f}" if isinstance(value, float) else f"{key}: {value}")
+            return 0
+        if parsed.command == "catalog":
+            registry = Registry.open()
+            try:
+                source_arg = getattr(parsed, "source", None)
+                source = canonical_source_root(source_arg) if source_arg is not None else None
+                if parsed.catalog_command == "summary":
+                    _print_catalog_summary(registry.catalog_summary(source))
+                elif parsed.catalog_command == "list":
+                    rows = registry.list_catalog_assets(
+                        source_root=source,
+                        asset_type=parsed.asset_type,
+                        quality_status=parsed.quality_status,
+                        source_format=parsed.source_format,
+                        limit=parsed.limit,
+                    )
+                    print(json.dumps(rows, ensure_ascii=False, default=str, indent=2))
+                else:
+                    details = registry.catalog_asset_details(parsed.asset_id)
+                    if details is None:
+                        print(f"ERROR: catalog asset not found: {parsed.asset_id}", file=sys.stderr)
+                        return 1
+                    print(
+                        json.dumps(
+                            _catalog_show_payload(details, rows=parsed.rows, chars=parsed.chars),
+                            ensure_ascii=False,
+                            default=str,
+                            indent=2,
+                        )
+                    )
+                return 0
+            finally:
+                registry.close()
         if parsed.command == "registry":
             registry = Registry.open()
             try:

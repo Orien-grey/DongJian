@@ -1,6 +1,6 @@
-# Unified extraction (Phase 5B)
+# Unified extraction and processing (Phase 5B/6)
 
-The formal operator entry point is:
+The expert extraction entry point is:
 
 ```text
 .\chongzu.cmd extract "D:\Research Data\Project" [--workers 1..2] [--force]
@@ -10,6 +10,16 @@ The formal operator entry point is:
 deterministic routes. The named commands (`extract structured`, `extract pdf`,
 `extract pdf-table`, and `extract ocr`) remain available for diagnostics and
 focused benchmarks.
+
+The formal end-user workflow after Phase 6 is:
+
+```text
+.\chongzu.cmd process "D:\Research Data\Project" [--workers 1..4] [--force]
+```
+
+It runs the same incremental extraction coordinator, then deterministic
+cleaning, profiling, quality assessment, and Catalog publication. `extract`
+remains useful when only raw extraction is desired.
 
 ```text
 FILE
@@ -21,6 +31,7 @@ FILE
             -> one RapidOCR pass -> TextAsset/TextChunk
             -> OCRBlock adapter  -> 0..N image TableAssets
        -> TXT                        -> TextAsset/TextChunk
+       -> deterministic cleaning -> profiles / QualityIssue -> catalog_assets
 ```
 
 Table and text cardinality is independent. A screenshot or scanned page with a
@@ -75,14 +86,46 @@ Each implemented route has its own content/version identity. A second
 `extract SOURCE` therefore reuses scan facts, native PDF facts, native table
 candidates, OCR TextAssets, image TableAssets, and TXT assets independently.
 `--force` republishes the selected route identities.
+Because one file can have several independent routes, the unified
+`Reused extraction` value is a route-stage count and can exceed the file count.
+
+## Phase 6 process and Catalog
+
+`process SOURCE` never cleans source files or extraction artifacts in place.
+For each current TableAsset/TextAsset it hashes the raw artifact, derives a
+separate cleaning identity from the asset/source/raw identity plus cleaner,
+profile, configuration, and options, and then reads the raw artifact once for
+the deterministic post-pass. Successful output is written below
+`workspace/artifacts/cleaning/`; `cleaning_runs`, `table_profiles`, and
+`text_profiles` are committed by the single DuckDB writer. A later cleaner
+version or option change re-runs only cleaning/profile; it does not invalidate
+the extraction identity or force OCR/PyMuPDF/Calamine work.
+
+The unified Catalog view exposes raw and cleaned paths together, so a cleaned
+preview cannot hide its extraction origin. `catalog summary`, `catalog list`,
+and `catalog show <asset-id>` provide bounded operator views. Table previews
+default to 20 rows and text previews to 2,000 characters. Unsupported files
+remain in `files` with `support_status=unsupported`; assets from OCR/PDF
+candidate routes remain `needs_review` when their provenance or structure is
+uncertain. `semantic_status` is `pending` and no semantic metadata is created
+by this phase.
+
+```text
+.\chongzu.cmd catalog summary
+.\chongzu.cmd catalog list --type table --quality needs_review --limit 20
+.\chongzu.cmd catalog show <asset-id> --rows 20 --chars 2000
+.\chongzu.cmd benchmark cleaning "D:\Research Data\Project"
+```
 
 ## Quality signals
 
-Image-table candidates receive review status only when conservative evidence is
-present. Signals include low OCR confidence, sparse OCR, suspicious single-row
+Image-table and PDF-candidate assets remain `needs_review` because their source
+provenance is weaker than structured data. A QualityIssue is emitted only for
+concrete evidence such as low OCR confidence, sparse OCR, suspicious single-row
 or single-column output, possible column shift, possible header loss, possible
-merged cells, long paragraph cells, and adapter errors. A structurally nonempty
-candidate is not deleted merely because it is suspicious.
+merged cells, long paragraph cells, incomplete provenance, or adapter errors.
+A structurally nonempty candidate is not deleted merely because it is
+suspicious.
 
 The PDF profile field `possible_table_candidate` is a
 `heuristic_hint_not_ground_truth`. The Phase 4C corpus showed that candidate
@@ -110,8 +153,10 @@ model download. It does not modify the source PDF or page PNGs.
 ## Offline and LLM boundary
 
 Core extraction uses only project-local Python, packages, OCR models, and
-DuckDB/Parquet. There is no `pip`, `uv sync`, Hugging Face, HTTP OCR, public
+DuckDB/Parquet. Cleaning and catalog use only local Polars/DuckDB and the
+already-published artifacts. There is no `pip`, `uv sync`, Hugging Face, HTTP OCR, public
 endpoint, or automatic model fallback during extraction. With no real user
 configuration, doctor reports `LLM STATUS: NOT CONFIGURED`; this is a normal
 optional state. No DeepSeek, Qwen, OpenAI, vision, or embedding request is
-made in Phase 5B.
+made in Phase 5B or Phase 6. `LLM STATUS = NOT CONFIGURED` is normal and does
+not fail doctor or process.

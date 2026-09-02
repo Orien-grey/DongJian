@@ -197,6 +197,7 @@ def test_image_dual_extraction_reuses_one_ocr_pass(tmp_path: Path) -> None:
     assert metadata["ocr_reused"] is True
     assert metadata["ocr_backend_calls"] == 0
     assert metadata["ocr_block_count"] >= 1
+    assert metadata["ocr_min_confidence"] <= metadata["ocr_mean_confidence"]
 
     reused = extract_ocr(
         source,

@@ -5,10 +5,10 @@ The source of truth is the embedded DuckDB file
 a database service process. Scans write only below `workspace/state/` and
 `workspace/logs/`; source directories are read-only.
 
-## Schema version 3
+## Schema version 4
 
-`registry_meta` stores `chongzu_file_registry = 3`. Opening schema v1 or v2
-performs the ordered, restartable v1-to-v2 and v2-to-v3 migrations. A database
+`registry_meta` stores `chongzu_file_registry = 4`. Opening schema v1, v2, or v3
+performs ordered, restartable migrations through v4. A database
 newer than the supported version is rejected. No silent destructive rebuild is
 allowed.
 
@@ -18,6 +18,7 @@ The migration:
 - adds deterministic processing-policy fields to `files`;
 - backfills those fields from stored detector/extension facts;
 - creates empty catalog contract tables and indexes;
+- adds cleaning/profile tables and the unified `catalog_assets` view;
 - does not create demo/synthetic extraction rows.
 
 DuckDB does not permit the required ALTER and backfill on the same old table in
@@ -66,6 +67,10 @@ detection evidence; they are not moved/deleted and do not fail the scan.
 | `text_chunks` | Searchable deterministic chunks with offsets and provenance JSON. |
 | `semantic_metadata` | Separate model-generated names/categories/descriptions/fields/summaries with model/prompt/time/confidence. |
 | `quality_issues` | Deterministic/AI/human issues and `open/accepted/ignored/resolved` review status. |
+| `cleaning_runs` | Independent cleaning identity, raw artifact identity, status, output paths, timings, and errors. |
+| `table_profiles` | Bounded deterministic table profile and quality signals for a cleaning run. |
+| `text_profiles` | Deterministic text size/source/confidence profile for a cleaning run. |
+| `catalog_assets` | View joining current table/text assets, source/provenance, cleaning, quality, and semantic state. |
 
 One `file_id` is intentionally non-unique in both asset tables. There can be
 zero, one, or many table rows and independently zero, one, or many text rows.
@@ -96,8 +101,8 @@ still have isolated failed file attempts. An interrupted open run is marked
 condition that can fail a whole run.
 
 Structured extraction reuse requires exact path-instance `file_id`, content
-SHA-256, extractor name and version, structured configuration version, schema
-version, and business format.
+SHA-256, extractor name and version, structured configuration version, the
+stable extraction identity schema, and business format.
 PDF native-text reuse uses the same identity discipline plus
 `pdf-native-text-v1` and `text-chunk-v1`. A successful or partial PDF run stores
 its profile JSON path and profile payload in `extraction_runs.warnings_json`;
@@ -105,8 +110,9 @@ current TextAsset rows remain independently queryable. Missing text/profile
 artifacts invalidate reuse. A failed rerun records the error and leaves prior
 successful artifacts available for audit.
 PDF table reuse is a separate identity (`content_sha256` plus
-`img2table-candidate` version, `pdf-table-v1` configuration, and Registry
-schema). Its `phase4b-pdf-table-candidate` / `pdf_table_candidate` run can be `successful`, `partial`,
+`img2table-candidate` version, `pdf-table-v1` configuration, and the stable
+extraction identity schema). Its `phase4b-pdf-table-candidate` /
+`pdf_table_candidate` run can be `successful`, `partial`,
 `deferred_to_ocr`, or `failed`; table assets are current independently from
 TextAssets. The runner consumes the Phase 4A profile instead of recalculating
 PDF class heuristics. A table-version/force rerun therefore does not invalidate
@@ -122,6 +128,14 @@ and TXT identities remain separate, so reuse is stage-local and a failure in
 one route does not erase an independent asset type. A unified summary reports
 file counts plus current catalog TableAsset/TextAsset/TextChunk and issue
 counts.
+
+Cleaning reuse is independent from every extraction route. Its identity uses
+the asset ID, source SHA-256, raw artifact hash, cleaner/version, configuration
+and profile versions, and cleaning options. A cleaner version bump therefore
+creates a new `cleaning_runs` result without invalidating a valid OCR, PDF, or
+structured extraction run. `catalog_assets` selects the latest cleaning result
+for the current asset/content pair; previous runs remain in history and raw
+artifacts remain intact.
 
 ## Lightweight detection versus business support
 

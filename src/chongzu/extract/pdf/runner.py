@@ -49,7 +49,7 @@ def pdf_extraction_identity(source: StructuredSource) -> str:
             "extractor_version": EXTRACTOR_VERSION,
             "pdf_config_version": paths.PDF_CONFIG_VERSION,
             "text_chunk_config_version": paths.TEXT_CHUNK_CONFIG_VERSION,
-            "registry_schema_version": paths.REGISTRY_SCHEMA_VERSION,
+            "registry_schema_version": paths.EXTRACTION_IDENTITY_SCHEMA_VERSION,
         },
         sort_keys=True,
         separators=(",", ":"),

@@ -141,7 +141,7 @@ def extraction_identity(source: StructuredSource) -> str:
         "config_version": paths.TEXT_CONFIG_VERSION,
         "chunk_config_version": paths.TEXT_CHUNK_CONFIG_VERSION,
         "pipeline_version": paths.TEXT_PIPELINE_VERSION,
-        "registry_schema_version": paths.REGISTRY_SCHEMA_VERSION,
+        "registry_schema_version": paths.EXTRACTION_IDENTITY_SCHEMA_VERSION,
     }
     return hashlib.sha256(
         json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")

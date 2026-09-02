@@ -347,6 +347,7 @@ def publish_image_table(
     average_confidence = (
         sum(confidence_values) / len(confidence_values) if confidence_values else None
     )
+    minimum_confidence = min(confidence_values) if confidence_values else None
     row_widths = [len(row) for row in rows]
     metadata = {
         "contract_version": paths.IMAGE_TABLE_CONFIG_VERSION,
@@ -389,6 +390,8 @@ def publish_image_table(
         "ocr_engine": paths.RAPIDOCR_VERSION,
         "ocr_block_count": len(blocks),
         "ocr_block_indices": [block.block_index for block in blocks],
+        "ocr_mean_confidence": average_confidence,
+        "ocr_min_confidence": minimum_confidence,
         "quality_warnings": flags,
         "layers": {"raw": "raw.parquet", "normalized": "normalized.parquet", "semantic": None},
         "column_mapping": [

@@ -124,6 +124,50 @@ ground truth.
 Chunking is deterministic and versioned. Embeddings are not fields on
 `TextChunk`; a later index may reference `chunk_id` externally.
 
+## Deterministic cleaning and profiles
+
+Phase 6 keeps the asset contracts independent and adds derived catalog state;
+it does not add a second OCR/table contract. Every clean result is keyed by
+`asset_id`, source `content_sha256`, the SHA-256 of the raw artifact, cleaner
+name/version, configuration version, profile version, and options. The result
+is recorded in `cleaning_runs` and writes below:
+
+```text
+workspace/artifacts/cleaning/
+  tables/<table_id>/<cleaning_identity-prefix>/
+    normalized.parquet
+    cleaning.json
+    profile.json
+  text/<text_asset_id>/<cleaning_identity-prefix>/
+    normalized.txt
+    cleaning.json
+    profile.json
+```
+
+`cleaning.json` is a machine-readable manifest. It records the raw artifact
+identity/path, original-to-mechanical column mapping, normalization actions,
+conservative inference hints, and explicit `raw`/`normalized`/`semantic`
+layer references. Semantic remains null/pending in this phase. Raw Parquet,
+raw text, source files, and extraction rows are never overwritten.
+
+Table profiles in `table_profiles`/`profile.json` contain row/column counts,
+null counts/ratios, distinct counts and bounded samples per column, safe
+numeric/date statistics, exact duplicate count, empty-cell and long-text
+ratios, irregular-width and OCR confidence signals, identifier/constant/high-
+cardinality hints, and provenance completeness. Text profiles in
+`text_profiles`/`profile.json` contain character/line/page/block/chunk counts,
+language hint when available, native/OCR source, OCR confidence, empty/low
+content flags, and provenance completeness.
+
+The catalog quality status is deterministic and source-aware:
+`ready` means no material deterministic signal was found; `needs_review`
+retains an asset with candidate/PDF/OCR or structural uncertainty; and
+`unusable` is reserved for an empty/clearly failed result. These statuses are
+quality signals, not accuracy claims. Source uncertainty may set
+`needs_review` without a generic issue; concrete `QualityIssue` rows carry the evidence
+and are linked to `cleaning_run_id` when produced by Phase 6; older extraction
+issues remain independently attributable.
+
 ## SemanticMetadata
 
 Semantic metadata is a separate AI/human interpretation record, not an asset
@@ -180,7 +224,7 @@ parent text asset plus deterministic index and offsets.
 
 ## Persistence mapping
 
-DuckDB schema v3 maps tuples/mappings/bounding boxes to JSON catalog columns
+DuckDB schema v4 maps tuples/mappings/bounding boxes to JSON catalog columns
 and stores text directly in the initial contract. Phase 3 writes real table
 catalog rows whose payload paths reference Parquet and metadata below
 `workspace/artifacts/`. Phase 4A writes real PDF TextAsset/TextChunk rows and
@@ -195,6 +239,14 @@ source file -> raw asset/artifact -> normalized artifact -> semantic metadata
 
 No downstream layer replaces or deletes the upstream evidence it interprets.
 
-Phase 4B `img2table` output is a candidate only. It uses the same
+Phase 4B/5B `img2table` output is a candidate only. It uses the same
 `TableAsset`/Parquet contract as CSV and Excel, while `TextAsset` and
 `TextChunk` rows from Phase 4A remain independent for the same PDF/page.
+
+The `catalog_assets` view is the unified read model for current assets. It
+exposes `asset_id`, asset/source format, fallback source display name,
+extractor/version, rows or chars, columns or chunks, quality status and issue
+count, raw/cleaned artifact paths, extraction/cleaning provenance, and
+`semantic_status` (`pending` until a future authorized enrichment). Fallback
+names such as `report.pdf / Page 3 / Table 2` are presentation helpers only;
+they are not semantic metadata and never participate in stable IDs.

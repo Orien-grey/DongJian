@@ -32,19 +32,17 @@ TableAsset              TextAsset/TextChunk
       +----------+-----------+
                  |
                  v
-         Semantic Enrichment
-       configured OpenAI-compatible API
+       Deterministic Cleaning
                  |
-         +-------+---------+
-         |       |         |
-       naming category semantic schema
-         |       |         |
-         +-------+---------+
+                 v
+          Profiling / Quality
                  |
                  v
             Data Catalog
+         DuckDB + Parquet
                  |
-          DuckDB + Parquet
+                 v
+       Future Semantic Enrichment
                  |
                  v
             Future Search
@@ -233,12 +231,14 @@ status/issues only; they do not silently delete candidate tables. The profile's
 `possible_table_candidate` remains a weak heuristic hint and is explicitly
 marked `heuristic_hint_not_ground_truth` in profile/metadata evidence.
 
-The formal coordinator is `extract_unified()` and the user-facing command is
+The extraction coordinator is `extract_unified()` and the expert command is
 `chongzu extract SOURCE`. It scans once, invokes the independent structured,
 native PDF, native PDF-table, OCR/image-table, and TXT routes as applicable,
 then reads current catalog counts. Each route keeps its own identity and reuse
 key, so one file failure does not cancel other files or erase an independent
-asset type. See [UNIFIED_EXTRACTION.md](UNIFIED_EXTRACTION.md).
+asset type. The formal user workflow is `chongzu process SOURCE`, which calls
+that extractor and then the Phase 6 cleaning/profile/catalog coordinator. See
+[UNIFIED_EXTRACTION.md](UNIFIED_EXTRACTION.md).
 
 Stable table/text/chunk IDs are derived from extraction provenance. Semantic
 display names, categories, model responses, and UI edits never participate in
@@ -288,6 +288,34 @@ anomaly explanation, and difficult OCR/visual review. It creates
 `SemanticMetadata`, `QualityIssue`, or a suggested transformation for review.
 It cannot mutate raw or normalized data directly.
 
+### Phase 6 cleaning, profiling, and catalog
+
+`src/chongzu/clean/` is a deterministic post-extraction layer. It reads only
+the published raw artifact, writes a new artifact below
+`workspace/artifacts/cleaning/`, and records a machine-readable manifest with
+the raw identity, cleaner/config/profile versions, column mapping, actions, and
+inference hints. Table cleaning is deliberately conservative: NFC/newline/
+whitespace mechanics, explicit null tokens, empty row/column removal, safe
+column-name deduplication, exact-duplicate marking, and type inference that
+keeps leading-zero/long numeric identifiers as strings. Text cleaning only
+normalizes Unicode/newlines/control characters/trailing whitespace and
+compresses excessive blank lines.
+
+`profile_table()` and `profile_text()` use bounded samples and columnar
+operations. They persist null/distinct/type/statistical, OCR/provenance,
+duplicate, text-size, page/block/chunk, and low-content facts. Quality status is
+`ready`, `needs_review`, or `unusable`; candidate/OCR/PDF provenance is not
+treated as accuracy, and `needs_review` assets remain cataloged. A cleaner
+failure records `cleaning_status=failed` and an issue while retaining the raw
+asset.
+
+Schema v4 adds `cleaning_runs`, `table_profiles`, `text_profiles`, and the
+`catalog_assets` view. The view joins source file/provenance, current raw and
+cleaned paths, profile/quality state, issue count, fallback source name, and
+`semantic_status=pending` until a future separately authorized semantic pass.
+Cleaning reuse is independent of extraction reuse: its identity includes asset,
+source SHA, raw artifact hash, cleaner/config/profile versions, and options.
+
 ## Semantic provider boundary
 
 `src/chongzu/semantic.py` defines a provider-neutral configuration and
@@ -309,10 +337,10 @@ ChongZu uses the embedded file
 process. DuckDB stores catalog metadata, provenance, policy and run state, and
 future query state. It directly queries large Parquet table artifacts.
 
-Schema v3 preserves Phase 2 `files`, `contents`, `scan_runs`, `file_attempts`,
-and `run_errors`, plus the v2 policy/catalog foundation. It adds structured
-extraction identity, source ranges, metadata paths, current-asset state, and
-real run/table/issue metrics to:
+Schema v4 preserves Phase 2 `files`, `contents`, `scan_runs`, `file_attempts`,
+and `run_errors`, plus the v2/v3 policy/extraction foundation. It adds
+structured extraction identity, source ranges, metadata paths, current-asset
+state, and real run/table/issue metrics to:
 
 - `extraction_runs`
 - `table_assets`
@@ -320,6 +348,10 @@ real run/table/issue metrics to:
 - `text_chunks`
 - `semantic_metadata`
 - `quality_issues`
+- `cleaning_runs`
+- `table_profiles`
+- `text_profiles`
+- `catalog_assets` (view)
 
 The migration writes no synthetic asset rows. It deterministically backfills
 policy status for existing file rows. See [REGISTRY.md](REGISTRY.md).
@@ -328,6 +360,8 @@ policy status for existing file rows. See [REGISTRY.md](REGISTRY.md).
 
 - One corrupt, unsupported, or failed file produces a local outcome and does
   not terminate the batch.
+- A cleaning failure never deletes or replaces the raw extraction artifact;
+  other assets continue and the failed asset remains visible in the Catalog.
 - File/run state is durable; interrupted nonterminal work is retryable.
 - Unchanged checks incorporate stable content identity plus pipeline/config
   versions before an extractor result may be reused.

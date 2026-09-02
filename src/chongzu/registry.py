@@ -266,6 +266,7 @@ CATALOG_SCHEMA_STATEMENTS = (
     CREATE TABLE IF NOT EXISTS quality_issues (
         issue_id VARCHAR PRIMARY KEY,
         extraction_run_id VARCHAR,
+        cleaning_run_id VARCHAR,
         asset_id VARCHAR NOT NULL,
         severity VARCHAR NOT NULL,
         issue_type VARCHAR NOT NULL,
@@ -282,12 +283,243 @@ CATALOG_SCHEMA_STATEMENTS = (
     "CREATE INDEX IF NOT EXISTS idx_text_chunks_asset ON text_chunks(text_asset_id, chunk_index)",
     "CREATE INDEX IF NOT EXISTS idx_semantic_metadata_asset ON semantic_metadata(asset_id, asset_type)",
     "CREATE INDEX IF NOT EXISTS idx_quality_issues_asset ON quality_issues(asset_id, status)",
+    "CREATE INDEX IF NOT EXISTS idx_quality_issues_cleaning ON quality_issues(cleaning_run_id, asset_id)",
     "CREATE INDEX IF NOT EXISTS idx_extraction_runs_file ON extraction_runs(file_id, content_sha256)",
     "CREATE INDEX IF NOT EXISTS idx_extraction_identity ON extraction_runs(extraction_identity, status)",
 )
 
 
-SCHEMA_STATEMENTS = CORE_SCHEMA_STATEMENTS + CATALOG_SCHEMA_STATEMENTS
+CLEANING_SCHEMA_STATEMENTS = (
+    """
+    CREATE TABLE IF NOT EXISTS cleaning_runs (
+        cleaning_run_id VARCHAR PRIMARY KEY,
+        cleaning_identity VARCHAR NOT NULL,
+        asset_id VARCHAR NOT NULL,
+        asset_type VARCHAR NOT NULL CHECK (asset_type IN ('table', 'text')),
+        file_id VARCHAR NOT NULL,
+        content_sha256 VARCHAR NOT NULL,
+        raw_artifact_identity VARCHAR NOT NULL,
+        cleaner VARCHAR NOT NULL,
+        cleaner_version VARCHAR NOT NULL,
+        config_version VARCHAR NOT NULL,
+        source_root VARCHAR NOT NULL,
+        source_relative_path VARCHAR NOT NULL,
+        started_at TIMESTAMP NOT NULL,
+        finished_at TIMESTAMP,
+        status VARCHAR NOT NULL CHECK (status IN ('running', 'successful', 'failed', 'interrupted')),
+        force BOOLEAN NOT NULL DEFAULT FALSE,
+        normalized_artifact_path VARCHAR,
+        manifest_artifact_path VARCHAR,
+        profile_artifact_path VARCHAR,
+        profile_json JSON,
+        timings_json JSON,
+        quality_status VARCHAR NOT NULL DEFAULT 'needs_review',
+        warnings_json JSON,
+        error_category VARCHAR,
+        error_message VARCHAR
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS table_profiles (
+        profile_id VARCHAR PRIMARY KEY,
+        table_id VARCHAR NOT NULL,
+        cleaning_run_id VARCHAR NOT NULL,
+        cleaning_identity VARCHAR NOT NULL,
+        content_sha256 VARCHAR NOT NULL,
+        row_count BIGINT NOT NULL,
+        column_count BIGINT NOT NULL,
+        null_count BIGINT NOT NULL,
+        null_ratio DOUBLE NOT NULL,
+        empty_row_count_before BIGINT NOT NULL,
+        empty_column_count_before BIGINT NOT NULL,
+        exact_duplicate_row_count BIGINT NOT NULL,
+        empty_cell_ratio DOUBLE NOT NULL,
+        long_text_cell_ratio DOUBLE NOT NULL,
+        irregular_row_width BOOLEAN NOT NULL,
+        ocr_mean_confidence DOUBLE,
+        ocr_min_confidence DOUBLE,
+        provenance_complete BOOLEAN NOT NULL,
+        profile_json JSON NOT NULL,
+        profile_artifact_path VARCHAR NOT NULL,
+        created_at TIMESTAMP NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS text_profiles (
+        profile_id VARCHAR PRIMARY KEY,
+        text_asset_id VARCHAR NOT NULL,
+        cleaning_run_id VARCHAR NOT NULL,
+        cleaning_identity VARCHAR NOT NULL,
+        content_sha256 VARCHAR NOT NULL,
+        char_count BIGINT NOT NULL,
+        line_count BIGINT NOT NULL,
+        page_count BIGINT NOT NULL,
+        block_count BIGINT NOT NULL,
+        chunk_count BIGINT NOT NULL,
+        language_hint VARCHAR,
+        extraction_source VARCHAR NOT NULL,
+        ocr_mean_confidence DOUBLE,
+        empty_content BOOLEAN NOT NULL,
+        low_content BOOLEAN NOT NULL,
+        profile_json JSON NOT NULL,
+        profile_artifact_path VARCHAR NOT NULL,
+        created_at TIMESTAMP NOT NULL
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_cleaning_runs_asset ON cleaning_runs(asset_id, content_sha256, finished_at)",
+    "CREATE INDEX IF NOT EXISTS idx_cleaning_identity ON cleaning_runs(cleaning_identity, status)",
+    "CREATE INDEX IF NOT EXISTS idx_table_profiles_asset ON table_profiles(table_id, cleaning_identity)",
+    "CREATE INDEX IF NOT EXISTS idx_text_profiles_asset ON text_profiles(text_asset_id, cleaning_identity)",
+)
+
+
+CATALOG_VIEW_STATEMENT = """
+CREATE OR REPLACE VIEW catalog_assets AS
+WITH latest_cleaning AS (
+    SELECT * EXCLUDE (row_number)
+    FROM (
+        SELECT c.*,
+               ROW_NUMBER() OVER (
+                   PARTITION BY c.asset_id, c.content_sha256
+                   ORDER BY c.finished_at DESC NULLS LAST, c.started_at DESC, c.cleaning_run_id DESC
+               ) AS row_number
+        FROM cleaning_runs c
+    ) ranked
+    WHERE row_number = 1
+),
+issue_counts AS (
+    SELECT q.asset_id,
+           COUNT(*) FILTER (WHERE q.status IN ('open', 'accepted')) AS issue_count
+    FROM quality_issues q
+    LEFT JOIN latest_cleaning c ON c.cleaning_run_id = q.cleaning_run_id
+    WHERE q.cleaning_run_id IS NULL OR c.cleaning_run_id IS NOT NULL
+    GROUP BY q.asset_id
+),
+semantic_assets AS (
+    SELECT DISTINCT asset_id, asset_type FROM semantic_metadata
+),
+text_chunk_counts AS (
+    SELECT text_asset_id, COUNT(*) AS chunk_count
+    FROM text_chunks
+    GROUP BY text_asset_id
+),
+table_catalog AS (
+    SELECT
+        t.table_id AS asset_id,
+            'table' AS asset_type,
+            t.file_id,
+            f.source_root,
+            t.content_sha256,
+        t.source_relative_path AS source_file,
+        f.business_format AS source_format,
+        t.extractor,
+        t.extractor_version,
+        t.source_kind,
+        t.sheet_name,
+        t.page_number,
+        CASE
+            WHEN t.sheet_name IS NOT NULL THEN f.filename || ' / ' || t.sheet_name
+            WHEN t.page_number IS NOT NULL THEN f.filename || ' / Page ' || CAST(t.page_number AS VARCHAR) || ' / Table ' || CAST(ROW_NUMBER() OVER (PARTITION BY t.file_id, t.page_number ORDER BY t.table_id) AS VARCHAR)
+            WHEN t.source_kind = 'image' THEN f.filename || ' / Table ' || CAST(ROW_NUMBER() OVER (PARTITION BY t.file_id ORDER BY t.table_id) AS VARCHAR)
+            ELSE f.filename
+        END AS fallback_display_name,
+        COALESCE(p.row_count, t.row_count) AS "rows",
+        CAST(NULL AS BIGINT) AS "chars",
+        COALESCE(p.column_count, t.column_count) AS "columns",
+        CAST(NULL AS BIGINT) AS chunks,
+         COALESCE(c.quality_status,
+            CASE
+                WHEN f.business_format = 'pdf' OR t.source_kind IN ('page', 'image') OR LOWER(t.extractor) LIKE '%img2table%' THEN 'needs_review'
+                WHEN t.quality_status = 'pass' THEN 'ready'
+                WHEN t.quality_status = 'fail' THEN 'unusable'
+                ELSE 'needs_review'
+            END) AS quality_status,
+        COALESCE(i.issue_count, 0) AS quality_issue_count,
+        CASE WHEN s.asset_id IS NULL THEN 'pending' ELSE 'enriched' END AS semantic_status,
+        COALESCE(c.status, 'not_run') AS cleaning_status,
+        c.cleaning_run_id,
+        c.cleaning_identity,
+        c.cleaner,
+        c.cleaner_version,
+        t.raw_artifact_path,
+        COALESCE(c.normalized_artifact_path, t.normalized_artifact_path) AS normalized_artifact_path,
+        c.normalized_artifact_path AS cleaned_normalized_artifact_path,
+        t.normalized_artifact_path AS extraction_normalized_artifact_path,
+        t.metadata_artifact_path,
+        c.manifest_artifact_path AS cleaning_manifest_path,
+        c.profile_artifact_path,
+        t.source_kind AS provenance_kind,
+        t.extraction_run_id,
+        t.created_at
+    FROM table_assets t
+    JOIN files f ON f.file_id = t.file_id
+    LEFT JOIN latest_cleaning c ON c.asset_id = t.table_id AND c.content_sha256 = t.content_sha256
+    LEFT JOIN table_profiles p ON p.cleaning_run_id = c.cleaning_run_id AND p.table_id = t.table_id
+    LEFT JOIN issue_counts i ON i.asset_id = t.table_id
+    LEFT JOIN semantic_assets s ON s.asset_id = t.table_id AND s.asset_type = 'table'
+    WHERE t.is_current = TRUE AND f.current_presence_state = 'present'
+),
+text_catalog AS (
+    SELECT
+        t.text_asset_id AS asset_id,
+            'text' AS asset_type,
+            t.file_id,
+            f.source_root,
+            t.content_sha256,
+        t.source_relative_path AS source_file,
+        f.business_format AS source_format,
+        t.extractor,
+        t.extractor_version,
+        t.source_kind,
+        t.section AS sheet_name,
+        t.page_number,
+        CASE
+            WHEN t.page_number IS NOT NULL THEN f.filename || ' / Page ' || CAST(t.page_number AS VARCHAR)
+            ELSE f.filename
+        END AS fallback_display_name,
+        CAST(NULL AS BIGINT) AS "rows",
+        COALESCE(p.char_count, LENGTH(t.text)) AS "chars",
+        CAST(NULL AS BIGINT) AS "columns",
+            COALESCE(p.chunk_count, tc.chunk_count, 0) AS chunks,
+        COALESCE(c.quality_status,
+            CASE
+                WHEN LENGTH(TRIM(t.text)) = 0 THEN 'unusable'
+                WHEN LOWER(t.extractor) LIKE '%ocr%' THEN 'needs_review'
+                ELSE 'ready'
+            END) AS quality_status,
+        COALESCE(i.issue_count, 0) AS quality_issue_count,
+        CASE WHEN s.asset_id IS NULL THEN 'pending' ELSE 'enriched' END AS semantic_status,
+        COALESCE(c.status, 'not_run') AS cleaning_status,
+        c.cleaning_run_id,
+        c.cleaning_identity,
+        c.cleaner,
+        c.cleaner_version,
+        t.raw_artifact_path,
+        COALESCE(c.normalized_artifact_path, t.normalized_artifact_path) AS normalized_artifact_path,
+        c.normalized_artifact_path AS cleaned_normalized_artifact_path,
+        t.normalized_artifact_path AS extraction_normalized_artifact_path,
+        t.metadata_artifact_path,
+        c.manifest_artifact_path AS cleaning_manifest_path,
+        c.profile_artifact_path,
+        t.source_kind AS provenance_kind,
+        t.extraction_run_id,
+        t.created_at
+    FROM text_assets t
+    JOIN files f ON f.file_id = t.file_id
+    LEFT JOIN latest_cleaning c ON c.asset_id = t.text_asset_id AND c.content_sha256 = t.content_sha256
+        LEFT JOIN text_profiles p ON p.cleaning_run_id = c.cleaning_run_id AND p.text_asset_id = t.text_asset_id
+        LEFT JOIN text_chunk_counts tc ON tc.text_asset_id = t.text_asset_id
+    LEFT JOIN issue_counts i ON i.asset_id = t.text_asset_id
+    LEFT JOIN semantic_assets s ON s.asset_id = t.text_asset_id AND s.asset_type = 'text'
+    WHERE t.is_current = TRUE AND f.current_presence_state = 'present'
+)
+SELECT * FROM table_catalog
+UNION ALL
+SELECT * FROM text_catalog
+"""
+
+
+SCHEMA_STATEMENTS = CORE_SCHEMA_STATEMENTS + CATALOG_SCHEMA_STATEMENTS + CLEANING_SCHEMA_STATEMENTS + (CATALOG_VIEW_STATEMENT,)
 
 
 def _processing_plan(
@@ -411,6 +643,22 @@ def _migrate_v2_to_v3(connection: duckdb.DuckDBPyConnection) -> None:
     )
 
 
+def _migrate_v3_to_v4(connection: duckdb.DuckDBPyConnection) -> None:
+    """Add cleaning/profile/catalog tables without rewriting extraction history."""
+
+    columns = {row[1] for row in connection.execute("PRAGMA table_info('quality_issues')").fetchall()}
+    if "cleaning_run_id" not in columns:
+        connection.execute("ALTER TABLE quality_issues ADD COLUMN cleaning_run_id VARCHAR")
+    for statement in CLEANING_SCHEMA_STATEMENTS:
+        connection.execute(statement)
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_quality_issues_cleaning ON quality_issues(cleaning_run_id, asset_id)")
+    connection.execute(CATALOG_VIEW_STATEMENT)
+    connection.execute(
+        "UPDATE registry_meta SET meta_value=?, updated_at=? WHERE meta_key=?",
+        ["4", utc_now(), paths.REGISTRY_SCHEMA_NAME],
+    )
+
+
 def initialize_schema(connection: duckdb.DuckDBPyConnection) -> None:
     connection.execute(
         """
@@ -446,6 +694,13 @@ def initialize_schema(connection: duckdb.DuckDBPyConnection) -> None:
         # The v2->v3 DDL is idempotent. Rechecking v3 also makes an interrupted
         # ALTER sequence restartable before any coordinator uses the catalog.
         _migrate_v2_to_v3(connection)
+    if version == 3 and paths.REGISTRY_SCHEMA_VERSION >= 4:
+        _migrate_v3_to_v4(connection)
+        version = 4
+    if version == 4 and paths.REGISTRY_SCHEMA_VERSION == 4:
+        # Re-run additive DDL after an interrupted migration before any
+        # coordinator relies on the catalog view or profile tables.
+        _migrate_v3_to_v4(connection)
     if version < paths.REGISTRY_SCHEMA_VERSION:
         raise RegistryError(f"Registry schema migration from {version} to {paths.REGISTRY_SCHEMA_VERSION} is not implemented")
 
@@ -918,6 +1173,254 @@ class Registry:
             if artifact
         ]
         return result
+
+    def recover_incomplete_cleaning(self, source_root: str) -> int:
+        row = self.connection.execute(
+            "SELECT COUNT(*) FROM cleaning_runs WHERE source_root=? AND status='running'",
+            [source_root],
+        ).fetchone()
+        count = int(row[0] or 0)
+        self.connection.execute(
+            "UPDATE cleaning_runs SET status='interrupted', finished_at=? WHERE source_root=? AND status='running'",
+            [utc_now(), source_root],
+        )
+        return count
+
+    def cleaning_candidates(self, source_root: str) -> list[dict[str, Any]]:
+        """Return current extracted assets without exposing source files to writers."""
+
+        table_cursor = self.connection.execute(
+            """
+            SELECT t.table_id AS asset_id, 'table' AS asset_type, t.file_id,
+                   t.content_sha256, t.extraction_run_id, t.extractor,
+                   t.extractor_version, t.source_kind, t.source_relative_path,
+                   t.sheet_name, t.page_number, t.bbox_json, t.row_count,
+                   t.column_count, t.columns_json, t.raw_artifact_path,
+                   t.normalized_artifact_path AS extraction_normalized_artifact_path,
+                   t.metadata_artifact_path, t.extraction_confidence,
+                   f.source_root, f.filename, f.business_format
+            FROM table_assets t
+            JOIN files f ON f.file_id=t.file_id
+            WHERE t.is_current=TRUE AND f.source_root=? AND f.current_presence_state='present'
+            ORDER BY t.source_relative_path, t.page_number NULLS FIRST, t.table_id
+            """,
+            [source_root],
+        )
+        table_columns = [item[0] for item in table_cursor.description]
+        rows = [dict(zip(table_columns, row)) for row in table_cursor.fetchall()]
+
+        text_cursor = self.connection.execute(
+            """
+            SELECT t.text_asset_id AS asset_id, 'text' AS asset_type, t.file_id,
+                   t.content_sha256, t.extraction_run_id, t.extractor,
+                   t.extractor_version, t.source_kind, t.source_relative_path,
+                   t.section AS sheet_name, t.page_number, t.bbox_json,
+                   t.text, t.language, t.raw_artifact_path,
+                   t.normalized_artifact_path AS extraction_normalized_artifact_path,
+                   t.metadata_artifact_path, CAST(NULL AS DOUBLE) AS extraction_confidence,
+                   COALESCE((SELECT COUNT(*) FROM text_chunks tc WHERE tc.text_asset_id=t.text_asset_id), 0) AS chunk_count,
+                   f.source_root, f.filename, f.business_format
+            FROM text_assets t
+            JOIN files f ON f.file_id=t.file_id
+            WHERE t.is_current=TRUE AND f.source_root=? AND f.current_presence_state='present'
+            ORDER BY t.source_relative_path, t.page_number NULLS FIRST, t.text_asset_id
+            """,
+            [source_root],
+        )
+        text_columns = [item[0] for item in text_cursor.description]
+        rows.extend(dict(zip(text_columns, row)) for row in text_cursor.fetchall())
+        return rows
+
+    def reusable_cleaning(self, cleaning_identity: str) -> dict[str, Any] | None:
+        cursor = self.connection.execute(
+            """
+            SELECT cleaning_run_id, cleaning_identity, asset_id, asset_type, file_id,
+                   content_sha256, raw_artifact_identity, cleaner, cleaner_version,
+                   config_version, source_root, source_relative_path, started_at,
+                   finished_at, status, force, normalized_artifact_path,
+                   manifest_artifact_path, profile_artifact_path, profile_json,
+                   timings_json, quality_status, warnings_json, error_category,
+                   error_message
+            FROM cleaning_runs
+            WHERE cleaning_identity=? AND status='successful'
+            ORDER BY finished_at DESC NULLS LAST, started_at DESC
+            LIMIT 1
+            """,
+            [cleaning_identity],
+        )
+        row = cursor.fetchone()
+        if row is None:
+            return None
+        columns = [item[0] for item in cursor.description]
+        return dict(zip(columns, row))
+
+    def start_cleaning_run(self, result: Any, *, started_at: datetime, force: bool) -> None:
+        self.connection.execute(
+            """
+            INSERT INTO cleaning_runs(
+                cleaning_run_id, cleaning_identity, asset_id, asset_type, file_id,
+                content_sha256, raw_artifact_identity, cleaner, cleaner_version,
+                config_version, source_root, source_relative_path, started_at,
+                status, force, quality_status
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'running', ?, 'needs_review')
+            """,
+            [
+                result.cleaning_run_id,
+                result.cleaning_identity,
+                result.asset_id,
+                result.asset_type,
+                result.file_id,
+                result.content_sha256,
+                result.raw_artifact_identity,
+                result.cleaner,
+                result.cleaner_version,
+                result.config_version,
+                result.source_root,
+                result.source_relative_path,
+                started_at,
+                force,
+            ],
+        )
+
+    def record_cleaning_result(
+        self,
+        result: Any,
+        *,
+        started_at: datetime,
+        finished_at: datetime,
+        force: bool,
+    ) -> None:
+        """Persist one clean/profile result while retaining every raw artifact."""
+
+        connection = self.connection
+        profile = result.profile or {}
+        timings = result.timings.as_dict() if hasattr(result.timings, "as_dict") else dict(result.timings or {})
+        warnings = list(result.warnings or [])
+        connection.execute("BEGIN TRANSACTION")
+        try:
+            connection.execute(
+                """
+                INSERT OR REPLACE INTO cleaning_runs(
+                    cleaning_run_id, cleaning_identity, asset_id, asset_type, file_id,
+                    content_sha256, raw_artifact_identity, cleaner, cleaner_version,
+                    config_version, source_root, source_relative_path, started_at,
+                    finished_at, status, force, normalized_artifact_path,
+                    manifest_artifact_path, profile_artifact_path, profile_json,
+                    timings_json, quality_status, warnings_json, error_category,
+                    error_message
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    result.cleaning_run_id,
+                    result.cleaning_identity,
+                    result.asset_id,
+                    result.asset_type,
+                    result.file_id,
+                    result.content_sha256,
+                    result.raw_artifact_identity,
+                    result.cleaner,
+                    result.cleaner_version,
+                    result.config_version,
+                    result.source_root,
+                    result.source_relative_path,
+                    started_at,
+                    finished_at,
+                    result.status,
+                    force,
+                    result.normalized_artifact_path,
+                    result.manifest_artifact_path,
+                    result.profile_artifact_path,
+                    json.dumps(profile, ensure_ascii=False, default=str),
+                    json.dumps(timings, ensure_ascii=False, default=str),
+                    result.quality_status,
+                    json.dumps(warnings, ensure_ascii=False, default=str),
+                    result.error_category,
+                    result.error_message,
+                ],
+            )
+            if result.status == "successful":
+                if result.asset_type == "table":
+                    row = result.profile_row
+                    connection.execute(
+                        """
+                        INSERT OR REPLACE INTO table_profiles(
+                            profile_id, table_id, cleaning_run_id, cleaning_identity,
+                            content_sha256, row_count, column_count, null_count,
+                            null_ratio, empty_row_count_before, empty_column_count_before,
+                            exact_duplicate_row_count, empty_cell_ratio, long_text_cell_ratio,
+                            irregular_row_width, ocr_mean_confidence, ocr_min_confidence,
+                            provenance_complete, profile_json, profile_artifact_path,
+                            created_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        [
+                            row["profile_id"], row["table_id"], result.cleaning_run_id,
+                            result.cleaning_identity, result.content_sha256,
+                            row["row_count"], row["column_count"], row["null_count"],
+                            row["null_ratio"], row["empty_row_count_before"],
+                            row["empty_column_count_before"], row["exact_duplicate_row_count"],
+                            row["empty_cell_ratio"], row["long_text_cell_ratio"],
+                            row["irregular_row_width"], row.get("ocr_mean_confidence"),
+                            row.get("ocr_min_confidence"), row["provenance_complete"],
+                            json.dumps(profile, ensure_ascii=False, default=str),
+                            result.profile_artifact_path, finished_at,
+                        ],
+                    )
+                else:
+                    row = result.profile_row
+                    connection.execute(
+                        """
+                        INSERT OR REPLACE INTO text_profiles(
+                            profile_id, text_asset_id, cleaning_run_id, cleaning_identity,
+                            content_sha256, char_count, line_count, page_count, block_count,
+                            chunk_count, language_hint, extraction_source,
+                            ocr_mean_confidence, empty_content, low_content, profile_json,
+                            profile_artifact_path, created_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        [
+                            row["profile_id"], row["text_asset_id"], result.cleaning_run_id,
+                            result.cleaning_identity, result.content_sha256,
+                            row["char_count"], row["line_count"], row["page_count"],
+                            row["block_count"], row["chunk_count"], row.get("language_hint"),
+                            row["extraction_source"], row.get("ocr_mean_confidence"),
+                            row["empty_content"], row["low_content"],
+                            json.dumps(profile, ensure_ascii=False, default=str),
+                            result.profile_artifact_path, finished_at,
+                        ],
+                    )
+            for issue in result.issues or ():
+                connection.execute(
+                    """
+                    INSERT INTO quality_issues(
+                        issue_id, extraction_run_id, cleaning_run_id, asset_id, severity,
+                        issue_type, description, evidence_json, detected_by,
+                        suggested_action, status, created_at
+                    ) VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(issue_id) DO UPDATE SET
+                        cleaning_run_id=excluded.cleaning_run_id,
+                        evidence_json=excluded.evidence_json,
+                        description=excluded.description,
+                        status=excluded.status
+                    """,
+                    [
+                        issue.issue_id,
+                        result.cleaning_run_id,
+                        issue.asset_id,
+                        issue.severity.value,
+                        issue.issue_type,
+                        issue.description,
+                        json.dumps(issue.evidence, ensure_ascii=False, default=str),
+                        issue.detected_by,
+                        issue.suggested_action,
+                        issue.status.value,
+                        finished_at,
+                    ],
+                )
+            connection.execute("COMMIT")
+        except Exception:
+            connection.execute("ROLLBACK")
+            raise
 
     def start_structured_extraction(
         self,
@@ -2243,50 +2746,140 @@ class Registry:
             f"SELECT status, COUNT(*) FROM extraction_runs {run_where} GROUP BY status",
             params,
         ).fetchall()
-        asset_where = "AND f.source_root=?" if source_root is not None else ""
-        asset_params = [source_root] if source_root is not None else []
+        catalog_where = "WHERE source_root=?" if source_root is not None else ""
+        catalog_params = [source_root] if source_root is not None else []
+        file_count = self.connection.execute(
+            "SELECT COUNT(*) FROM files WHERE current_presence_state='present'" + (" AND source_root=?" if source_root is not None else ""),
+            catalog_params,
+        ).fetchone()
         assets = self.connection.execute(
-            f"""
-            SELECT COUNT(*), COALESCE(SUM(t.row_count), 0)
-            FROM table_assets t JOIN files f ON f.file_id=t.file_id
-            WHERE t.is_current=TRUE {asset_where}
-            """,
-            asset_params,
+            f"SELECT COUNT(*), COALESCE(SUM(\"rows\"), 0) FROM catalog_assets {catalog_where} AND asset_type='table'" if source_root is not None else "SELECT COUNT(*), COALESCE(SUM(\"rows\"), 0) FROM catalog_assets WHERE asset_type='table'",
+            catalog_params,
         ).fetchone()
         text_assets = self.connection.execute(
-            f"""
-            SELECT COUNT(*) FROM text_assets t JOIN files f ON f.file_id=t.file_id
-            WHERE t.is_current=TRUE {asset_where}
-            """,
-            asset_params,
+            f"SELECT COUNT(*) FROM catalog_assets {catalog_where} AND asset_type='text'" if source_root is not None else "SELECT COUNT(*) FROM catalog_assets WHERE asset_type='text'",
+            catalog_params,
         ).fetchone()
         text_chunks = self.connection.execute(
-            f"""
-            SELECT COUNT(*) FROM text_chunks c
-            JOIN text_assets t ON t.text_asset_id=c.text_asset_id
-            JOIN files f ON f.file_id=t.file_id
-            WHERE t.is_current=TRUE {asset_where}
-            """,
-            asset_params,
+            f"SELECT COALESCE(SUM(chunks), 0) FROM catalog_assets {catalog_where} AND asset_type='text'" if source_root is not None else "SELECT COALESCE(SUM(chunks), 0) FROM catalog_assets WHERE asset_type='text'",
+            catalog_params,
         ).fetchone()
-        issues = self.connection.execute(
-            f"""
-            SELECT COUNT(*) FROM quality_issues q
-            JOIN extraction_runs r ON r.extraction_run_id=q.extraction_run_id
-            {run_where}
-            """,
-            params,
+        issue_count = self.connection.execute(
+            f"SELECT COALESCE(SUM(quality_issue_count), 0) FROM catalog_assets {catalog_where}" if source_root is not None else "SELECT COALESCE(SUM(quality_issue_count), 0) FROM catalog_assets",
+            catalog_params,
         ).fetchone()
+        status_rows = self.connection.execute(
+            f"SELECT quality_status, COUNT(*) FROM catalog_assets {catalog_where} GROUP BY quality_status" if source_root is not None else "SELECT quality_status, COUNT(*) FROM catalog_assets GROUP BY quality_status",
+            catalog_params,
+        ).fetchall()
+        semantic_pending = self.connection.execute(
+            f"SELECT COUNT(*) FROM catalog_assets {catalog_where} AND semantic_status='pending'" if source_root is not None else "SELECT COUNT(*) FROM catalog_assets WHERE semantic_status='pending'",
+            catalog_params,
+        ).fetchone()
+        cleaning_rows = self.connection.execute(
+            f"SELECT cleaning_status, COUNT(*) FROM catalog_assets {catalog_where} GROUP BY cleaning_status" if source_root is not None else "SELECT cleaning_status, COUNT(*) FROM catalog_assets GROUP BY cleaning_status",
+            catalog_params,
+        ).fetchall()
         result = {f"extraction_{status}": int(count) for status, count in run_rows}
+        quality_counts = {str(status): int(count) for status, count in status_rows}
+        cleaning_counts = {str(status): int(count) for status, count in cleaning_rows}
         result.update(
             {
+                "files": int(file_count[0] or 0),
                 "table_assets": int(assets[0] or 0),
                 "table_rows": int(assets[1] or 0),
                 "text_assets": int(text_assets[0] or 0),
                 "text_chunks": int(text_chunks[0] or 0),
-                "quality_issues": int(issues[0] or 0),
+                "quality_issues": int(issue_count[0] or 0),
+                "catalog_assets": int(assets[0] or 0) + int(text_assets[0] or 0),
+                "ready": quality_counts.get("ready", 0),
+                "needs_review": quality_counts.get("needs_review", 0),
+                "unusable": quality_counts.get("unusable", 0),
+                "semantic_pending": int(semantic_pending[0] or 0),
+                "cleaning_successful": cleaning_counts.get("successful", 0),
+                "cleaning_failed": cleaning_counts.get("failed", 0),
+                "cleaning_not_run": cleaning_counts.get("not_run", 0),
             }
         )
+        return result
+
+    def list_catalog_assets(
+        self,
+        *,
+        source_root: str | None = None,
+        asset_type: str | None = None,
+        quality_status: str | None = None,
+        source_format: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        if limit < 1 or limit > 100_000:
+            raise ValueError("limit must be between 1 and 100000")
+        clauses = ["1=1"]
+        params: list[Any] = []
+        for column, value in (
+            ("source_root", source_root),
+            ("asset_type", asset_type),
+            ("quality_status", quality_status),
+            ("source_format", source_format),
+        ):
+            if value is not None:
+                clauses.append(f"{column}=?")
+                params.append(value)
+        cursor = self.connection.execute(
+            f"SELECT * FROM catalog_assets WHERE {' AND '.join(clauses)} ORDER BY source_file, asset_type, asset_id LIMIT {int(limit)}",
+            params,
+        )
+        columns = [item[0] for item in cursor.description]
+        return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+    def catalog_asset_details(self, asset_id: str) -> dict[str, Any] | None:
+        cursor = self.connection.execute("SELECT * FROM catalog_assets WHERE asset_id=?", [asset_id])
+        row = cursor.fetchone()
+        if row is None:
+            return None
+        columns = [item[0] for item in cursor.description]
+        result: dict[str, Any] = dict(zip(columns, row))
+        issue_cursor = self.connection.execute(
+            """
+            SELECT issue_id, extraction_run_id, cleaning_run_id, asset_id, severity,
+                   issue_type, description, evidence_json, detected_by,
+                   suggested_action, status, created_at
+            FROM quality_issues
+            WHERE asset_id=? AND status IN ('open', 'accepted')
+              AND (cleaning_run_id IS NULL OR cleaning_run_id=?)
+            ORDER BY created_at, issue_id
+            """,
+            [asset_id, result.get("cleaning_run_id")],
+        )
+        issue_columns = [item[0] for item in issue_cursor.description]
+        issues = []
+        for issue_row in issue_cursor.fetchall():
+            issue = dict(zip(issue_columns, issue_row))
+            evidence = issue.get("evidence_json")
+            if isinstance(evidence, str):
+                try:
+                    issue["evidence"] = json.loads(evidence)
+                except json.JSONDecodeError:
+                    issue["evidence"] = evidence
+            else:
+                issue["evidence"] = evidence
+            issue.pop("evidence_json", None)
+            issues.append(issue)
+        result["quality_issues"] = issues
+        profile_path = result.get("profile_artifact_path")
+        if profile_path:
+            profile_row = self.connection.execute(
+                "SELECT profile_json FROM table_profiles WHERE profile_artifact_path=? UNION ALL SELECT profile_json FROM text_profiles WHERE profile_artifact_path=? LIMIT 1",
+                [profile_path, profile_path],
+            ).fetchone()
+            if profile_row:
+                profile = profile_row[0]
+                if isinstance(profile, str):
+                    try:
+                        profile = json.loads(profile)
+                    except json.JSONDecodeError:
+                        pass
+                result["profile"] = profile
         return result
 
     def list_files(self, source_root: str | None = None, state: str | None = None, limit: int = 1000) -> list[dict[str, Any]]:

@@ -200,7 +200,7 @@ def test_worker_bound_and_schema_version(tmp_path: Path) -> None:
         normalize_workers(MAX_WORKERS + 1)
     registry = Registry.open(_registry(tmp_path))
     try:
-        assert registry.schema_version() == 3
+        assert registry.schema_version() == 4
         tables = {row[0] for row in registry.connection.execute("SHOW TABLES").fetchall()}
         assert {
             "scan_runs",
@@ -215,6 +215,9 @@ def test_worker_bound_and_schema_version(tmp_path: Path) -> None:
             "text_chunks",
             "semantic_metadata",
             "quality_issues",
+            "cleaning_runs",
+            "table_profiles",
+            "text_profiles",
         } <= tables
     finally:
         registry.close()
@@ -268,7 +271,7 @@ def test_schema_v1_registry_migrates_policy_and_empty_catalog(tmp_path: Path) ->
 
     registry = Registry.open(database)
     try:
-        assert registry.schema_version() == 3
+        assert registry.schema_version() == 4
         row = registry.list_files()[0]
         assert row["support_status"] == "unsupported"
         assert row["policy_reason"] == "unsupported_business_format"

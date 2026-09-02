@@ -40,8 +40,17 @@ PDF_TABLE_CONFIG_VERSION = "pdf-table-v1"
 OCR_CONFIG_VERSION = "ocr-v2"
 TEXT_CONFIG_VERSION = "text-v1"
 IMAGE_TABLE_CONFIG_VERSION = "image-table-v1"
+CLEANING_PIPELINE_VERSION = "phase6-deterministic-clean-profile"
+CLEANING_CONFIG_VERSION = "clean-v1"
+TABLE_CLEANER_VERSION = "table-clean-v1"
+TEXT_CLEANER_VERSION = "text-clean-v1"
+PROFILE_CONFIG_VERSION = "profile-v1"
+# Extraction identities must not change merely because the metadata registry
+# gains additive catalog tables.  Extractor/config versions remain the cache
+# invalidation boundary for raw extraction.
+EXTRACTION_IDENTITY_SCHEMA_VERSION = 3
 REGISTRY_SCHEMA_NAME = "chongzu_file_registry"
-REGISTRY_SCHEMA_VERSION = 3
+REGISTRY_SCHEMA_VERSION = 4
 
 
 def _discover_project_root() -> Path:
@@ -103,6 +112,9 @@ WORKSPACE_ROOT = PROJECT_ROOT / "workspace"
 ARTIFACTS_ROOT = WORKSPACE_ROOT / "artifacts"
 TABLE_ARTIFACTS_ROOT = ARTIFACTS_ROOT / "tables"
 SHEET_ARTIFACTS_ROOT = ARTIFACTS_ROOT / "sheets"
+CLEANING_ARTIFACTS_ROOT = ARTIFACTS_ROOT / "cleaning"
+CLEANED_TABLE_ARTIFACTS_ROOT = CLEANING_ARTIFACTS_ROOT / "tables"
+CLEANED_TEXT_ARTIFACTS_ROOT = CLEANING_ARTIFACTS_ROOT / "text"
 INPUT_ROOT = WORKSPACE_ROOT / "input"
 STAGING_ROOT = WORKSPACE_ROOT / "staging"
 OUTPUT_ROOT = WORKSPACE_ROOT / "output"
@@ -135,6 +147,7 @@ CORE_DIRECTORIES = {
     "models_docling": DOCLING_MODELS_ROOT,
     "workspace": WORKSPACE_ROOT,
     "workspace_artifacts": ARTIFACTS_ROOT,
+    "workspace_cleaning_artifacts": CLEANING_ARTIFACTS_ROOT,
     "workspace_input": INPUT_ROOT,
     "workspace_staging": STAGING_ROOT,
     "workspace_output": OUTPUT_ROOT,

@@ -51,7 +51,7 @@ def extraction_identity(source: StructuredSource, extractor: str, extractor_vers
             "extractor": extractor,
             "extractor_version": extractor_version,
             "structured_config_version": paths.STRUCTURED_CONFIG_VERSION,
-            "registry_schema_version": paths.REGISTRY_SCHEMA_VERSION,
+            "registry_schema_version": paths.EXTRACTION_IDENTITY_SCHEMA_VERSION,
             "business_format": source.business_format,
         },
         sort_keys=True,

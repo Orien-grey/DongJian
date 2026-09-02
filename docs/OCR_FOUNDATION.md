@@ -117,3 +117,10 @@ RapidOCR returns text blocks, not a guaranteed table structure. The Phase 5B
 image adapter is still a candidate route: CJK accuracy, table boundaries,
 merged cells, and borderless layouts require review. Confidence is only
 reported when the engine returns a score and is not treated as ground truth.
+
+Phase 6 consumes both OCR TextAssets and image/scanned-page TableAssets through
+the same deterministic cleaning/profile layer. OCR/image tables default to
+`needs_review` unless they are clearly empty/unusable; cleaning never changes
+the raw OCR/table artifact and creates a separate manifest/profile. Use
+`chongzu process SOURCE` for extraction plus cleaning/catalog, or keep
+`chongzu extract SOURCE` for the raw extraction-only route.

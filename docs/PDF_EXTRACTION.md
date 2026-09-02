@@ -96,7 +96,9 @@ then use a conservative character limit; the current default has no overlap.
 ## Reuse and failure behavior
 
 Reuse identity includes file ID, content SHA-256, business format, extractor and
-version, `pdf-native-text-v1`, `text-chunk-v1`, and Registry schema version.
+version, `pdf-native-text-v1`, `text-chunk-v1`, and the stable extraction
+identity schema version. Additive Catalog schema migrations do not invalidate
+this identity.
 Successful and partial runs are reused only when every referenced text and
 profile artifact still exists. Changed content, extractor/config changes, or
 `--force` create a new run and make the new assets current only after atomic

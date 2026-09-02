@@ -144,8 +144,7 @@ provenance. OCR-to-table integration is implemented in Phase 5B.
 
 ## Phase 5B - Image/scanned-PDF dual extraction and unified pipeline
 
-- Status: implementation complete for this round; changes remain intentionally
-  uncommitted for review.
+- Status: implementation complete and committed 2026-09-02 as `049e9cc`.
 - Reuse one RapidOCR pass as the internal `OCRBlock` evidence contract for
   TextAssets and the `img2table==2.0.0` image adapter.
 - Route JPG/JPEG/PNG and scanned PDF pages to independent text and table
@@ -164,21 +163,30 @@ Acceptance: synthetic images, mixed/scanned PDFs, unsupported files, relocation,
 failure isolation, source SHA invariants, and offline reuse are verified. No
 GMFT, Docling, LLM, embedding, or frontend work is included.
 
-## Phase 6 - Deterministic Cleaning and Data Catalog
+## Phase 6 - Deterministic Cleaning, Data Profiling, and Data Catalog
 
-- Implement deterministic Unicode/null/row/column/type/name normalization.
-- Add profiling, reversible cleaning operations, issue detection, and human
-  accept/modify/ignore/resolve workflows.
-- Catalog raw, normalized, and semantic layers in DuckDB while large tables
-  remain Parquet-first.
-- Reconcile catalog counts and lineage back to source files and extraction runs.
+- Status: implementation complete for this round; changes intentionally remain
+  uncommitted for review.
+- Run `process SOURCE` as scan -> independent extraction -> deterministic
+  cleaning -> profiling/quality -> `catalog_assets`.
+- Normalize only Unicode/whitespace/newlines, explicit nulls, empty rows/
+  columns, safe duplicate names, optional exact duplicate rows, and
+  conservative physical types. Preserve identifier-like numeric text.
+- Keep raw extraction immutable and write machine-readable cleaning manifests,
+  normalized artifacts, `cleaning_runs`, `table_profiles`, and `text_profiles`.
+- Use source-aware `ready`, `needs_review`, and `unusable` statuses. OCR/image
+  and PDF candidate results remain review material, not accuracy truth.
+- Keep unsupported files and isolated cleaning failures visible in the
+  Registry/Catalog. Provide bounded Catalog summary/list/show and cleaning
+  benchmark commands.
 
 Acceptance: every transformation is traceable and raw assets remain immutable.
 
 ## Phase 7 - LLM Semantic Enrichment
 
-- Implement a provider adapter only for a user-configured OpenAI-compatible
-  base URL after explicit configuration and explicit test authorization.
+- Implement a provider adapter only after the user supplies configuration and
+  explicitly authorizes actual requests to that configured OpenAI-compatible
+  base URL.
 - Keep model selection configuration-driven; Qwen3.6-35B-A3B is the expected
   company service and DeepSeek is development-only when explicitly authorized.
 - Generate naming, category, descriptions, semantic field mappings, summaries,
