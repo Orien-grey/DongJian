@@ -478,9 +478,9 @@ def _summary(components: list[dict[str, Any]]) -> dict[str, int]:
     }
 
 
-def _render_notices(components: list[dict[str, Any]], summary: dict[str, int]) -> str:
+def _render_notices(components: list[dict[str, Any]], summary: dict[str, int], *, version: str) -> str:
     lines = [
-        "ChongZu 0.1.0-rc1 third-party notices",
+        f"ChongZu {version} third-party notices",
         "",
         "Engineering audit record for the actual production payload and the",
         "frontend production bundle. This file records local evidence only; it",
@@ -535,7 +535,7 @@ def _payload(components: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def _check_output(root: Path, expected: dict[str, Any]) -> None:
+def _check_output(root: Path, expected: dict[str, Any], *, version: str) -> None:
     manifest_path = root / "third-party-components.json"
     notices_path = root / "THIRD_PARTY_NOTICES.txt"
     if not manifest_path.is_file() or not notices_path.is_file():
@@ -543,7 +543,7 @@ def _check_output(root: Path, expected: dict[str, Any]) -> None:
     actual = json.loads(manifest_path.read_text(encoding="utf-8"))
     if actual != expected:
         raise RuntimeError("third-party-components.json is stale or differs from the local payload audit")
-    expected_notices = _render_notices(expected["components"], expected["summary"])
+    expected_notices = _render_notices(expected["components"], expected["summary"], version=version)
     if notices_path.read_text(encoding="utf-8") != expected_notices:
         raise RuntimeError("THIRD_PARTY_NOTICES.txt is stale or differs from the local payload audit")
     for component in expected["components"]:
@@ -554,10 +554,11 @@ def _check_output(root: Path, expected: dict[str, Any]) -> None:
 
 
 def audit(root: Path, output_root: Path, *, check: bool) -> dict[str, Any]:
+    version = (root / "VERSION").read_text(encoding="utf-8").strip()
     if check:
         expected_components = _components(root, None)
         expected = _payload(expected_components)
-        _check_output(output_root, expected)
+        _check_output(output_root, expected, version=version)
         return expected
     licenses_root = output_root / "licenses"
     if licenses_root.exists():
@@ -570,7 +571,7 @@ def audit(root: Path, output_root: Path, *, check: bool) -> dict[str, Any]:
         encoding="utf-8",
     )
     (output_root / "THIRD_PARTY_NOTICES.txt").write_text(
-        _render_notices(components, payload["summary"]),
+        _render_notices(components, payload["summary"], version=version),
         encoding="utf-8",
     )
     return payload

@@ -3,6 +3,7 @@ import { api, ApiClientError } from "./api";
 import type {
   AssetDetail,
   AssetSummary,
+  HealthResponse,
   Overview,
   Page,
   QualityIssue,
@@ -76,6 +77,7 @@ function formatDate(value: string | null): string {
 function App() {
   const [page, setPage] = useState<Page>("overview");
   const [overview, setOverview] = useState<Overview>(EMPTY_OVERVIEW);
+  const [health, setHealth] = useState<HealthResponse | null>(null);
   const [assets, setAssets] = useState<AssetSummary[]>([]);
   const [catalogTotal, setCatalogTotal] = useState(0);
   const [catalogOffset, setCatalogOffset] = useState(0);
@@ -112,12 +114,23 @@ function App() {
   const [textPreview, setTextPreview] = useState<TextPreview | null>(null);
   const [taskSource, setTaskSource] = useState("");
   const [showProcess, setShowProcess] = useState(false);
+  const [showSemanticConfirm, setShowSemanticConfirm] = useState(false);
+  const [semanticEnriching, setSemanticEnriching] = useState(false);
+  const [semanticNotice, setSemanticNotice] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
   const refreshOverview = useCallback(async () => {
     try {
       setOverview(await api.overview());
+    } catch (cause) {
+      setError(errorText(cause));
+    }
+  }, []);
+
+  const refreshHealth = useCallback(async () => {
+    try {
+      setHealth(await api.health());
     } catch (cause) {
       setError(errorText(cause));
     }
@@ -186,11 +199,12 @@ function App() {
   }, []);
 
   useEffect(() => {
+    void refreshHealth();
     void refreshOverview();
     void refreshCatalog();
     void refreshIssues();
     void refreshTasks();
-  }, [refreshCatalog, refreshIssues, refreshOverview, refreshTasks]);
+  }, [refreshCatalog, refreshHealth, refreshIssues, refreshOverview, refreshTasks]);
 
   useEffect(() => {
     if (!selectedId) return;
@@ -253,6 +267,7 @@ function App() {
   const openAsset = (assetId: string) => {
     setSelectedId(assetId);
     setDetailTab("data");
+    setSemanticNotice("");
     setPage("detail");
   };
 
@@ -317,6 +332,29 @@ function App() {
     }
   };
 
+  const requestSemanticEnrichment = () => {
+    if (!selected || !health?.llm.configured || semanticEnriching) return;
+    setSemanticNotice("");
+    setShowSemanticConfirm(true);
+  };
+
+  const confirmSemanticEnrichment = async () => {
+    if (!selectedId) return;
+    setShowSemanticConfirm(false);
+    setSemanticEnriching(true);
+    setError("");
+    try {
+      const result = await api.semanticEnrich(selectedId);
+      setSelected(result.asset);
+      setSemanticNotice(result.reused ? "已使用现有 AI 整理结果" : "AI 整理完成");
+      await Promise.all([refreshOverview(), refreshCatalog()]);
+    } catch (cause) {
+      setError(errorText(cause));
+    } finally {
+      setSemanticEnriching(false);
+    }
+  };
+
   const resetCatalog = (next: () => void) => {
     setCatalogOffset(0);
     next();
@@ -343,17 +381,18 @@ function App() {
 
       <main className="main-content">
         {error ? <div className="error-banner" role="alert"><span>{error}</span><button onClick={() => setError("")}>关闭</button></div> : null}
-        {page === "overview" ? <OverviewPage overview={overview} tasks={tasks} onProcess={() => setShowProcess(true)} onNavigate={setPage} onOpenAsset={openAsset} /> : null}
+        {page === "overview" ? <OverviewPage overview={overview} health={health} tasks={tasks} onProcess={() => setShowProcess(true)} onNavigate={setPage} onOpenAsset={openAsset} /> : null}
         {page === "catalog" ? <CatalogPage assets={assets} total={catalogTotal} offset={catalogOffset} loading={loading} type={catalogType} quality={catalogQuality} format={catalogFormat} query={catalogQuery} formats={overview.formats} onType={(value) => resetCatalog(() => setCatalogType(value))} onQuality={(value) => resetCatalog(() => setCatalogQuality(value))} onFormat={(value) => resetCatalog(() => setCatalogFormat(value))} onQuery={(value) => { setCatalogOffset(0); setCatalogQuery(value); }} onOffset={setCatalogOffset} onOpen={openAsset} onProcess={() => setShowProcess(true)} /> : null}
         {page === "search" ? <SearchPage input={searchInput} query={searchQuery} results={searchResults} total={searchTotal} offset={searchOffset} loading={searchLoading} submitted={searchSubmitted} hasAssets={overview.tableAssets + overview.textAssets > 0} type={searchType} quality={searchQuality} format={searchFormat} match={searchMatch} formats={overview.formats} onInput={setSearchInput} onSubmit={submitSearch} onType={(value) => { setSearchType(value); setSearchOffset(0); }} onQuality={(value) => { setSearchQuality(value); setSearchOffset(0); }} onFormat={(value) => { setSearchFormat(value); setSearchOffset(0); }} onMatch={(value) => { setSearchMatch(value); setSearchOffset(0); }} onOffset={(value) => { setSearchOffset(value); void refreshSearch(value); }} onOpen={openSearchResult} /> : null}
         {page === "query" ? <QueryPage assets={queryAssets} selectedIds={querySelectedIds} schema={querySchema} sql={querySql} result={queryResult} loading={queryLoading} error={queryError} onToggle={toggleQueryAsset} onSql={setQuerySql} onRun={runSql} onOpen={openAsset} /> : null}
         {page === "quality" ? <QualityPage issues={issues} onUpdate={updateIssue} onOpen={openAsset} /> : null}
         {page === "tasks" ? <TasksPage tasks={tasks} onProcess={() => setShowProcess(true)} onOpenCatalog={() => setPage("catalog")} /> : null}
-        {page === "detail" && selected ? <DetailPage detail={selected} tab={detailTab} onTab={setDetailTab} tableLayer={tableLayer} onTableLayer={setTableLayer} tableOffset={tableOffset} onTableOffset={setTableOffset} tablePreview={tablePreview} textPreview={textPreview} onBack={() => setPage("catalog")} onUpdateIssue={updateIssue} /> : null}
+        {page === "detail" && selected ? <DetailPage detail={selected} tab={detailTab} onTab={setDetailTab} tableLayer={tableLayer} onTableLayer={setTableLayer} tableOffset={tableOffset} onTableOffset={setTableOffset} tablePreview={tablePreview} textPreview={textPreview} semanticConfigured={health?.llm.configured === true} semanticEnriching={semanticEnriching} semanticNotice={semanticNotice} onSemanticEnrich={requestSemanticEnrichment} onBack={() => setPage("catalog")} onUpdateIssue={updateIssue} /> : null}
         {page === "detail" && !selected ? <EmptyState title="正在加载资产" body="正在读取本地目录与画像信息。" /> : null}
       </main>
 
       {showProcess ? <ProcessDialog source={taskSource} onSource={setTaskSource} onClose={() => setShowProcess(false)} onSubmit={startProcess} /> : null}
+      {showSemanticConfirm && selected ? <SemanticConfirmDialog assetName={selected.displayName} onCancel={() => setShowSemanticConfirm(false)} onConfirm={() => void confirmSemanticEnrichment()} /> : null}
     </div>
   );
 }
@@ -362,7 +401,7 @@ function NavButton({ active, onClick, children }: { active: boolean; onClick: ()
   return <button className={`nav-button ${active ? "active" : ""}`} onClick={onClick}>{children}</button>;
 }
 
-function OverviewPage({ overview, tasks, onProcess, onNavigate, onOpenAsset }: { overview: Overview; tasks: Task[]; onProcess: () => void; onNavigate: (page: Page) => void; onOpenAsset: (id: string) => void }) {
+function OverviewPage({ overview, health, tasks, onProcess, onNavigate, onOpenAsset }: { overview: Overview; health: HealthResponse | null; tasks: Task[]; onProcess: () => void; onNavigate: (page: Page) => void; onOpenAsset: (id: string) => void }) {
   const totalAssets = overview.tableAssets + overview.textAssets;
   const formatItems = Object.entries(overview.formats);
   return <section className="page-section">
@@ -373,7 +412,7 @@ function OverviewPage({ overview, tasks, onProcess, onNavigate, onOpenAsset }: {
       <section className="panel composition-panel"><PanelTitle title="资产组成" /><div className="composition-bar"><span className="bar-table" style={{ width: `${totalAssets ? (overview.tableAssets / totalAssets) * 100 : 0}%` }} /><span className="bar-text" style={{ width: `${totalAssets ? (overview.textAssets / totalAssets) * 100 : 0}%` }} /></div><div className="legend"><span><i className="legend-dot bar-table" />表格 {number(overview.tableAssets)}</span><span><i className="legend-dot bar-text" />文本 {number(overview.textAssets)}</span></div><div className="format-list">{formatItems.length ? formatItems.slice(0, 6).map(([format, count]) => <span key={format}><b>{format.toUpperCase()}</b>{number(count)}</span>) : <span className="muted">尚未处理资料</span>}</div></section>
     </div>
     <section className="panel recent-panel"><PanelTitle title="最近任务" action={<button className="text-button" onClick={() => onNavigate("tasks")}>全部任务 →</button>} />{tasks.length ? <div className="task-table">{tasks.slice(0, 5).map((task) => <TaskRow key={task.taskId} task={task} />)}</div> : <EmptyState title="尚未处理资料" body="输入一个本地科研资料目录，开始建立数据目录。" compact />}</section>
-    <div className="info-strip"><span className="info-icon">i</span><span>AI 语义分析：<strong>未配置模型</strong>。当前处理完全离线，不会发送任何资料。</span></div>
+    <div className="info-strip"><span className="info-icon">i</span><span>AI 语义分析：<strong>{health?.llm.configured ? "provider 已配置" : "尚未配置模型"}</strong>。默认处理完全离线；语义整理仅由显式命令触发。</span></div>
   </section>;
 }
 
@@ -489,8 +528,8 @@ function QueryResult({ result }: { result: SqlQueryResponse }) {
   return <div className="query-result"><div className="query-result-meta"><span>{number(result.rowCount)} 行 · {result.executionMs.toFixed(1)} ms</span>{result.truncated ? <strong>结果已截断（受本地上限限制）</strong> : null}<span className="sandbox-label">{result.sandbox}</span></div><div className="table-wrap"><table><thead><tr>{result.columns.map((column) => <th key={column}>{column}</th>)}</tr></thead><tbody>{result.rows.map((row, index) => <tr key={index}>{result.columns.map((column) => <td key={column} title={displayValue(row[column])}>{displayValue(row[column])}</td>)}</tr>)}</tbody></table></div></div>;
 }
 
-function DetailPage({ detail, tab, onTab, tableLayer, onTableLayer, tableOffset, onTableOffset, tablePreview, textPreview, onBack, onUpdateIssue }: { detail: AssetDetail; tab: "data" | "profile" | "quality" | "source" | "semantic"; onTab: (value: "data" | "profile" | "quality" | "source" | "semantic") => void; tableLayer: "raw" | "normalized"; onTableLayer: (value: "raw" | "normalized") => void; tableOffset: number; onTableOffset: (value: number) => void; tablePreview: TablePreview | null; textPreview: TextPreview | null; onBack: () => void; onUpdateIssue: (issue: QualityIssue, status: QualityIssue["status"]) => void }) {
-  return <section className="page-section detail-section"><button className="back-button" onClick={onBack}>← 数据目录</button><div className="detail-heading"><div className={`asset-type-mark large ${detail.assetType}`}>{detail.assetType === "table" ? "表" : "文"}</div><div><div className="eyebrow">{typeLabel(detail.assetType)}资产</div><h1>{detail.displayName}</h1><div className="detail-source">{detail.source.relativePath} <span>·</span> {detail.source.format?.toUpperCase()}</div></div><div className={`quality-pill ${detail.qualityStatus}`}>{qualityLabel(detail.qualityStatus)}</div></div><div className="detail-tabs">{([["data", "数据"], ["profile", "画像"], ["quality", `质量${detail.qualityIssues.length ? ` · ${detail.qualityIssues.length}` : ""}`], ["source", "来源"], ["semantic", "AI语义"]] as const).map(([key, label]) => <button key={key} className={tab === key ? "active" : ""} onClick={() => onTab(key)}>{label}</button>)}</div>{tab === "data" ? detail.assetType === "table" ? <TableData detail={detail} layer={tableLayer} onLayer={onTableLayer} offset={tableOffset} onOffset={onTableOffset} preview={tablePreview} /> : <TextData detail={detail} preview={textPreview} /> : null}{tab === "profile" ? <ProfileView detail={detail} /> : null}{tab === "quality" ? <DetailQuality detail={detail} onUpdate={onUpdateIssue} /> : null}{tab === "source" ? <SourceView detail={detail} /> : null}{tab === "semantic" ? <SemanticView detail={detail} /> : null}</section>;
+function DetailPage({ detail, tab, onTab, tableLayer, onTableLayer, tableOffset, onTableOffset, tablePreview, textPreview, semanticConfigured, semanticEnriching, semanticNotice, onSemanticEnrich, onBack, onUpdateIssue }: { detail: AssetDetail; tab: "data" | "profile" | "quality" | "source" | "semantic"; onTab: (value: "data" | "profile" | "quality" | "source" | "semantic") => void; tableLayer: "raw" | "normalized"; onTableLayer: (value: "raw" | "normalized") => void; tableOffset: number; onTableOffset: (value: number) => void; tablePreview: TablePreview | null; textPreview: TextPreview | null; semanticConfigured: boolean; semanticEnriching: boolean; semanticNotice: string; onSemanticEnrich: () => void; onBack: () => void; onUpdateIssue: (issue: QualityIssue, status: QualityIssue["status"]) => void }) {
+  return <section className="page-section detail-section"><button className="back-button" onClick={onBack}>← 数据目录</button><div className="detail-heading"><div className={`asset-type-mark large ${detail.assetType}`}>{detail.assetType === "table" ? "表" : "文"}</div><div><div className="eyebrow">{typeLabel(detail.assetType)}资产</div><h1>{detail.displayName}</h1><div className="detail-source">{detail.source.relativePath} <span>·</span> {detail.source.format?.toUpperCase()}</div></div><div className={`quality-pill ${detail.qualityStatus}`}>{qualityLabel(detail.qualityStatus)}</div></div><div className="detail-tabs">{([["data", "数据"], ["profile", "画像"], ["quality", `质量${detail.qualityIssues.length ? ` · ${detail.qualityIssues.length}` : ""}`], ["source", "来源"], ["semantic", "AI语义"]] as const).map(([key, label]) => <button key={key} className={tab === key ? "active" : ""} onClick={() => onTab(key)}>{label}</button>)}</div>{tab === "data" ? detail.assetType === "table" ? <TableData detail={detail} layer={tableLayer} onLayer={onTableLayer} offset={tableOffset} onOffset={onTableOffset} preview={tablePreview} /> : <TextData detail={detail} preview={textPreview} /> : null}{tab === "profile" ? <ProfileView detail={detail} /> : null}{tab === "quality" ? <DetailQuality detail={detail} onUpdate={onUpdateIssue} /> : null}{tab === "source" ? <SourceView detail={detail} /> : null}{tab === "semantic" ? <SemanticView detail={detail} configured={semanticConfigured} enriching={semanticEnriching} notice={semanticNotice} onEnrich={onSemanticEnrich} /> : null}</section>;
 }
 
 function TableData({ detail, layer, onLayer, offset, onOffset, preview }: { detail: AssetDetail; layer: "raw" | "normalized"; onLayer: (value: "raw" | "normalized") => void; offset: number; onOffset: (value: number) => void; preview: TablePreview | null }) { return <div className="detail-panel"><div className="data-toolbar"><div><h2>表格预览</h2><p>默认查看 normalized；raw artifact 保持不变</p></div><div className="segmented"><button className={layer === "normalized" ? "selected" : ""} onClick={() => { onLayer("normalized"); onOffset(0); }}>Normalized</button><button className={layer === "raw" ? "selected" : ""} onClick={() => { onLayer("raw"); onOffset(0); }}>Raw</button></div></div>{preview ? <><div className="table-wrap"><table><thead><tr><th className="row-number">#</th>{preview.columns.map((column) => <th key={column}>{column}</th>)}</tr></thead><tbody>{preview.rows.map((row, index) => <tr key={`${offset}-${index}`}><td className="row-number">{offset + index + 1}</td>{preview.columns.map((column) => <td key={column} title={displayValue(row[column])}>{displayValue(row[column])}</td>)}</tr>)}</tbody></table></div><Pagination offset={offset} limit={20} total={preview.pagination.total ?? detail.dimensions.rows ?? 0} onOffset={onOffset} /></> : <div className="loading-box">读取表格预览…</div>}</div>; }
@@ -505,7 +544,25 @@ function SourceView({ detail }: { detail: AssetDetail }) { return <div className
 
 function SourceField({ label, value, wide }: { label: string; value: unknown; wide?: boolean }) { return <div className={`source-field ${wide ? "wide" : ""}`}><span>{label}</span><code>{String(value ?? "—")}</code></div>; }
 
-function SemanticView({ detail }: { detail: AssetDetail }) { return <div className="detail-panel semantic-empty"><div className="semantic-lock">AI</div><h2>尚未配置模型</h2><p>Phase 7B 未执行。ChongZu 当前不会连接 DeepSeek、Qwen 或任何外部模型。</p><span>Semantic status: {detail.semanticStatus === "enriched" ? "enriched" : "pending"}</span></div>; }
+function SemanticView({ detail, configured, enriching, notice, onEnrich }: { detail: AssetDetail; configured: boolean; enriching: boolean; notice: string; onEnrich: () => void }) {
+  const semantic = detail.semantic;
+  const action = configured ? <button className="primary-button semantic-action" disabled={enriching} onClick={onEnrich}>{enriching ? "整理中..." : semantic && detail.semanticStatus === "enriched" ? "再次 AI 整理" : "AI 整理"}</button> : null;
+  if (!semantic || detail.semanticStatus !== "enriched") {
+    return <div className="detail-panel semantic-empty"><div className="semantic-lock">AI</div><h2>{configured ? "尚未进行 AI 整理" : "尚未配置 AI 模型"}</h2><p>{configured ? "当前资产还没有 SemanticMetadata。" : "配置 provider 后，才能手动发起单 Asset AI 整理。"}</p>{action}<span>Semantic status: pending</span></div>;
+  }
+  const fields = Array.isArray(semantic.semanticFields) ? semantic.semanticFields : [];
+  return <div className="detail-panel semantic-panel">
+    <div className="semantic-header"><div><div className="eyebrow">SEMANTIC METADATA</div><h2>{semantic.display_name}</h2></div><div className="semantic-header-actions">{action}<span className="semantic-confidence">confidence {semantic.confidence.toFixed(2)}</span></div></div>
+    {notice ? <div className="semantic-notice" role="status">{notice}</div> : null}
+    <div className="semantic-facts"><div><span>category</span><strong>{semantic.category}</strong></div><div><span>model</span><strong>{semantic.model}</strong></div><div><span>prompt</span><strong>{semantic.prompt_version}</strong></div><div><span>run</span><strong>{semantic.semantic_run_id}</strong></div></div>
+    <div className="semantic-copy"><h3>description</h3><p>{semantic.description}</p><h3>summary</h3><p>{semantic.summary}</p><h3>keywords</h3><div className="keyword-list">{semantic.keywords.map((keyword) => <span key={keyword}>{keyword}</span>)}</div></div>
+    {detail.assetType === "table" ? <><h3 className="semantic-subheading">semantic fields</h3>{fields.length ? <div className="table-wrap"><table><thead><tr><th>source column</th><th>semantic name</th><th>description</th><th>type</th><th>unit</th><th>confidence</th></tr></thead><tbody>{fields.map((field) => <tr key={`${field.source_column}-${field.semantic_name}`}><td>{field.source_column}</td><td>{field.semantic_name}</td><td>{field.description}</td><td>{field.semantic_type}</td><td>{field.unit ?? "—"}</td><td>{field.confidence.toFixed(2)}</td></tr>)}</tbody></table></div> : <p className="muted">No semantic fields were returned.</p>}</> : null}
+  </div>;
+}
+
+function SemanticConfirmDialog({ assetName, onCancel, onConfirm }: { assetName: string; onCancel: () => void; onConfirm: () => void }) {
+  return <div className="dialog-backdrop" role="presentation"><div className="dialog semantic-confirm" role="dialog" aria-modal="true" aria-labelledby="semantic-confirm-title"><div className="dialog-header"><div><div className="eyebrow">EXPLICIT PROVIDER ACTION</div><h2 id="semantic-confirm-title">确认 AI 整理</h2></div><button className="close-button" onClick={onCancel} aria-label="取消">×</button></div><p className="semantic-confirm-asset">当前资产：{assetName}</p><p>AI 整理将向当前配置的大模型服务发送该资产的受控摘要/样本。</p><p>不发送原始文件；不发送完整大型表格；不修改原始或规范化数据。</p><div className="dialog-actions"><button className="secondary-button" onClick={onCancel}>取消</button><button className="primary-button" onClick={onConfirm}>开始整理</button></div></div></div>;
+}
 
 function ProcessDialog({ source, onSource, onClose, onSubmit }: { source: string; onSource: (value: string) => void; onClose: () => void; onSubmit: () => void }) { return <div className="dialog-backdrop" role="presentation"><div className="dialog" role="dialog" aria-modal="true"><div className="dialog-header"><div><div className="eyebrow">NEW PROCESS</div><h2>处理新目录</h2></div><button className="close-button" onClick={onClose}>×</button></div><label className="field-label" htmlFor="source-path">资料目录</label><input id="source-path" className="path-input" value={source} onChange={(event) => onSource(event.target.value)} placeholder="例如：E:\\Research\\Project" autoFocus /><p className="field-help">请输入或粘贴本机目录路径。浏览器不会直接读取本机目录。</p><div className="dialog-actions"><button className="secondary-button" onClick={onClose}>取消</button><button className="primary-button" disabled={!source.trim()} onClick={onSubmit}>开始处理</button></div></div></div>; }
 

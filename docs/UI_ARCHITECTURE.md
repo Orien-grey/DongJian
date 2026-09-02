@@ -186,8 +186,11 @@ The process dialog accepts a pasted existing directory path. A POST creates a
 background task; the browser polls it once per second and never blocks on the
 pipeline. Empty registry/catalog/quality/task states are explicit empty
 states. Quality controls update only `open`, `accepted`, `ignored`, or
-`resolved` review status. The AI tab remains `尚未配置模型`; Phase 7B and all
-network calls are disabled.
+`resolved` review status. The AI tab reports the configured provider state. It
+offers a single-asset AI整理 action only when configured, displays a concise
+confirmation before sending a bounded summary/sample, and renders the
+validated semantic metadata after success. Phase 7B acceptance used synthetic
+assets; core processing and all ordinary read paths remain offline.
 
 Phase 9 adds **数据检索** and **数据查询** to the navigation. Data retrieval
 uses the local lexical Search API and displays bounded plain-text snippets,

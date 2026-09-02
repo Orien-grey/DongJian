@@ -1,7 +1,7 @@
 param(
     [string]$Version = "",
     [string]$OutputRoot = "",
-    [string]$ArtifactSuffix = "rc1"
+    [string]$ArtifactSuffix = "rc2"
 )
 
 $ErrorActionPreference = 'Stop'

@@ -107,7 +107,7 @@ def _build_parser() -> argparse.ArgumentParser:
     semantic_sub = semantic_parser.add_subparsers(dest="semantic_command", required=True)
     semantic_sub.add_parser("status", help="show provider configuration without making a network call")
     semantic_enrich_parser = semantic_sub.add_parser(
-        "enrich", help="enrich catalog assets; Phase 7A permits only explicit --provider fake"
+        "enrich", help="enrich catalog assets; real provider requires explicit authorization"
     )
     semantic_enrich_parser.add_argument("--source", type=Path, default=None)
     semantic_enrich_parser.add_argument("--asset", dest="asset_id", default=None)
@@ -116,7 +116,12 @@ def _build_parser() -> argparse.ArgumentParser:
         "--provider",
         choices=("openai-compatible", "fake"),
         default="openai-compatible",
-        help="openai-compatible is disabled in Phase 7A; fake is an explicit offline test provider",
+        help="fake is offline; openai-compatible requires --allow-real-provider",
+    )
+    semantic_enrich_parser.add_argument(
+        "--allow-real-provider",
+        action="store_true",
+        help="explicitly authorize the configured OpenAI-compatible provider for this command",
     )
     semantic_enrich_parser.add_argument("--force", action="store_true")
     semantic_enrich_parser.add_argument("--limit", type=int, default=None)
@@ -344,6 +349,9 @@ def _print_semantic_summary(summary) -> None:
     print(f"Sent chars: {summary.sent_chars}")
     print(f"Sampled rows: {summary.sampled_rows}")
     print(f"Inputs truncated: {summary.input_truncated}")
+    print(f"Provider calls: {summary.provider_calls}")
+    print(f"Request payload bytes: {summary.request_payload_bytes}")
+    print(f"Response payload bytes: {summary.response_payload_bytes}")
     print(f"Wall time: {summary.wall_time_ms:.2f} ms")
     for failure in summary.failures[:20]:
         print(f"Failure: {failure.get('asset_id')} [{failure.get('error_code')}] {failure.get('error')}")
@@ -494,6 +502,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     provider_name=parsed.provider,
                     force=parsed.force,
                     limit=parsed.limit,
+                    allow_real_provider=parsed.allow_real_provider,
                 )
             except SemanticNotConfigured:
                 print("Semantic enrichment is not configured.")

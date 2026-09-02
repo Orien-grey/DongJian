@@ -118,6 +118,10 @@ class SemanticConfig:
         parsed = urlsplit(self.base_url)
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:
             raise ValueError("base_url must be an explicit http(s) URL")
+        if parsed.username or parsed.password:
+            raise ValueError("base_url must not contain embedded credentials")
+        if parsed.query or parsed.fragment:
+            raise ValueError("base_url must not contain a query or fragment")
 
 
 # Preserve the provider-neutral Phase 2 import contract while the package is

@@ -159,7 +159,7 @@ DuckDB/Parquet. Cleaning, Catalog, and the Phase 7A Fake Provider use only
 local code and already-published artifacts. There is no `pip`, `uv sync`,
 Hugging Face, HTTP OCR, public endpoint, or automatic model fallback during
 these routes. With no `.env`, doctor reports `LLM STATUS: NOT CONFIGURED /
-OPTIONAL`; this is normal and does not fail doctor or process. Phase 7A makes
-no DeepSeek, Qwen, OpenAI, vision, or embedding request. The real HTTP adapter
-is hard-disabled until Phase 7B receives explicit user configuration and
-authorization.
+OPTIONAL`; this is normal and does not fail doctor or process. Core routes make
+no DeepSeek, Qwen, OpenAI, vision, or embedding request. Phase 7B acceptance
+used only two explicitly authorized synthetic requests; Phase 7C permits only
+an explicit, confirmed single-asset semantic action.

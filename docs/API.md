@@ -17,6 +17,7 @@ browser contract.
 | GET | `/api/v1/overview` | File, asset, quality, semantic-pending, and format counts. |
 | GET | `/api/v1/catalog` | Metadata list with `type`, `quality`, `format`, `q`, `limit`, `offset`. |
 | GET | `/api/v1/assets/{asset-id}` | Unified asset metadata, provenance, profile, issues, and semantic history. |
+| POST | `/api/v1/assets/{asset-id}/semantic-enrich` | Explicitly enrich exactly one table/text asset; requires configured provider and UI confirmation. |
 | GET | `/api/v1/assets/{asset-id}/table-preview` | Bounded Parquet preview with `layer=raw\|normalized`, `limit`, `offset`. |
 | GET | `/api/v1/assets/{asset-id}/text-preview` | Bounded text window with `limit`, `offset`. |
 | GET | `/api/v1/search` | Offline lexical search with `q`, `type`, `format`, `quality`, `match`, `limit`, `offset`. |
@@ -108,7 +109,11 @@ does not mutate that directory. Static files are contained under
 output returns `frontend_not_built` rather than attempting a development
 server or a download.
 
-The API never invokes semantic enrichment. With the current Phase 7A state,
-health and UI report `NOT_CONFIGURED` / `AI semantic: Not configured`, and no
-LLM, vision, embedding, public endpoint, model download, pip, or uv operation
-is performed.
+The process endpoint never invokes semantic enrichment. The single-asset
+semantic endpoint is the only API route that may construct the configured
+provider, and only for an explicit POST. It sends bounded summary/sample data,
+never returns the API key, and maps provider failures to stable codes such as
+`SEMANTIC_NOT_CONFIGURED`, `SEMANTIC_TIMEOUT`, `SEMANTIC_UNAVAILABLE`,
+`SEMANTIC_AUTH_FAILED`, and `SEMANTIC_INVALID_RESPONSE`. It does not expose
+`force` or support bulk enrichment. No vision, embedding, public endpoint,
+model download, pip, or uv operation is performed by the local product.

@@ -90,10 +90,10 @@ and invoke the standalone executable directly. They never activate or invoke
 expected; that is a normal, non-venv interpreter.
 
 Phase 3, Phase 4A, the Phase 4B candidate, and the Phase 5A/5B OCR foundation
-use the existing project-local runtime. Phase 6 cleaning/catalog and Phase 7A
-semantic infrastructure add no package, OCR, or model payload. Phase 7A uses
-only Python standard library code for configuration, validation, and its
-disabled HTTP adapter. The packages are installed into `runtime\packages`
+use the existing project-local runtime. Phase 6 cleaning/catalog and Phase
+7A/7B/7C semantic infrastructure add no package, OCR, or model payload. The
+semantic provider adapter uses Python standard library HTTP only, with real
+calls restricted to explicit user authorization/configuration. The packages are installed into `runtime\packages`
 with project-private uv, the locked
 versions/hashes, and a wheel-only constraint. `scripts\bootstrap.ps1` performs
 the install in a temporary project-local staging venv, removes stale target
@@ -247,15 +247,15 @@ PyArrow, Pandas, OpenPyXL, GMFT, Docling, Torch, Java, and Tika remain absent.
 RapidOCR/ONNX Runtime are present for offline OCR only; Phase 5B injects their
 OCR blocks into the existing img2table image adapter without a second OCR
 backend call. NumPy/OpenCV/pypdfium2 are shared native dependencies of the
-candidate and OCR trees. Phase 5B, Phase 6, and Phase 7A add no package or
+candidate and OCR trees. Phase 5B, Phase 6, and Phase 7A/7B/7C add no package or
 model dependency.
 Polars writes and reads Parquet using its bundled native runtime. PyMuPDF's
 native payload is loaded from `runtime\packages\pymupdf`; the development venv
 is not a production input.
 
 Phase 3/4A/4B/5A/5B/6 processing and Phase 7A Fake semantic enrichment make no
-network request and do not call a configured LLM. Provisioning is the only
-network-enabled step in the current workflow. Phase 6/7A use only the already
+network request and do not call a configured LLM. Phase 7B/7C real calls are
+limited to explicit, bounded semantic requests. Phase 6/7A use only the already
 installed Polars, DuckDB, and standard-library payload. Doctor reports
 `PyMuPDF PASS`, `img2table PASS (candidate)`, `RapidOCR PASS`, `ONNX Runtime
 PASS`, `OCR models PASS`, `Polars PASS`, `Calamine PASS`, `DuckDB PASS`, and
@@ -263,13 +263,15 @@ PASS`, `OCR models PASS`, `Polars PASS`, `Calamine PASS`, `DuckDB PASS`, and
 default route; GMFT and Docling are not next-phase requirements and can return
 only through later evidence. img2table's optional OCR extras are not installed;
 Phase 5B uses its own explicit RapidOCR model bundle and never downloads models
-at runtime. `process SOURCE`, `catalog`, `semantic status`, and the Phase 7A
-Fake Provider only read/write project-contained workspace state; they do not
-run `pip`, `uv sync`, Hugging Face, HTTP OCR, or an LLM endpoint. Phase 6/7A
+at runtime. `process SOURCE`, `catalog`, and `semantic status` only read/write
+project-contained workspace state; the process route never invokes semantic
+enrichment. Only an explicit single-asset semantic request may call a
+configured LLM; it does not run `pip`, `uv sync`, Hugging Face, or HTTP OCR.
+Phase 6/7A
 introduce no runtime-size increase; final bundle-size measurement must still
 be repeated after package cleanup. The future `.env` is project-local and
-ignored by Git; the current Phase 7A guard rejects real provider execution
-even when it is filled.
+ignored by Git; a release contains only `.env.example`, and real semantic
+calls remain opt-in.
 
 The Phase 8 server is localhost-only (`127.0.0.1`) and its process task calls
 the Python coordinator directly. Frontend assets are static local files; the
@@ -288,8 +290,10 @@ relations are populated through parameterized batches.
 
 The runtime network guard covers process, Search, SQL, and the static frontend.
 No model download, pip/uv operation, Hugging Face access, HTTP OCR, external
-SQL file function, or public endpoint is part of the product route. `LLM_STATUS
-= NOT_CONFIGURED` remains a normal optional state.
+SQL file function, or public endpoint is part of the product route. Only a
+configured, explicit single-asset semantic request may use its configured
+OpenAI-compatible endpoint. `LLM_STATUS=NOT_CONFIGURED` remains a normal
+optional release state.
 
 The development checkout's standalone CPython image also contains its own
 project-local bootstrap tools `pip==26.1.2` and `setuptools==82.0.1` under
@@ -303,7 +307,7 @@ declared in `pyproject.toml`.
 
 `VERSION` currently contains `0.1.0`. `scripts\build_release.ps1` requires a
 clean Git tree and copies only the explicit production allowlist into
-`release\ChongZu-0.1.0-rc1-win-x64`, writes `release-manifest.json`,
+`release\ChongZu-0.1.0-rc2-win-x64`, writes `release-manifest.json`,
 `THIRD_PARTY_NOTICES.txt`, `third-party-components.json`, and `licenses/`, and
 creates a ZIP and SHA-256 sidecar. The bundle
 contains the exact `runtime\python\cpython-3.11.15-windows-x86_64-none`,

@@ -186,7 +186,7 @@ Acceptance: every transformation is traceable and raw assets remain immutable.
 
 - Status: committed in `1b92ca14bd0254423e8cd0a0ceb96f981e365954`.
 - Add the provider-neutral `SemanticRequest`/`SemanticResponse` boundary, the
-  versioned `table-semantic-v1` and `text-semantic-v1` prompts, bounded table
+  versioned initial semantic prompts, bounded table
   sampling/text excerpts, strict local JSON validation, and semantic run/cache
   history in Registry schema v5.
 - Keep output in the separate semantic layer. A validated result may propose
@@ -194,8 +194,9 @@ Acceptance: every transformation is traceable and raw assets remain immutable.
   suggestions; it cannot mutate raw/normalized artifacts, physical columns, or
   existing issue status.
 - Provide a deterministic Fake Provider for offline tests and explicit smoke
-  runs. The standard-library OpenAI-compatible adapter exists as a reviewed
-  future boundary but is hard-disabled in Phase 7A.
+  runs. The standard-library OpenAI-compatible adapter is retained as a
+  provider-neutral boundary; real calls require a separate explicit
+  authorization path.
 - Use only project-root `.env` as the future configuration source. Missing
   configuration is `LLM_STATUS=NOT_CONFIGURED`, not a doctor failure.
 
@@ -205,15 +206,27 @@ does not include a real model or network request.
 
 ## Phase 7B - Real Provider Acceptance
 
-Status: **BLOCKED BY USER CONFIGURATION / NOT RUN**.
+Status: **ACCEPTED for the explicitly configured development provider using
+synthetic assets only**.
 
-This phase may begin only after the user fills `.env` with an explicit
-OpenAI-compatible base URL, API key, model, and bounded timeout/retry settings,
-then explicitly authorizes a controlled test. It will validate the HTTP
-adapter, response behavior, payload audit, and provider-specific deployment
-without adding a public endpoint fallback. Development may use DeepSeek and
-the company may deploy Qwen3.6-35B-A3B, but ChongZu remains vendor/model
-neutral. Phase 8 can proceed without completing this phase.
+This phase validated the provider-neutral OpenAI-compatible HTTP adapter,
+`/chat/completions` URL normalization, standard JSON response format request,
+strict local validation, bounded retries, payload audit, provenance, and raw /
+normalized hash invariants. The acceptance used one synthetic TableAsset and
+one synthetic TextAsset; no user corpus was sent. Qwen acceptance remains
+**NOT RUN**.
+
+## Phase 7C - Semantic Product Closure
+
+Status: **COMPLETE in the RC2 source tree**.
+
+The local UI exposes an explicit confirmation and a single-asset
+`POST /api/v1/assets/{asset-id}/semantic-enrich` action for TableAsset/TextAsset
+only. It shows configured/unconfigured states, progress, validated metadata,
+stable provider error categories, and cache reuse. `process` remains
+deterministic and never starts semantic work; the UI has no bulk or force
+operation. The RC2 bundle excludes `.env` and defaults to
+`LLM_STATUS=NOT_CONFIGURED`.
 
 ## Phase 8 - Local Frontend
 
@@ -298,5 +311,6 @@ and writes all mutable state below its relocated root.
   machine-readable component manifest, enforce a clean source tree at formal
   build time, and rebuild the RC from the resulting commit.
 - Keep unresolved package/model redistribution evidence as explicit review
-  items. This phase does not make a legal determination and does not run
-  Phase 7B or connect a real provider.
+  items. This phase does not make a legal determination and its deterministic
+  release acceptance does not connect a real provider; Phase 7B's synthetic
+  real-provider acceptance is recorded separately.

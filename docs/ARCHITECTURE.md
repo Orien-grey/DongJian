@@ -368,20 +368,19 @@ of extraction reuse.
 `src/chongzu/semantic/` defines `SemanticRequest`/`SemanticResponse`, the
 provider protocol, versioned prompts, bounded input builders, strict local
 validation, the deterministic Fake Provider, and the standard-library
-OpenAI-compatible adapter. Phase 7A runs only the explicit Fake Provider. The
-HTTP adapter is hard-disabled by the Phase 7A runner, so even a filled `.env`
-cannot create a real request in this phase. There is no vendor-specific branch:
-DeepSeek may be used in a future authorized development test and the company
-may deploy Qwen3.6-35B-A3B, but both are configuration choices rather than
-ChongZu dependencies or contract types.
+OpenAI-compatible adapter. The Fake Provider remains the default test path;
+the HTTP adapter is available only through explicit authorization (the CLI
+flag or the confirmed single-asset API action). There is no vendor-specific
+branch: the configured service remains a provider/model choice rather than a
+ChongZu dependency or contract type.
 
 The formal configuration source is the project-root `.env`, represented by
 `.env.example`; the tracked `config/llm.example.json` is documentation-only
 compatibility material. Missing values produce `LLM_STATUS=NOT_CONFIGURED` and
 are normal. No endpoint is guessed and no public fallback exists. The adapter
 supports bounded timeout/retry, JSON and response-size checks, and sanitized
-error categories; Phase 7A tests use only a monkeypatched local unit stub and
-never contact a live endpoint.
+error categories. Phase 7B's two real requests used synthetic assets only;
+normal tests and core processing never contact a live endpoint.
 
 Semantic input contains only controlled summaries of normalized assets:
 provenance, profile, quality hints, bounded representative table rows or text

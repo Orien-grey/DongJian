@@ -125,6 +125,19 @@ def _int_value(value: object, default: int = 0) -> int:
         return default
 
 
+def _input_quality_issues(candidate: Mapping[str, Any]) -> list[object]:
+    """Keep deterministic review evidence out of the semantic feedback loop."""
+
+    values = candidate.get("quality_issues") or []
+    if not isinstance(values, (list, tuple)):
+        return []
+    return [
+        item
+        for item in values
+        if not isinstance(item, Mapping) or str(item.get("detected_by") or "").casefold() != "semantic"
+    ]
+
+
 def _table_columns(candidate: Mapping[str, Any], profile: Mapping[str, Any], metadata: Mapping[str, Any], path: Path) -> tuple[list[str], list[str]]:
     normalized: list[str] = []
     original: list[str] = []
@@ -388,7 +401,7 @@ def build_table_request(
         "row_count": row_count,
         "column_count": len(columns),
         "profile": profile,
-        "quality_issues": candidate.get("quality_issues") or [],
+        "quality_issues": _input_quality_issues(candidate),
         "provenance": {
             "file_id": candidate.get("file_id"),
             "content_sha256": candidate.get("content_sha256"),
@@ -471,7 +484,7 @@ def build_text_request(
         "page_or_section": candidate.get("page_number") or candidate.get("sheet_name"),
         "extraction_source": profile.get("extraction_source") or ("ocr" if "ocr" in str(candidate.get("extractor") or "").casefold() else "native"),
         "profile": profile,
-        "quality_issues": candidate.get("quality_issues") or [],
+        "quality_issues": _input_quality_issues(candidate),
         "provenance": {
             "file_id": candidate.get("file_id"),
             "content_sha256": candidate.get("content_sha256"),

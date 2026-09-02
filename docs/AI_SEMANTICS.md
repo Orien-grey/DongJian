@@ -12,7 +12,7 @@ explicitly authorized development test, and the company deployment may use
 logic. ChongZu does not select a public endpoint, fallback server, vision
 endpoint, or embedding endpoint.
 
-## Phase 7A boundary
+## Phase 7A/7B/7C boundary
 
 The current package is `src/chongzu/semantic/`:
 
@@ -25,7 +25,7 @@ The current package is `src/chongzu/semantic/`:
 | `input_builder.py` | Normalized-artifact sampling, truncation, and audit metadata. |
 | `validator.py` | Strict local JSON/type/range/column validation. |
 | `fake_provider.py` | Deterministic no-network test provider. |
-| `openai_compatible.py` | Minimal standard-library text chat adapter, disabled in Phase 7A. |
+| `openai_compatible.py` | Minimal provider-neutral standard-library text chat adapter; real calls require explicit authorization. |
 | `runner.py` | Cache identity, per-asset isolation, and Registry persistence. |
 
 The flow is:
@@ -67,8 +67,10 @@ Network calls: disabled
 Doctor reports `LLM: NOT CONFIGURED / OPTIONAL` through its historical
 `LLM STATUS` label and remains successful. `semantic enrich` without
 configuration prints `Semantic enrichment is not configured.` and performs no
-request. In Phase 7A, even a filled `.env` cannot enable the real provider;
-Phase 7B requires a new explicit user authorization.
+request. A real CLI call requires both configured `.env` values and the
+explicit `--allow-real-provider` authorization. The UI requires a configured
+provider and an explicit confirmation before its single-asset endpoint sends a
+bounded request.
 
 ## Input contract and exposure audit
 
@@ -106,7 +108,7 @@ The runner stores counts and hashes, not the API key or complete prompt, in
 
 ## Prompt and JSON contracts
 
-Prompt versions are `table-semantic-v1` and `text-semantic-v1`. The sections
+Prompt versions are `table-semantic-v2` and `text-semantic-v2`. The sections
 `instructions`, `reference_data`, and `output_contract` are kept distinct.
 Changing a prompt version changes semantic identity and reruns only semantic
 enrichment.
@@ -154,10 +156,11 @@ available only after an explicit `--provider fake` CLI switch or from tests.
 The OpenAI-compatible adapter uses Python standard library `urllib`, explicit
 `.env` values, `Authorization`, JSON, timeout, response-size limits, HTTP/error
 mapping, and at most `LLM_MAX_RETRIES` retries for bounded transient failures.
-It has no vendor branches and no fallback. The Phase 7A runner rejects real
-provider execution before constructing a request, so tests and current CLI
-smoke runs cannot contact DeepSeek, Qwen, OpenAI, localhost, or any other
-endpoint.
+It has no vendor branches and no fallback. The runner rejects real provider
+execution unless the caller supplies explicit authorization, so ordinary
+tests, `process`, Catalog reads, and CLI smoke runs cannot contact any
+endpoint. Phase 7B used two authorized synthetic-only provider requests;
+Phase 7C exposes only the same explicit one-asset operation through the UI/API.
 
 ## Identity, history, and failure isolation
 
@@ -183,5 +186,7 @@ statuses intact.
 ```
 
 `process SOURCE` does not invoke semantic enrichment. No vision, embedding,
-vector database, frontend, GMFT, Docling, new OCR, or real model acceptance is
-part of Phase 7A. Phase 7B is **BLOCKED BY USER CONFIGURATION / NOT RUN**.
+vector database, Chat, GMFT, Docling, or new OCR is part of this closure.
+Phase 7B real provider acceptance is complete for synthetic assets only;
+Qwen acceptance is **NOT RUN**. Phase 7C provides only the explicit
+single-asset UI/API action and no bulk enrichment.

@@ -1,4 +1,4 @@
-ChongZu 0.1.0-rc1 third-party notices
+ChongZu 0.1.0 third-party notices
 
 Engineering audit record for the actual production payload and the
 frontend production bundle. This file records local evidence only; it

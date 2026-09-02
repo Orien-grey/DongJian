@@ -1,8 +1,9 @@
-# Phase 7A semantic enrichment infrastructure
+# Phase 7C semantic product closure
 
-Phase 7A provides a strict, auditable semantic seam without making a real
-model call. It consumes bounded summaries of already published normalized
-`TableAsset` and `TextAsset` values.
+Phase 7A/7B/7C provide a strict, auditable semantic seam over already
+published normalized `TableAsset` and `TextAsset` values. Phase 7B accepted
+the configured OpenAI-compatible provider with two synthetic real requests;
+Phase 7C exposes the same single-asset operation through the local UI.
 
 ## Boundaries
 
@@ -10,7 +11,7 @@ model call. It consumes bounded summaries of already published normalized
 TableAsset/TextAsset
         -> normalized artifact + profile + quality/provenance
         -> bounded SemanticRequest
-        -> FakeSemanticProvider (Phase 7A only)
+        -> FakeSemanticProvider or explicitly authorized OpenAI-compatible provider
         -> strict local JSON validation
         -> semantic_metadata history/current + open review suggestions
         -> catalog_assets effective display name
@@ -43,10 +44,13 @@ is optional and does not fail doctor.
 .\chongzu.cmd semantic status
 ```
 
-In this round it reports provider/model not configured and network calls
-disabled. A real configuration still does not enable calls in Phase 7A.
-`semantic enrich` without configuration returns the safe message
-`Semantic enrichment is not configured.`. The explicit test route is:
+`semantic status` reports configuration without making a network call. The
+CLI remains offline by default; a real provider requires the explicit
+`--allow-real-provider` flag. The local semantic API is also only executed by
+an explicit user `POST` after UI confirmation. Without configuration it
+returns HTTP 409 with `SEMANTIC_NOT_CONFIGURED` and makes no provider call.
+
+The CLI fake route is:
 
 ```text
 .\chongzu.cmd semantic enrich --provider fake --asset <asset-id>
@@ -54,7 +58,7 @@ disabled. A real configuration still does not enable calls in Phase 7A.
 
 ## Input and prompt contract
 
-Prompt versions are `table-semantic-v1` and `text-semantic-v1`. Each request
+Prompt versions are `table-semantic-v2` and `text-semantic-v2`. Each request
 keeps `instructions`, untrusted `reference_data`, and `output_contract` as
 separate sections. Asset text is reference data: commands embedded in a file
 must not change the semantic task.
@@ -100,21 +104,24 @@ filename/sheet/page fallback. Semantic quality suggestions are `open` and
 `FakeSemanticProvider` is deterministic and has no network path. The
 OpenAI-compatible text-only adapter uses standard-library `urllib` and has
 bounded timeout/retry, response-size, JSON, HTTP, timeout, and connection
-error handling. It has no hard-coded vendor or fallback endpoint. The Phase 7A
-runner rejects real-provider execution before any HTTP call, even if `.env` is
-filled. Vision, file upload, embedding, vector retrieval, GMFT, Docling, new
-OCR, and frontend work are outside this phase.
+error handling. It has no hard-coded vendor or fallback endpoint. The local
+API endpoint accepts only one existing table/text asset and never exposes
+`force`; CLI/debug use remains the only forced regeneration path.
 
-Phase 8's frontend may display `AI semantic: Not configured` and the semantic
-tab is intentionally read-only. `chongzu process SOURCE` and the local API
-process task never invoke this layer. The local UI has no model endpoint,
-vision upload, embedding route, chat surface, or public fallback.
+The UI shows `尚未配置 AI 模型` when the provider is absent. When configured,
+Asset Detail → AI语义 offers `AI 整理`, first showing an explicit confirmation
+that only a bounded summary/sample is sent. Success refreshes the current
+asset detail; a matching result is shown as `已使用现有 AI 整理结果` without a
+second provider call. `chongzu process SOURCE` and the local API process task
+never invoke this layer. There is no bulk enrichment, vision upload,
+embedding route, chat surface, or public fallback.
 
 Phase 9's local Search and SQL workbench do not change this boundary. Lexical
 retrieval consumes local Catalog and TextChunk data, while SQL is explicit
 selected-table read-only execution. Neither path calls the semantic provider or
 creates embeddings.
 
-Phase 7B is **BLOCKED BY USER CONFIGURATION / NOT RUN**. It requires the user
-to fill `.env` and explicitly authorize a controlled test before any real
-provider request is permitted.
+Phase 7B real provider acceptance is complete for the configured development
+provider using synthetic assets only. Qwen acceptance remains **NOT RUN**.
+Release bundles contain `.env.example` only and report
+`LLM_STATUS=NOT_CONFIGURED`.

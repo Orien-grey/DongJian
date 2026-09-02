@@ -82,10 +82,10 @@ remove the raw path.
 unusable counts, quality issues, and semantic-pending count. `list` supports
 only the small type/quality/format/limit filters. `show` includes source and
 provenance, metadata, profile, current quality issues, and a bounded preview
-(20 table rows or 2,000 text characters by default); it never prints a whole
+ (20 table rows or 2,000 text characters by default); it never prints a whole
 large Parquet table. `show` also includes semantic history and effective-name
-selection. The Fake Provider is an explicit offline test path; the HTTP
-provider is disabled in Phase 7A.
+ selection. The Fake Provider is an explicit offline test path; the HTTP
+ provider is available only to an explicitly authorized semantic action.
 
 ## Local API and UI read model
 
@@ -130,11 +130,13 @@ for the exact limits and validation boundary.
 
 ## Boundaries
 
-Catalog metadata remains local and queryable. Phase 7A may add Fake Provider
-semantic metadata, but no real LLM response, embedding, or vector database is
-created. Unsupported files remain registered in `files` with their source
-fingerprint but have no asset row. All source and raw/normalized hashes remain
-stable across cleaning, semantic validation, and Catalog queries.
+ Catalog metadata remains local and queryable. Phase 7B may add validated real
+ semantic metadata only for explicitly selected synthetic/development assets;
+ Phase 7C exposes the same operation for one user-selected asset. No embedding
+ or vector database is created. Unsupported files remain registered in `files`
+ with their source fingerprint but have no asset row. All source and
+ raw/normalized hashes remain stable across cleaning, semantic validation, and
+ Catalog queries.
 
 ## Phase 10 release verification
 

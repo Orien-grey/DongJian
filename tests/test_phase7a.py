@@ -127,7 +127,7 @@ def test_semantic_cache_reuse_and_model_prompt_invalidation_do_not_reextract(tmp
     second = _runner(tmp_path, second_provider)
     try:
         model_change = second.enrich(asset_id=table_id)
-        prompt_change = second.enrich(asset_id=table_id, prompt_version="table-semantic-v2")
+        prompt_change = second.enrich(asset_id=table_id, prompt_version="table-semantic-test-v2")
         assert (model_change.enriched, prompt_change.enriched) == (1, 1)
         assert second_provider.calls == 2
         history = second.registry.semantic_history(table_id)
@@ -164,6 +164,9 @@ def test_strict_validator_rejects_malformed_missing_confidence_and_hallucinated_
     invalid_confidence = dict(valid.payload)
     invalid_confidence["confidence"] = 2
     assert not validate_semantic_payload(invalid_confidence, request).valid
+    numeric_string_confidence = dict(valid.payload)
+    numeric_string_confidence["confidence"] = "0.5"
+    assert not validate_semantic_payload(numeric_string_confidence, request).valid
     hallucinated = dict(valid.payload)
     hallucinated["semantic_fields"] = [
         {
@@ -307,6 +310,7 @@ def test_quality_suggestions_are_open_review_records(tmp_path: Path) -> None:
     runner = _runner(tmp_path, SuggestingProvider())
     try:
         assert runner.enrich(asset_id=str(table["asset_id"])).enriched == 1
+        assert runner.enrich(asset_id=str(table["asset_id"])).reused == 1
         rows = runner.registry.connection.execute(
             "SELECT detected_by, status, semantic_run_id, issue_type FROM quality_issues WHERE detected_by='semantic'"
         ).fetchall()

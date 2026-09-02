@@ -542,9 +542,9 @@ def _check_optional_tools(report: DoctorReport) -> None:
             report.add(
                 "LLM STATUS",
                 "INFO",
-                "CONFIGURED IN .env; Phase 7A real calls disabled / explicit Phase 7B authorization required",
+                "CONFIGURED IN .env; real calls require explicit CLI/API user authorization",
             )
-            report.add("LLM", "INFO", "CONFIGURED / OPTIONAL; real calls disabled in Phase 7A")
+            report.add("LLM", "INFO", "CONFIGURED / OPTIONAL; core processing remains offline")
         else:
             report.add("LLM STATUS", "INFO", "NOT CONFIGURED / OPTIONAL")
             report.add("LLM", "INFO", "NOT CONFIGURED / OPTIONAL")

@@ -22,6 +22,51 @@ export interface Overview {
   formats: Record<string, number>;
 }
 
+export interface HealthResponse {
+  app: { name: string; version: string; apiVersion: string };
+  portableRuntime: { status: string; projectRoot: string };
+  registry: { status: string; path: string };
+  llm: {
+    status: "CONFIGURED" | "NOT_CONFIGURED" | string;
+    configured: boolean;
+    optional: boolean;
+    networkCalls: string;
+  };
+}
+
+export interface SemanticField {
+  source_column: string;
+  semantic_name: string;
+  description: string;
+  semantic_type: string;
+  unit: string | null;
+  aliases: string[];
+  confidence: number;
+}
+
+export interface SemanticMetadata {
+  display_name: string;
+  category: string;
+  description: string;
+  keywords: string[];
+  summary: string;
+  semanticFields?: SemanticField[];
+  confidence: number;
+  model: string;
+  prompt_version: string;
+  generated_at: string;
+  semantic_run_id: string;
+  input_hash: string;
+}
+
+export interface SemanticEnrichmentResponse {
+  assetId: string;
+  status: "enriched" | "reused";
+  reused: boolean;
+  providerCalls: number;
+  asset: AssetDetail;
+}
+
 export interface AssetSource {
   fileId: string;
   root: string;
@@ -192,7 +237,7 @@ export interface AssetDetail {
   extractorMetadata: Record<string, unknown> | null;
   profile: Record<string, unknown> | null;
   qualityIssues: QualityIssue[];
-  semantic: Record<string, unknown> | null;
+  semantic: SemanticMetadata | null;
   semanticHistory: Array<Record<string, unknown>>;
   createdAt: string;
 }

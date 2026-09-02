@@ -12,13 +12,13 @@ It reads `VERSION`, copies an explicit allowlist, writes
 `third-party-components.json`, and `licenses/`, and produces:
 
 ```text
-release/ChongZu-<version>-rc1-win-x64/
-release/ChongZu-<version>-rc1-win-x64.zip
-release/ChongZu-<version>-rc1-win-x64.zip.sha256.txt
+release/ChongZu-<version>-<suffix>-win-x64/
+release/ChongZu-<version>-<suffix>-win-x64.zip
+release/ChongZu-<version>-<suffix>-win-x64.zip.sha256.txt
 ```
 
 The builder checks `git status --porcelain` before assembly and requires a
-clean Git tree. The bundle contains the production standalone CPython, pinned
+clean Git tree. RC2 uses `-ArtifactSuffix rc2`; the bundle contains the production standalone CPython, pinned
 packages, OCR models, application source/scripts, docs, `frontend/dist`, and
 local license evidence. It excludes Git metadata, development venv/Node/uv,
 interpreter provisioning site-packages, pip/npm caches, tests, benchmark and
@@ -53,17 +53,18 @@ Chinese lexical Search, selected-table SQL, hostile SQL rejection, restart
 persistence, and source immutability. It never calls an LLM and does not use
 the repository's real research workspace as input.
 
-The current RC is deterministic only. `LLM_STATUS=NOT_CONFIGURED` is expected;
-Phase 7B remains blocked until the user supplies configuration and explicitly
-authorizes a separate real-provider acceptance. The known product boundaries
+The current RC is deterministic by default. `LLM_STATUS=NOT_CONFIGURED` is
+expected because `.env` is excluded; Phase 7B real-provider acceptance is
+recorded separately and Phase 7C exposes only explicit single-asset semantic
+enrichment. The known product boundaries
 are:
 
 - Search is lexical-only; there is no embedding/vector retrieval.
 - SQL is limited to explicitly selected `TableAsset` inputs and at most
   50,000 input rows.
 - PDF/image table reconstruction may require review.
-- Semantic enrichment is implemented, but real-provider acceptance has not
-  been run.
+- Semantic enrichment is single-asset and provider-optional; Qwen acceptance
+  remains not run.
 - LLM use is optional and is not configured in this RC.
 
 These are release limitations, not deterministic acceptance failures.

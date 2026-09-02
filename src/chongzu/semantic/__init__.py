@@ -4,7 +4,7 @@ The package owns the provider boundary, bounded input construction, prompt
 contracts, local validation, and semantic run persistence.  It never imports
 or calls a provider merely because the package is imported.  Phase 7A only
 executes :class:`FakeSemanticProvider`; the HTTP implementation is reserved
-for a separately authorized Phase 7B.
+for a separately authorized Phase 7B/7C request.
 """
 
 from .config import LLMConfig, SemanticConfig, load_semantic_config

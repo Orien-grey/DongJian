@@ -27,11 +27,13 @@ formal `process SOURCE` route: deterministic cleaning, bounded profiling,
 quality status/issues, and a queryable `catalog_assets` view. No LLM,
 embedding, or frontend is part of the core route. Phase 7A adds the offline
 semantic contract, bounded input builder, strict validator, Fake Provider, and
-versioned semantic run history; it does not enable real model calls.
+versioned semantic run history. Phase 7B accepts the configured
+OpenAI-compatible provider with synthetic assets; Phase 7C exposes only
+explicit single-asset semantic enrichment in the local UI.
 Phase 8 adds a localhost-only Python API, a self-contained React/Vite catalog
 frontend, asynchronous process tasks, and root-derived Windows start/stop
 launchers. The product UI is usable with `AI semantic: Not configured`; Phase
-7B is not run. Phase 9 adds offline lexical retrieval over catalog metadata and
+9 adds offline lexical retrieval over catalog metadata and
 TextChunks plus a read-only SQL workbench over explicitly selected normalized
 TableAssets. It does not add embeddings, a vector database, query rewriting,
 SQL generation, or any model call.
@@ -90,10 +92,9 @@ Phase 5B OCR/image route and is not yet a permanent default extractor.
 is a weak heuristic routing hint, not table ground truth.
 
 The current runtime reports `LLM STATUS = NOT CONFIGURED` when no `.env` exists.
-This is normal: extraction never calls DeepSeek, Qwen, OpenAI, a vision API, an
-embedding API, or a public endpoint/fallback. Phase 7A's HTTP adapter is
-infrastructure only and is hard-disabled until a separately authorized Phase
-7B.
+This is normal: extraction never calls an LLM, vision API, embedding API, or a
+public endpoint/fallback. Only an explicitly confirmed single-asset semantic
+request may use the configured OpenAI-compatible endpoint.
 
 ## Data safety and semantic boundary
 
@@ -108,7 +109,8 @@ infrastructure only and is hard-disabled until a separately authorized Phase
   profiles, and catalog metadata. Raw artifacts and source SHA-256 remain
   unchanged; `semantic_status` is `pending` until an explicit semantic pass.
 - `process` never calls the semantic provider. `semantic status` is read-only;
-  Phase 7A enrichment requires the explicit offline `--provider fake` switch.
+  semantic API requests are single-asset and explicitly confirmed; CLI real
+  calls require `--allow-real-provider`.
 - Semantic output is metadata/history only. It cannot rename physical columns,
   alter Parquet/text, resolve a quality issue, or change an asset ID.
 - The only future runtime network destination is an LLM base URL explicitly
@@ -239,7 +241,7 @@ verified by adversarial tests; the Registry connection is never exposed to
 user SQL.
 
 Phase 10.1 has a deterministic release-candidate path. `VERSION` remains
-`0.1.0`; the artifact name is `ChongZu-0.1.0-rc1-win-x64`.
+`0.1.0`; RC2 uses the artifact name `ChongZu-0.1.0-rc2-win-x64`.
 `scripts\build_release.ps1` requires a clean Git tree, assembles an explicit
 allowlist under `release\`, and writes the release manifest, third-party audit,
 license evidence, ZIP, and SHA-256 sidecar. The RC excludes the development
@@ -247,5 +249,5 @@ venv, uv, Node, npm/node_modules, interpreter provisioning tools, caches,
 tests, benchmark/acceptance data, real workspace state, and secrets.
 `scripts\run_phase10_acceptance.py` creates a synthetic corpus and validates
 the copied directory and extracted ZIP via the real Windows launcher and
-localhost API. Phase 7B remains `NOT RUN` and the normal product remains fully
-usable with `LLM_STATUS=NOT_CONFIGURED`.
+localhost API. Phase 7B/7C semantic acceptance uses synthetic assets and the
+normal release remains fully usable with `LLM_STATUS=NOT_CONFIGURED`.

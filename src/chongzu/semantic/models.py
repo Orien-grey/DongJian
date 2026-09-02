@@ -164,6 +164,7 @@ class SemanticResponse:
     model: str
     raw_size_bytes: int | None = None
     request_id: str | None = None
+    usage: Mapping[str, int | float] | None = None
 
 
 @dataclass(frozen=True)

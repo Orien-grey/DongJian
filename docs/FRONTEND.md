@@ -46,9 +46,11 @@ CSS, and HTML and is served by the Python backend.
   mapping, a plain SQL textarea, bounded results, execution time, and sandbox
   status. SQL is never generated automatically.
 
-The AI semantic tab is intentionally disabled in practice and says that a
-model is not configured. Search is lexical-only. Chat, RAG, SQL Agent, Vision,
-Embedding, and real model calls are not present.
+The AI semantic tab reports the current provider status. With no provider it
+says `尚未配置 AI 模型`; with a configured provider it offers a single-asset
+`AI 整理` action after an explicit summary/sample transmission confirmation.
+Search is lexical-only. Chat, RAG, SQL Agent, Vision, and Embedding are not
+present, and the process route never performs model calls.
 
 Search distinguishes three empty states: no query has been entered, a submitted
 query has no matching result, and the Catalog has not been populated. A text

@@ -22,7 +22,7 @@ class SemanticNotConfigured(RuntimeError):
 
 
 class RealSemanticProviderDisabled(RuntimeError):
-    """Phase 7A guard preventing all real endpoint calls."""
+    """Guard preventing real endpoint calls without explicit authorization."""
 
 
 @dataclass
@@ -42,6 +42,9 @@ class SemanticSummary:
     sent_chars: int = 0
     sampled_rows: int = 0
     input_truncated: int = 0
+    provider_calls: int = 0
+    request_payload_bytes: int = 0
+    response_payload_bytes: int = 0
     wall_time_ms: float = 0.0
     failures: list[dict[str, str]] = field(default_factory=list)
 
@@ -50,19 +53,30 @@ def semantic_status(project_root: Path | None = None) -> dict[str, str | bool]:
     try:
         config = load_semantic_config(project_root)
     except Exception:
-        # Optional configuration diagnostics must not turn into a network or
-        # doctor failure.  The detailed parse error is intentionally omitted
-        # from the public status line to avoid leaking configuration content.
-        config = SemanticConfig()
+        # Keep parse/validation failures distinguishable without echoing any
+        # .env value.  A malformed config never enables a network call.
+        return {
+            "provider": "configuration error",
+            "model": "not configured",
+            "llm_status": "INVALID_CONFIGURATION",
+            "network_calls": False,
+            "configuration_error": True,
+        }
     return {
-        "provider": "configured (Phase 7B disabled)" if config.configured else "not configured",
+        "provider": "configured" if config.configured else "not configured",
         "model": config.model if config.configured else "not configured",
         "llm_status": config.status,
         "network_calls": False,
+        "configuration_error": False,
     }
 
 
-def provider_for_name(name: str, config: SemanticConfig | None = None):
+def provider_for_name(
+    name: str,
+    config: SemanticConfig | None = None,
+    *,
+    allow_real_provider: bool = False,
+):
     normalized = name.casefold().replace("_", "-")
     if normalized == "fake":
         return FakeSemanticProvider()
@@ -70,12 +84,13 @@ def provider_for_name(name: str, config: SemanticConfig | None = None):
         selected = config or load_semantic_config()
         if not selected.configured:
             raise SemanticNotConfigured("Semantic enrichment is not configured.")
-        # The implementation is intentionally available for Phase 7B review,
-        # but this hard guard makes it impossible for Phase 7A tests/CLI to
-        # reach urllib or an external endpoint.
-        raise RealSemanticProviderDisabled(
-            "Real semantic provider execution is disabled in Phase 7A; no network calls are permitted."
-        )
+        if not allow_real_provider:
+            raise RealSemanticProviderDisabled(
+                "Real semantic provider requires the explicit --allow-real-provider authorization."
+            )
+        from .openai_compatible import OpenAICompatibleProvider
+
+        return OpenAICompatibleProvider(selected)
     raise ValueError(f"unknown semantic provider: {name}")
 
 
@@ -103,17 +118,23 @@ class SemanticRunner:
         workspace_root: Path = paths.WORKSPACE_ROOT,
         config_version: str = paths.SEMANTIC_CONFIG_VERSION,
         limits: SemanticInputLimits | None = None,
+        allow_real_provider: bool = False,
     ) -> None:
         self.registry = registry
         provider_name = str(getattr(provider, "name", provider.__class__.__name__)).casefold().replace("_", "-")
-        if provider_name in {"openai-compatible", "openai", "http"}:
+        if provider_name in {"openai-compatible", "openai", "http"} and not allow_real_provider:
             raise RealSemanticProviderDisabled(
-                "Real semantic provider execution is disabled in Phase 7A; no network calls are permitted."
+                "Real semantic provider requires the explicit --allow-real-provider authorization."
             )
         self.provider = provider
         self.workspace_root = Path(workspace_root).resolve()
         self.config_version = config_version
         self.limits = limits or SemanticInputLimits()
+
+    @staticmethod
+    def _provider_counter(provider: object, name: str) -> int:
+        value = getattr(provider, name, 0)
+        return int(value) if isinstance(value, (int, float)) else 0
 
     @property
     def provider_name(self) -> str:
@@ -177,6 +198,11 @@ class SemanticRunner:
                 raise ValueError("limit must be between 1 and 100000")
             rows = rows[:limit]
         summary = SemanticSummary(provider=self.provider_name, model=selected_model, source_root=source_root, assets_considered=len(rows))
+        calls_before = self._provider_counter(self.provider, "call_count")
+        if not calls_before:
+            calls_before = self._provider_counter(self.provider, "calls")
+        request_bytes_before = self._provider_counter(self.provider, "request_payload_bytes")
+        response_bytes_before = self._provider_counter(self.provider, "response_payload_bytes")
         for row in rows:
             current_asset_id = str(row["asset_id"])
             details = self.registry.catalog_asset_details(current_asset_id)
@@ -261,6 +287,16 @@ class SemanticRunner:
                     str(exc),
                 )
         summary.wall_time_ms = (time.perf_counter_ns() - started) / 1_000_000
+        calls_after = self._provider_counter(self.provider, "call_count")
+        if not calls_after:
+            calls_after = self._provider_counter(self.provider, "calls")
+        summary.provider_calls = max(0, calls_after - calls_before)
+        summary.request_payload_bytes = max(
+            0, self._provider_counter(self.provider, "request_payload_bytes") - request_bytes_before
+        )
+        summary.response_payload_bytes = max(
+            0, self._provider_counter(self.provider, "response_payload_bytes") - response_bytes_before
+        )
         return summary
 
 
@@ -275,6 +311,7 @@ def enrich_catalog(
     registry_path: Path | str | None = None,
     workspace_root: Path | str | None = None,
     prompt_version: str | None = None,
+    allow_real_provider: bool = False,
 ) -> SemanticSummary:
     normalized_provider = provider_name.casefold().replace("_", "-")
     if normalized_provider == "fake":
@@ -283,10 +320,15 @@ def enrich_catalog(
         provider = provider_for_name(provider_name)
     else:
         config = load_semantic_config()
-        provider = provider_for_name(provider_name, config)
+        provider = provider_for_name(provider_name, config, allow_real_provider=allow_real_provider)
     registry = Registry.open(registry_path)
     try:
-        runner = SemanticRunner(registry, provider, workspace_root=Path(workspace_root or paths.WORKSPACE_ROOT))
+        runner = SemanticRunner(
+            registry,
+            provider,
+            workspace_root=Path(workspace_root or paths.WORKSPACE_ROOT),
+            allow_real_provider=allow_real_provider,
+        )
         return runner.enrich(
             source=source,
             asset_id=asset_id,

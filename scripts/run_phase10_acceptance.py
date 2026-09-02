@@ -30,7 +30,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 RELEASE_ROOT = ROOT / "release"
 VERSION = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
-BUNDLE_NAME = f"ChongZu-{VERSION}-rc1-win-x64"
+BUNDLE_NAME = f"ChongZu-{VERSION}-rc2-win-x64"
 SOURCE_NAME = "接受 测试资料 中文 with spaces"
 WORK_ROOT = ROOT / "cache" / "temp" / "phase10-acceptance"
 DEFAULT_TIMEOUT = 30
@@ -324,6 +324,13 @@ def _assert_release_allowlist(bundle: Path) -> None:
             violations.append(relative.as_posix())
     if violations:
         raise AssertionError(f"release allowlist violation: {violations[:20]}")
+    frontend_text = "\n".join(
+        path.read_text(encoding="utf-8", errors="replace")
+        for path in (bundle / "frontend" / "dist").rglob("*")
+        if path.is_file() and path.suffix.casefold() in {".js", ".html"}
+    )
+    if "尚未配置 AI 模型" not in frontend_text or "semantic-enrich" not in frontend_text:
+        raise AssertionError("release frontend semantic no-config flow is missing")
     forbidden_strings = (
         r"E:\Desktop\ChongZu",
         "C:\\Users\\",
@@ -411,6 +418,15 @@ def _run_journey(bundle: Path, source: Path, *, label: str, assert_reuse: bool) 
         text_detail = _ok(base, f"/api/v1/assets/{text['assetId']}")
         assert table_detail["source"]["sha256"] and table_detail["artifacts"]["normalized"]
         assert text_detail["source"]["sha256"] and text_detail["artifacts"]["normalized"]
+        semantic_status, semantic_error = _json_request(
+            base,
+            f"/api/v1/assets/{records['assetId']}/semantic-enrich",
+            method="POST",
+            payload={},
+        )
+        assert semantic_status == 409, (label, semantic_status, semantic_error)
+        assert semantic_error["error"]["code"] == "SEMANTIC_NOT_CONFIGURED", semantic_error
+        assert "traceback" not in json.dumps(semantic_error).casefold()
         assert _ok(base, f"/api/v1/assets/{records['assetId']}/table-preview?limit=5")["rows"]
         assert "北京大学" in _ok(base, f"/api/v1/assets/{text['assetId']}/text-preview?limit=500")["text"]
 

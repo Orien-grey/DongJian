@@ -10,6 +10,7 @@ from dataclasses import dataclass
 import json
 import logging
 from pathlib import Path
+import threading
 import traceback
 from typing import Any, Mapping
 from urllib.parse import parse_qs, unquote, urlsplit
@@ -27,6 +28,7 @@ from chongzu.services import (
     SqlTimeoutError,
     SourceValidationError,
 )
+from chongzu.semantic.runner import SemanticRunner, provider_for_name
 
 
 APP_NAME = "ChongZu"
@@ -71,6 +73,7 @@ class BackendApp:
         workspace_root: Path | str | None = None,
         frontend_dist: Path | str | None = None,
         task_manager: ProcessTaskManager | None = None,
+        semantic_provider: object | None = None,
         logger: logging.Logger | None = None,
     ) -> None:
         self.project_root = Path(project_root or paths.PROJECT_ROOT).resolve()
@@ -85,6 +88,11 @@ class BackendApp:
             registry_path=self.registry_path,
             workspace_root=self.workspace_root,
         )
+        # The optional provider is a test seam only. Production constructs the
+        # configured provider for an explicit POST request; no process task
+        # or catalog read can invoke semantic enrichment implicitly.
+        self._semantic_provider_override = semantic_provider
+        self._semantic_lock = threading.Lock()
         self.logger = logger or logging.getLogger("chongzu.api")
 
     def close(self) -> None:
@@ -115,6 +123,107 @@ class BackendApp:
             "registry": {"status": registry_status, "path": "workspace/state/registry.duckdb"},
             "llm": llm,
         }
+
+    @staticmethod
+    def _semantic_failure(error_code: str) -> tuple[str, str, int]:
+        normalized = error_code.casefold()
+        if normalized == "timeout":
+            return "SEMANTIC_TIMEOUT", "AI semantic request timed out", 504
+        if normalized in {"connection_error", "http_408", "http_429"} or normalized.startswith("http_5"):
+            return "SEMANTIC_UNAVAILABLE", "AI semantic service is unavailable", 503
+        if normalized in {"http_401", "http_403"}:
+            return "SEMANTIC_AUTH_FAILED", "AI semantic service rejected authentication", 502
+        if normalized in {"malformed_json", "semantic_validation_failed"}:
+            return "SEMANTIC_INVALID_RESPONSE", "AI semantic service returned an invalid response", 502
+        return "SEMANTIC_PROVIDER_ERROR", "AI semantic request could not be completed", 502
+
+    def _semantic_enrich(self, asset_id: str, body: bytes) -> ApiResponse:
+        """Run exactly one user-triggered semantic request and publish its result."""
+
+        try:
+            config = load_semantic_config(self.project_root)
+            config.validate_for_use()
+        except Exception:
+            # Do not echo configuration details. In particular, this endpoint
+            # never returns or logs the API key from .env.
+            raise ApiError(
+                "SEMANTIC_NOT_CONFIGURED",
+                "AI semantic provider is not configured",
+                409,
+            )
+
+        if body:
+            value = self._body_object(body)
+            if value:
+                raise ApiError(
+                    "SEMANTIC_FORCE_NOT_ALLOWED",
+                    "semantic enrichment accepts no options; force remains CLI-only",
+                )
+
+        detail = self.catalog.asset_detail(asset_id)
+        if detail is None:
+            raise ApiError("asset_not_found", "asset was not found", 404)
+        asset_type = str(detail.get("assetType") or "")
+        if asset_type not in {"table", "text"}:
+            raise ApiError(
+                "SEMANTIC_ASSET_NOT_SUPPORTED",
+                "AI semantic enrichment supports only table and text assets",
+                409,
+            )
+
+        with self._semantic_lock:
+            provider = self._semantic_provider_override
+            if provider is None:
+                provider = provider_for_name(
+                    "openai-compatible",
+                    config,
+                    allow_real_provider=True,
+                )
+            registry = None
+            try:
+                from chongzu.registry import Registry
+
+                registry = Registry.open(self.registry_path)
+                summary = SemanticRunner(
+                    registry,
+                    provider,
+                    workspace_root=self.workspace_root,
+                    allow_real_provider=True,
+                ).enrich(asset_id=asset_id, asset_type=asset_type)
+            except ApiError:
+                raise
+            except Exception as exc:
+                # The response must remain a stable, secret-free API error;
+                # provider details are retained only in the semantic run.
+                raise ApiError(
+                    "SEMANTIC_PROVIDER_ERROR",
+                    "AI semantic request could not be completed",
+                    502,
+                ) from exc
+            finally:
+                if registry is not None:
+                    registry.close()
+
+        if summary.failed:
+            failure = summary.failures[0] if summary.failures else {}
+            code, message, status = self._semantic_failure(str(failure.get("error_code") or ""))
+            raise ApiError(code, message, status)
+        if not summary.enriched and not summary.reused:
+            raise ApiError("SEMANTIC_PROVIDER_ERROR", "AI semantic request produced no result", 502)
+
+        refreshed = self.catalog.asset_detail(asset_id)
+        if refreshed is None:
+            raise ApiError("asset_not_found", "asset was not found", 404)
+        return ApiResponse(
+            200,
+            {
+                "assetId": asset_id,
+                "status": "reused" if summary.reused else "enriched",
+                "reused": bool(summary.reused),
+                "providerCalls": summary.provider_calls,
+                "asset": refreshed,
+            },
+        )
 
     @staticmethod
     def _body_object(body: bytes) -> dict[str, Any]:
@@ -231,6 +340,8 @@ class BackendApp:
                 return ApiResponse(200, {"item": updated})
             if len(parts) >= 4 and parts[:3] == ["api", "v1", "assets"]:
                 asset_id = parts[3]
+                if len(parts) == 5 and parts[4] == "semantic-enrich" and method == "POST":
+                    return self._semantic_enrich(asset_id, body)
                 if len(parts) == 4 and method == "GET":
                     detail = self.catalog.asset_detail(asset_id)
                     if detail is None:

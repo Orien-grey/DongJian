@@ -1,9 +1,11 @@
 import type {
   AssetDetail,
   CatalogResponse,
+  HealthResponse,
   Overview,
   QualityResponse,
   SearchResponse,
+  SemanticEnrichmentResponse,
   SqlQueryResponse,
   SqlSchemaResponse,
   TablePreview,
@@ -46,11 +48,16 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  health: () => request<Record<string, unknown>>("/api/v1/health"),
+  health: () => request<HealthResponse>("/api/v1/health"),
   overview: () => request<Overview>("/api/v1/overview"),
   catalog: (params: URLSearchParams) => request<CatalogResponse>(`/api/v1/catalog?${params.toString()}`),
   search: (params: URLSearchParams) => request<SearchResponse>(`/api/v1/search?${params.toString()}`),
   asset: (assetId: string) => request<AssetDetail>(`/api/v1/assets/${encodeURIComponent(assetId)}`),
+  semanticEnrich: (assetId: string) =>
+    request<SemanticEnrichmentResponse>(`/api/v1/assets/${encodeURIComponent(assetId)}/semantic-enrich`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    }),
   tablePreview: (assetId: string, layer: "raw" | "normalized", limit: number, offset: number) =>
     request<TablePreview>(
       `/api/v1/assets/${encodeURIComponent(assetId)}/table-preview?layer=${layer}&limit=${limit}&offset=${offset}`,
