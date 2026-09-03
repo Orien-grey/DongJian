@@ -52,6 +52,9 @@ SEMANTIC_TEXT_PROMPT_VERSION = "text-semantic-v2"
 VISION_PIPELINE_VERSION = "phase-m1-vision-image"
 VISION_CONFIG_VERSION = "vision-json-v1"
 VISION_CONTRACT_VERSION = "vision-json-v1"
+VISION_PDF_PIPELINE_VERSION = "phase-m2-vision-scanned-pdf"
+VISION_PDF_CONFIG_VERSION = "vision-pdf-json-v1"
+AI_CONFIG_VERSION = "project-llm-v1"
 # Extraction identities must not change merely because the metadata registry
 # gains additive catalog tables.  Extractor/config versions remain the cache
 # invalidation boundary for raw extraction.
@@ -82,6 +85,10 @@ def _discover_project_root() -> Path:
 
 
 PROJECT_ROOT = _discover_project_root()
+
+CONFIG_ROOT = PROJECT_ROOT / "config"
+LLM_CONFIG_EXAMPLE_PATH = CONFIG_ROOT / "llm.example.json"
+LLM_CONFIG_PATH = CONFIG_ROOT / "llm.json"
 
 RUNTIME_ROOT = PROJECT_ROOT / "runtime"
 PYTHON_RUNTIME_ROOT = RUNTIME_ROOT / "python"
@@ -133,6 +140,7 @@ REGISTRY_PATH = STATE_ROOT / "registry.duckdb"
 
 CORE_DIRECTORIES = {
     "project_root": PROJECT_ROOT,
+    "config": CONFIG_ROOT,
     "runtime": RUNTIME_ROOT,
     "runtime_python": PYTHON_RUNTIME_ROOT,
     "runtime_python_standalone": PYTHON_RUNTIME_DIR,

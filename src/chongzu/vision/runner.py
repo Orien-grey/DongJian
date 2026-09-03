@@ -22,6 +22,7 @@ from uuid import uuid4
 from chongzu import paths
 from chongzu.assets import (
     AssetQualityStatus,
+    BoundingBox,
     ChunkProvenance,
     QualityIssue,
     QualityIssueSeverity,
@@ -93,6 +94,11 @@ class VisionExtractionResult:
     extraction_run_id: str
     extraction_identity: str
     route_reason: str
+    pipeline_version: str = VISION_PIPELINE_VERSION
+    configuration_version: str = VISION_CONFIG_VERSION
+    pages_attempted: int = 0
+    pages_succeeded: int = 0
+    pages_failed: int = 0
     status: str = "successful"
     text_assets: list[TextAsset] = field(default_factory=list)
     text_chunks: list[TextChunk] = field(default_factory=list)
@@ -141,6 +147,12 @@ class VisionExtractionSummary:
     registry_write_ms: float = 0.0
     discovery_scan_ms: float = 0.0
     wall_time_ms: float = 0.0
+    pages_considered: int = 0
+    pages_attempted: int = 0
+    pages_succeeded: int = 0
+    pages_failed: int = 0
+    pdfs_considered: int = 0
+    pdfs_attempted: int = 0
 
     def benchmark_metrics(self) -> dict[str, float | int | str]:
         seconds = self.wall_time_ms / 1000.0 if self.wall_time_ms else 0.0
@@ -161,6 +173,9 @@ class VisionExtractionSummary:
             "artifact write ms": self.artifact_write_ms,
             "registry write ms": self.registry_write_ms,
             "wall time ms": self.wall_time_ms,
+            "pages": self.pages_attempted,
+            "pages succeeded": self.pages_succeeded,
+            "pages failed": self.pages_failed,
         }
 
 
@@ -188,6 +203,15 @@ def _source_from_row(row: dict[str, Any], workspace_root: Path) -> StructuredSou
 def _provider_value(provider: VisionProvider, name: str, default: str) -> str:
     value = getattr(provider, name, default)
     return value if isinstance(value, str) and value else default
+
+
+def _safe_provider_error(provider: VisionProvider, value: object) -> str:
+    message = str(value).strip()
+    config = getattr(provider, "config", None)
+    secret = getattr(config, "api_key", "") if config is not None else ""
+    if isinstance(secret, str) and secret:
+        message = message.replace(secret, "[REDACTED]")
+    return message[:4_000]
 
 
 def vision_extraction_identity(source: StructuredSource, provider: VisionProvider) -> str:
@@ -253,16 +277,25 @@ def _write_table_asset(
     provider_name: str,
     provider_model: str,
     provider_contract: str,
+    source_kind: SourceKind = SourceKind.IMAGE,
+    page_number: int | None = None,
+    bbox: BoundingBox | None = None,
+    source_locator: str | None = None,
+    asset_index: int | None = None,
+    render_metadata: dict[str, Any] | None = None,
+    pipeline_version: str = VISION_PIPELINE_VERSION,
+    configuration_version: str = VISION_CONFIG_VERSION,
 ) -> None:
     width = len(table.columns)
+    locator = source_locator or f"image:vision:table:{table_index}:contract:{VISION_CONTRACT_VERSION}"
     table_id = make_table_id(
         file_id=source.file_id,
         content_sha256=source.content_sha256,
         extractor=VISION_EXTRACTOR,
         extractor_version=VISION_EXTRACTOR_VERSION,
-        source_kind=SourceKind.IMAGE,
-        source_locator=f"image:vision:table:{table_index}:contract:{VISION_CONTRACT_VERSION}",
-        asset_index=table_index,
+        source_kind=source_kind,
+        source_locator=locator,
+        asset_index=table_index if asset_index is None else asset_index,
     )
     target_dir = source.workspace_root / "artifacts" / "tables" / table_id
     raw_path = target_dir / "raw.parquet"
@@ -275,6 +308,10 @@ def _write_table_asset(
     result.timings.artifact_write_ms += write_parquet_atomic(raw_frame, raw_path)
     result.timings.artifact_write_ms += write_parquet_atomic(normalized_frame, normalized_path)
     quality_warnings = ["duplicate_column_names"] if duplicate else []
+    if not table.rows:
+        quality_warnings.append("empty_table")
+    if any(not str(column).strip() for column in table.columns):
+        quality_warnings.append("empty_column_header")
     metadata = {
         "contract_version": VISION_CONTRACT_VERSION,
         "file_id": source.file_id,
@@ -283,7 +320,11 @@ def _write_table_asset(
         "extraction_run_id": result.extraction_run_id,
         "extractor": VISION_EXTRACTOR,
         "extractor_version": VISION_EXTRACTOR_VERSION,
-        "source_kind": SourceKind.IMAGE.value,
+        "source_kind": source_kind.value,
+        "page_number": page_number,
+        "source_locator": locator,
+        "pipeline_version": pipeline_version,
+        "configuration_version": configuration_version,
         "source_range": {
             "row_start": 0,
             "row_end": len(table.rows),
@@ -291,7 +332,9 @@ def _write_table_asset(
             "column_end": width,
             "coordinate_system": "zero-based half-open model table coordinates",
         },
+        "bbox": bbox.__dict__ if bbox else None,
         "image_identity": image_identity,
+        "render_metadata": render_metadata,
         "provider": provider_name,
         "provider_contract": provider_contract,
         "model": provider_model,
@@ -315,11 +358,11 @@ def _write_table_asset(
         extraction_run_id=result.extraction_run_id,
         extractor=VISION_EXTRACTOR,
         extractor_version=VISION_EXTRACTOR_VERSION,
-        source_kind=SourceKind.IMAGE,
+        source_kind=source_kind,
         source_relative_path=source.relative_path,
         sheet_name=None,
-        page_number=None,
-        bbox=None,
+        page_number=page_number,
+        bbox=bbox,
         source_row_start=0,
         source_row_end=len(table.rows),
         source_column_start=0,
@@ -341,7 +384,11 @@ def _write_table_asset(
                 source,
                 table_id,
                 "duplicate_column_names",
-                {"column_mapping": column_mapping, "source_relative_path": source.relative_path},
+                {
+                    "column_mapping": column_mapping,
+                    "source_relative_path": source.relative_path,
+                    "page_number": page_number,
+                },
             )
         )
 
@@ -355,6 +402,15 @@ def _write_text_asset(
     provider_name: str,
     provider_model: str,
     provider_contract: str,
+    source_kind: SourceKind = SourceKind.IMAGE,
+    page_number: int | None = None,
+    bbox: BoundingBox | None = None,
+    source_locator: str | None = None,
+    asset_index: int = 0,
+    section: str | None = None,
+    render_metadata: dict[str, Any] | None = None,
+    pipeline_version: str = VISION_PIPELINE_VERSION,
+    configuration_version: str = VISION_CONFIG_VERSION,
 ) -> None:
     segments: list[str] = []
     if document.title.strip():
@@ -364,14 +420,15 @@ def _write_text_asset(
     normalized = normalize_text(raw_text)
     if not normalized.strip():
         return
+    locator = source_locator or f"image:vision:text:contract:{VISION_CONTRACT_VERSION}"
     text_asset_id = make_text_asset_id(
         file_id=source.file_id,
         content_sha256=source.content_sha256,
         extractor=VISION_EXTRACTOR,
         extractor_version=VISION_EXTRACTOR_VERSION,
-        source_kind=SourceKind.IMAGE,
-        source_locator=f"image:vision:text:contract:{VISION_CONTRACT_VERSION}",
-        asset_index=0,
+        source_kind=source_kind,
+        source_locator=locator,
+        asset_index=asset_index,
     )
     metadata = {
         "contract_version": VISION_CONTRACT_VERSION,
@@ -381,8 +438,13 @@ def _write_text_asset(
         "extraction_run_id": result.extraction_run_id,
         "extractor": VISION_EXTRACTOR,
         "extractor_version": VISION_EXTRACTOR_VERSION,
-        "source_kind": SourceKind.IMAGE.value,
+        "source_kind": source_kind.value,
+        "page_number": page_number,
+        "source_locator": locator,
+        "pipeline_version": pipeline_version,
+        "configuration_version": configuration_version,
         "image_identity": image_identity,
+        "render_metadata": render_metadata,
         "provider": provider_name,
         "provider_contract": provider_contract,
         "model": provider_model,
@@ -409,10 +471,10 @@ def _write_text_asset(
         extraction_run_id=result.extraction_run_id,
         extractor=VISION_EXTRACTOR,
         extractor_version=VISION_EXTRACTOR_VERSION,
-        source_kind=SourceKind.IMAGE,
-        page_number=None,
-        section="vision-image",
-        bbox=None,
+        source_kind=source_kind,
+        page_number=page_number,
+        section=section or ("vision-image" if page_number is None else f"vision-pdf-page-{page_number}"),
+        bbox=bbox,
         text=normalized,
         language=None,
         created_at=utc_now(),
@@ -445,9 +507,9 @@ def _write_text_asset(
                     extraction_run_id=result.extraction_run_id,
                     extractor=VISION_EXTRACTOR,
                     extractor_version=VISION_EXTRACTOR_VERSION,
-                    source_kind=SourceKind.IMAGE,
-                    page_number=None,
-                    section="vision-image",
+                    source_kind=source_kind,
+                    page_number=page_number,
+                    section=asset.section,
                 ),
             )
         )
@@ -541,7 +603,7 @@ def _extract_one(
     except VisionContractError as exc:
         result.status = "failed"
         result.error_category = "vision_contract_error"
-        result.error_message = str(exc)
+        result.error_message = _safe_provider_error(provider, exc)
         result.text_assets.clear()
         result.text_chunks.clear()
         result.table_assets.clear()
@@ -549,7 +611,7 @@ def _extract_one(
     except VisionProviderError as exc:
         result.status = "failed"
         result.error_category = f"vision_provider_{exc.code}"
-        result.error_message = str(exc)
+        result.error_message = _safe_provider_error(provider, exc)
         result.text_assets.clear()
         result.text_chunks.clear()
         result.table_assets.clear()
@@ -557,7 +619,7 @@ def _extract_one(
     except Exception as exc:  # one image must not poison the directory
         result.status = "failed"
         result.error_category = "vision_extraction_error"
-        result.error_message = str(exc)
+        result.error_message = _safe_provider_error(provider, exc)
         result.text_assets.clear()
         result.text_chunks.clear()
         result.table_assets.clear()

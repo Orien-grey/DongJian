@@ -91,10 +91,11 @@ Phase 5B OCR/image route and is not yet a permanent default extractor.
 `possible_table_candidate`
 is a weak heuristic routing hint, not table ground truth.
 
-The current runtime reports `LLM STATUS = NOT CONFIGURED` when no `.env` exists.
-This is normal: extraction never calls an LLM, vision API, embedding API, or a
-public endpoint/fallback. Only an explicitly confirmed single-asset semantic
-request may use the configured OpenAI-compatible endpoint.
+The current runtime reports `LLM STATUS = NOT CONFIGURED` when
+`config/llm.json` is missing or blank. This is normal: extraction never calls
+an LLM, vision API, embedding API, or a public endpoint/fallback. Only an
+explicitly configured and selected operation may use the configured
+OpenAI-compatible endpoint.
 
 ## Data safety and semantic boundary
 
@@ -134,7 +135,7 @@ See [Architecture](docs/ARCHITECTURE.md), [Data model](docs/DATA_MODEL.md),
 | `frontend/dist/` | Generated self-contained production UI; ignored in Git but required in a release bundle |
 | `tests/` | Automated tests and synthetic fixtures only |
 | `.env.example` | Blank provider-neutral semantic configuration example; `.env` is ignored |
-| `config/` | Legacy JSON example for documentation only; real files are ignored |
+| `config/` | Directly editable portable AI config (`llm.json`) and blank tracked template (`llm.example.json`) |
 | `scripts/` | Windows environment, bootstrap, doctor, and launcher scripts |
 | `docs/` | Architecture, contracts, roadmap, UI, and runtime records |
 | `runtime/` | Standalone CPython, production packages, dev venv, and uv payloads; ignored |

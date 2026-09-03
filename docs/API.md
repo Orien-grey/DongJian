@@ -1,6 +1,6 @@
 # Local API v1
 
-Phases 8 and 9 ship a small localhost API implemented with Python's standard
+Phases 8, 9, and Vision M2 ship a small localhost API implemented with Python's standard
 library `ThreadingHTTPServer`. It binds to `127.0.0.1` by default on port
 `18765`; it is not a network service and does not listen on `0.0.0.0`.
 
@@ -14,6 +14,9 @@ browser contract.
 | Method | Path | Purpose |
 | --- | --- | --- |
 | GET | `/api/v1/health` | App, portable runtime, registry, and optional LLM status. No key is returned. |
+| GET | `/api/v1/settings/ai` | Project-local AI status and editable fields; never returns the key. |
+| PUT | `/api/v1/settings/ai` | Atomically write `config/llm.json` from the Settings page. |
+| POST | `/api/v1/settings/ai/test` | Explicit connection test; does not run automatically during extraction. |
 | GET | `/api/v1/overview` | File, asset, quality, semantic-pending, and format counts. |
 | GET | `/api/v1/catalog` | Metadata list with `type`, `quality`, `format`, `q`, `limit`, `offset`. |
 | GET | `/api/v1/assets/{asset-id}` | Unified asset metadata, provenance, profile, issues, and semantic history. |
@@ -21,6 +24,9 @@ browser contract.
 | GET | `/api/v1/assets/{asset-id}/table-preview` | Bounded Parquet preview with `layer=raw\|normalized`, `limit`, `offset`. |
 | GET | `/api/v1/assets/{asset-id}/text-preview` | Bounded text window with `limit`, `offset`. |
 | GET | `/api/v1/search` | Offline lexical search with `q`, `type`, `format`, `quality`, `match`, `limit`, `offset`. |
+| POST | `/api/v1/analysis/context` | Bounded metadata, schema, samples, profiling, chunks, and provenance for selected assets. |
+| POST | `/api/v1/analysis/search` | Thin adapter over the existing local lexical Search service. |
+| POST | `/api/v1/analysis/sql` | Thin adapter over the existing bounded read-only SQL service. |
 | POST | `/api/v1/query/schema` | Return aliases and bounded schemas for explicitly selected table asset IDs. |
 | POST | `/api/v1/query/sql` | Execute one bounded read-only SQL statement over the selected temporary relations. |
 | GET | `/api/v1/quality/issues` | Review queue with `status`, `severity`, `asset_id`, `limit`, `offset`. |
@@ -84,7 +90,8 @@ network.
 `POST /process` never runs a subprocess or blocks on extraction. A bounded
 single-worker `ProcessTaskManager` calls the existing `process_source()` core
 function directly. It receives stage callbacks for `scan`, `extract`, `clean`,
-`profile`, and `catalog`, and exposes `queued`, `running`, `succeeded`,
+`profile`, and `catalog`; explicit Vision PDF work additionally reports page
+substages and current page. It exposes `queued`, `running`, `succeeded`,
 `failed`, and reserved `cancelled` states. A task failure is isolated from
 the files and assets already handled by the core pipeline.
 
@@ -117,3 +124,11 @@ never returns the API key, and maps provider failures to stable codes such as
 `SEMANTIC_AUTH_FAILED`, and `SEMANTIC_INVALID_RESPONSE`. It does not expose
 `force` or support bulk enrichment. No vision, embedding, public endpoint,
 model download, pip, or uv operation is performed by the local product.
+
+The analysis routes do not add chat, RAG, embeddings, or a vector database.
+`context` accepts at most eight explicitly selected TableAsset/TextAsset values;
+table context includes schema, row count, sample rows, profiling, and
+provenance, while text context includes a bounded text excerpt, chunks, and
+provenance. Search and SQL retain their existing local bounds and SQL remains
+limited to one read-only `SELECT`/`WITH ... SELECT` statement over selected
+temporary relations.

@@ -130,6 +130,7 @@ $directoryCopies = @(
     @{ Source = 'runtime\python\cpython-3.11.15-windows-x86_64-none'; Destination = 'runtime\python\cpython-3.11.15-windows-x86_64-none' },
     @{ Source = 'runtime\packages'; Destination = 'runtime\packages' },
     @{ Source = 'runtime\models'; Destination = 'runtime\models' },
+    @{ Source = 'config\llm.example.json'; Destination = 'config\llm.example.json' },
     @{ Source = 'scripts\env.ps1'; Destination = 'scripts\env.ps1' },
     @{ Source = 'scripts\chongzu.ps1'; Destination = 'scripts\chongzu.ps1' },
     @{ Source = 'scripts\doctor.ps1'; Destination = 'scripts\doctor.ps1' },
@@ -141,6 +142,12 @@ foreach ($item in $directoryCopies) {
         -Source (Join-Path $repoRoot $item.Source) `
         -Destination (Join-Path $bundlePath $item.Destination)
 }
+
+# The portable product always starts with a directly editable, secret-free
+# project configuration.  Never copy a developer's ignored config/llm.json.
+Copy-RequiredPath `
+    -Source (Join-Path $repoRoot 'config\llm.example.json') `
+    -Destination (Join-Path $bundlePath 'config\llm.json')
 
 if (-not (Test-Path -LiteralPath (Join-Path $bundlePath 'frontend\dist\index.html') -PathType Leaf)) {
     throw 'frontend/dist/index.html is required; run npm run build before packaging'
@@ -238,6 +245,11 @@ $manifest = [ordered]@{
         provisioning_uv = 'excluded from release; provisioning-only'
         development_venv = 'excluded from release'
         development_node = 'excluded from release'
+    }
+    ai_configuration = [ordered]@{
+        project_file = 'config/llm.json'
+        example_file = 'config/llm.example.json'
+        api_key_policy = 'never included in release manifest, logs, tasks, or registry'
     }
     llm_status = 'NOT_CONFIGURED'
     third_party_manifest = [ordered]@{

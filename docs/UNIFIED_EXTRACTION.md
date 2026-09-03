@@ -1,4 +1,4 @@
-# Unified extraction and processing (Phase 5B/6)
+# Unified extraction and processing (Phase 5B/6 + Vision M2)
 
 The expert extraction entry point is:
 
@@ -41,6 +41,32 @@ weak table hint into a table by itself.
 
 ## Image and scanned-PDF route
 
+The default/local route above remains offline. When the user explicitly selects
+`ai_vision` and project `config/llm.json` is complete with
+`vision_enabled=true`, the existing native PDF route still runs first. Only
+pages marked by the PyMuPDF profile as clearly image-only are rendered locally
+and sent one page at a time to the OpenAI-compatible Vision contract:
+
+```text
+scanned PDF page -> local PNG render -> Vision JSON -> strict validator
+                 -> existing TextAsset/TableAsset -> deterministic cleaning
+```
+
+Native-text pages are never resent to Vision. A page produces at most one
+user-visible Vision TextAsset; all useful text returned for that page is
+aggregated into its TextChunks. Vision table output is bounded and validated
+for shape, scalar values, headers, rows, cells, and size before publication.
+The provider supplies neither file identity nor provenance: the local runner
+injects file ID, source SHA-256, page, extraction run, model/contract, and render
+metadata into the existing asset/artifact contracts.
+
+The process task reports `vision_extraction` substages
+`inspecting_pdf`, `rendering_page`, `calling_model`, `validating_response`, and
+`writing_assets`, followed by `cleaning_assets`. Cancellation stops subsequent
+page calls, recovers any running Registry marker, and retains committed page
+results. A malformed or failed page records a structured issue and lets later
+pages continue.
+
 RapidOCR output is converted immediately to the internal `OCRBlock` contract:
 
 ```text
@@ -62,6 +88,11 @@ PDF pages are routed independently from the Phase 4A profile:
 | Reliable native text | PyMuPDF TextAsset + native img2table candidate |
 | No reliable native text | PyMuPDF render + RapidOCR TextAsset + image table candidate |
 | Mixed PDF | Apply the two rules page by page |
+
+With Vision explicitly selected, the no-native-text row becomes
+`PyMuPDF render + Vision TextAsset/TableAsset`; local OCR/img2table is not run
+for those image/PDF targets. With Vision disabled, the RapidOCR/img2table
+fallback remains the route.
 
 One scanned page does not cause a native page to be OCR'd. All resulting assets
 retain the same `file_id` and source SHA-256, with page/image provenance and
@@ -85,7 +116,9 @@ atomic and remain below `workspace/`.
 Each implemented route has its own content/version identity. A second
 `extract SOURCE` therefore reuses scan facts, native PDF facts, native table
 candidates, OCR TextAssets, image TableAssets, and TXT assets independently.
-`--force` republishes the selected route identities.
+`--force` republishes the selected route identities. Vision PDF identities also
+include the render and provider contract versions, so a changed source or
+configuration does not silently reuse a previous page result.
 Because one file can have several independent routes, the unified
 `Reused extraction` value is a route-stage count and can exceed the file count.
 
@@ -154,12 +187,12 @@ model download. It does not modify the source PDF or page PNGs.
 
 ## Offline and LLM boundary
 
-Core extraction uses only project-local Python, packages, OCR models, and
+Core/local extraction uses only project-local Python, packages, OCR models, and
 DuckDB/Parquet. Cleaning, Catalog, and the Phase 7A Fake Provider use only
 local code and already-published artifacts. There is no `pip`, `uv sync`,
 Hugging Face, HTTP OCR, public endpoint, or automatic model fallback during
-these routes. With no `.env`, doctor reports `LLM STATUS: NOT CONFIGURED /
-OPTIONAL`; this is normal and does not fail doctor or process. Core routes make
-no DeepSeek, Qwen, OpenAI, vision, or embedding request. Phase 7B acceptance
-used only two explicitly authorized synthetic requests; Phase 7C permits only
-an explicit, confirmed single-asset semantic action.
+these routes. With a missing or blank `config/llm.json`, doctor reports `LLM
+STATUS: NOT CONFIGURED / OPTIONAL`; this is normal and does not fail doctor or
+process. Local routes make no DeepSeek, Qwen, OpenAI, Vision, or embedding
+request. Real Vision is an explicit user-selected route only; this phase uses
+mocked deterministic providers and does not claim Qwen acceptance.

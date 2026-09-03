@@ -20,7 +20,8 @@ The current package is `src/chongzu/semantic/`:
 | --- | --- |
 | `models.py` | `SemanticRequest`, `SemanticResponse`, validated metadata contracts and hashes. |
 | `provider.py` | Provider-neutral protocol and safe error taxonomy. |
-| `config.py` | Project-root `.env` parser and optional status. |
+| `config.py` | Provider-neutral values and optional status parsing. |
+| `settings.py` | Directly editable project config plus legacy DPAPI/`.env` compatibility sources. |
 | `prompts.py` | Versioned prompt sections and output contracts. |
 | `input_builder.py` | Normalized-artifact sampling, truncation, and audit metadata. |
 | `validator.py` | Strict local JSON/type/range/column validation. |
@@ -43,7 +44,29 @@ quality issue, or change an asset ID.
 
 ## Configuration and status
 
-The only future runtime configuration source is the project-root `.env`:
+The portable runtime reads one directly editable project file first:
+`config/llm.json`. The tracked `config/llm.example.json` is the blank template
+copied into a release as `config/llm.json`.
+
+```json
+{
+  "base_url": "",
+  "api_key": "",
+  "model": "",
+  "timeout_seconds": 120,
+  "vision_enabled": false
+}
+```
+
+The Settings page reads and writes this same file. The encrypted DPAPI settings
+snapshot and project-root `.env` are retained only as legacy compatibility
+sources when `config/llm.json` is absent. Precedence is:
+
+```text
+config/llm.json > legacy DPAPI snapshot > legacy .env > offline
+```
+
+The legacy `.env` form remains:
 
 ```text
 LLM_BASE_URL=
@@ -53,9 +76,10 @@ LLM_TIMEOUT_SECONDS=60
 LLM_MAX_RETRIES=2
 ```
 
-`.env.example` contains no secret and `.env` is ignored by Git. The tracked
-`config/llm.example.json` is a legacy documentation example only; it is not an
-implicit runtime configuration source. With missing values:
+`.env.example` contains no secret and `.env` is ignored by Git. `api_key` is
+never returned in API status, task payloads, Registry metadata, release
+manifests, logs, or technical error details. With missing or blank project
+values the product remains fully offline:
 
 ```text
 Provider: not configured
@@ -67,7 +91,9 @@ Network calls: disabled
 Doctor reports `LLM: NOT CONFIGURED / OPTIONAL` through its historical
 `LLM STATUS` label and remains successful. `semantic enrich` without
 configuration prints `Semantic enrichment is not configured.` and performs no
-request. A real CLI call requires both configured `.env` values and the
+request. `vision_enabled=false` permits text Semantic/Analysis only; `true`
+permits Vision only when the user explicitly selects the Vision process mode.
+A real CLI call requires configured values and the
 explicit `--allow-real-provider` authorization. The UI requires a configured
 provider and an explicit confirmation before its single-asset endpoint sends a
 bounded request.

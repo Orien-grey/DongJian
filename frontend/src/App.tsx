@@ -156,7 +156,7 @@ function App() {
   const [overview, setOverview] = useState<Overview>(EMPTY_OVERVIEW);
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [aiSettings, setAiSettings] = useState<AISettings | null>(null);
-  const [aiForm, setAiForm] = useState({ baseUrl: "", apiKey: "", model: "", timeout: "60" });
+  const [aiForm, setAiForm] = useState({ baseUrl: "", apiKey: "", model: "", timeout: "120", visionEnabled: false });
   const [aiBusy, setAiBusy] = useState(false);
   const [aiMessage, setAiMessage] = useState("");
   const [aiMessageKind, setAiMessageKind] = useState<"" | "success" | "error">("");
@@ -230,6 +230,7 @@ function App() {
         baseUrl: result.settings.baseUrl,
         model: result.settings.model,
         timeout: String(result.settings.timeout),
+        visionEnabled: result.settings.visionEnabled,
         apiKey: "",
       }));
     } catch (cause) {
@@ -503,17 +504,18 @@ function App() {
     setAiMessage("");
     setAiMessageKind("");
     try {
-      const payload: { baseUrl: string; apiKey?: string; model: string; timeout: number } = {
+      const payload: { baseUrl: string; apiKey?: string; model: string; timeout: number; visionEnabled: boolean } = {
         baseUrl: aiForm.baseUrl,
         model: aiForm.model,
         timeout: Number(aiForm.timeout),
+        visionEnabled: aiForm.visionEnabled,
       };
       if (aiForm.apiKey.trim()) payload.apiKey = aiForm.apiKey;
       const saved = await api.saveAiSettings(payload);
       setAiSettings(saved.settings);
-      setAiForm((current) => ({ ...current, baseUrl: saved.settings.baseUrl, model: saved.settings.model, timeout: String(saved.settings.timeout), apiKey: "" }));
+      setAiForm((current) => ({ ...current, baseUrl: saved.settings.baseUrl, model: saved.settings.model, timeout: String(saved.settings.timeout), visionEnabled: saved.settings.visionEnabled, apiKey: "" }));
       await refreshHealth();
-      setAiMessage("配置已保存；模型仍需测试后才会启用。");
+      setAiMessage("配置已保存；文本 Semantic/Analysis 可按配置使用，Vision 仅在勾选并明确选择后使用。");
       setAiMessageKind("success");
       if (testAfterSave) {
         const tested = await api.testAiConnection();
@@ -564,7 +566,7 @@ function App() {
         {page === "detail" && !selected ? <EmptyState title="正在加载资产" body="正在读取本地目录与画像信息。" /> : null}
       </main>
 
-      {showProcess ? <ProcessDialog source={taskSource} onSource={setTaskSource} visionMode={taskVisionMode} onVisionMode={setTaskVisionMode} visionEnabled={health?.llm.enabled === true} onClose={() => setShowProcess(false)} onSubmit={startProcess} /> : null}
+      {showProcess ? <ProcessDialog source={taskSource} onSource={setTaskSource} visionMode={taskVisionMode} onVisionMode={setTaskVisionMode} visionEnabled={health?.llm.visionEnabled === true} onClose={() => setShowProcess(false)} onSubmit={startProcess} /> : null}
       {showSemanticConfirm && selected ? <SemanticConfirmDialog assetName={selected.displayName} onCancel={() => setShowSemanticConfirm(false)} onConfirm={() => void confirmSemanticEnrichment()} /> : null}
     </div>
   );
@@ -575,6 +577,9 @@ function NavButton({ active, onClick, children }: { active: boolean; onClick: ()
 }
 
 function aiStatusLabel(settings: AISettings | null): string {
+  if (settings?.source === "project" && settings.configured) {
+    return settings.visionEnabled ? "project config configured; Vision enabled" : "project config configured; text AI only";
+  }
   if (!settings) return "正在读取配置";
   return {
     NOT_CONFIGURED: "未配置，完全离线",
@@ -589,26 +594,34 @@ function aiStatusLabel(settings: AISettings | null): string {
 
 function SettingsPage({ settings, form, busy, message, messageKind, onForm, onSave, onTest }: {
   settings: AISettings | null;
-  form: { baseUrl: string; apiKey: string; model: string; timeout: string };
+  form: { baseUrl: string; apiKey: string; model: string; timeout: string; visionEnabled: boolean };
   busy: boolean;
   message: string;
   messageKind: "" | "success" | "error";
-  onForm: (value: { baseUrl: string; apiKey: string; model: string; timeout: string }) => void;
+  onForm: (value: { baseUrl: string; apiKey: string; model: string; timeout: string; visionEnabled: boolean }) => void;
   onSave: () => void;
   onTest: () => void;
 }) {
-  const configuredSource = settings?.source === "env" ? "当前来自 .env 高级 fallback；保存此页后将优先使用 UI 配置。" : "配置保存在当前项目 workspace/state，复制或迁移项目时随项目移动。";
+  const configuredSource = settings?.source === "project"
+    ? `Project config: ${settings.configPath || "config/llm.json"}`
+    : settings?.source === "env"
+      ? "Legacy .env fallback; saving this page writes project config/llm.json."
+      : settings?.source === "ui"
+        ? "Legacy DPAPI settings are read only for compatibility migration."
+        : "No project AI configuration; the application remains offline.";
   return <section className="page-section"><div className="page-heading"><div><div className="eyebrow">SETTINGS</div><h1>设置</h1><p className="heading-note">AI 模型是可选能力；文件扫描、提取、清洗和查询始终可以离线运行。</p></div></div>
     <section className="panel settings-panel"><PanelTitle title="AI 模型" /><div className="settings-status">状态：<strong>{aiStatusLabel(settings)}</strong>{settings?.apiKeyConfigured ? " · API Key 已保存" : " · 未保存 API Key"}</div>
       <p className="settings-note">{configuredSource}</p>
       <div className="settings-form">
+        <label className="settings-field"><span className="field-label">Vision extraction</span><input type="checkbox" checked={form.visionEnabled} onChange={(event) => onForm({ ...form, visionEnabled: event.target.checked })} /><small>vision_enabled=true permits JPG/PNG and clearly scanned PDF page extraction.</small></label>
+        <p className="settings-note">Not configured: fully offline. Configured with Vision disabled: text Semantic/Analysis only. Vision enabled: visual extraction is allowed when explicitly selected.</p>
         <label className="settings-field"><span className="field-label">Base URL</span><input value={form.baseUrl} onChange={(event) => onForm({ ...form, baseUrl: event.target.value })} placeholder="https://example.com/v1" autoComplete="url" /><small>OpenAI-compatible 服务地址；不会自动访问公共服务。</small></label>
-        <label className="settings-field"><span className="field-label">API Key</span><input type="password" value={form.apiKey} onChange={(event) => onForm({ ...form, apiKey: event.target.value })} placeholder={settings?.apiKeyConfigured ? "留空保持已保存密钥" : "输入 API Key"} autoComplete="new-password" /><small>仅在本次保存时提交；项目文件只保存 Windows DPAPI 加密结果，界面不会回显密钥。</small></label>
+        <label className="settings-field"><span className="field-label">API Key</span><input type="password" value={form.apiKey} onChange={(event) => onForm({ ...form, apiKey: event.target.value })} placeholder={settings?.apiKeyConfigured ? "留空保持已保存密钥" : "输入 API Key"} autoComplete="new-password" /><small>保存到 project config/llm.json；API Key 不会回显，也不会写入 Registry、任务或日志。</small></label>
         <label className="settings-field"><span className="field-label">Model</span><input value={form.model} onChange={(event) => onForm({ ...form, model: event.target.value })} placeholder="qwen3.6-35b-a3b" /></label>
         <label className="settings-field"><span className="field-label">Timeout（秒）</span><input type="number" min="1" max="600" value={form.timeout} onChange={(event) => onForm({ ...form, timeout: event.target.value })} /></label>
         <div className="settings-actions"><button className="primary-button" disabled={busy} onClick={onTest}>{busy ? "处理中..." : "测试连接"}</button><button className="secondary-button" disabled={busy} onClick={onSave}>保存</button></div>
         {message ? <div className={`settings-status ${messageKind}`} role="status">{message}</div> : null}
-        <p className="settings-note">保存完整配置不会立即调用模型；只有连接测试成功后，AI 整理入口才会启用。测试请求只发送固定 synthetic 检查内容，不发送用户资产。</p>
+        <p className="settings-note">保存完整项目配置不会立即调用模型；文本 Semantic/Analysis 可按配置使用，Vision 还需要勾选并在处理时明确选择。测试连接是单独的显式检查，只发送固定 synthetic 内容，不发送用户资产。</p>
       </div>
     </section>
   </section>;
@@ -662,7 +675,7 @@ function TasksPage({ tasks, onProcess, onOpenCatalog }: { tasks: Task[]; onProce
 
 function TaskRow({ task }: { task: Task }) { return <div className="task-row"><span className={`task-status-dot ${task.status}`} /><div className="task-row-source">{task.source}</div><div className="task-row-stage">{STAGE_LABELS[task.currentStage] || task.currentStage}</div><div className="task-row-progress"><span style={{ width: `${task.progress * 100}%` }} /></div><div className="task-row-status">{taskStatusLabel(task.status)}{task.status === "running" ? ` ${Math.round(task.progress * 100)}%` : ""}</div></div>; }
 
-function TaskCard({ task, onOpenCatalog }: { task: Task; onOpenCatalog: () => void }) { return <article className="task-card"><div className="task-card-header"><div><span className={`task-status-dot ${task.status}`} /> <strong>{taskStatusLabel(task.status)}</strong></div><span className="task-time">{formatDate(task.startedAt)}</span></div><div className="task-source">{task.source}</div><div className="progress-track"><span style={{ width: `${task.progress * 100}%` }} /></div><div className="task-card-footer"><span>{STAGE_LABELS[task.currentStage] || task.currentStage} · {Math.round(task.progress * 100)}%</span>{task.currentFile ? <span className="task-current-file">当前：{task.currentFile}</span> : null}{task.completed || task.total ? <span>{number(task.completed)} / {number(task.total)}</span> : null}<span>已用时 {number(task.elapsedSeconds)} 秒</span>{task.status === "succeeded" ? <button className="text-button" onClick={onOpenCatalog}>查看资产 →</button> : null}</div>{task.currentSubstage ? <div className="task-substage">{task.currentSubstage}</div> : null}{task.error ? <div className="task-error-panel"><strong>{task.error.message}</strong><span>{STAGE_LABELS[task.error.stage] || task.error.stage}{task.error.affectedFile ? ` · ${task.error.affectedFile}` : ""}</span><span>{task.error.retryable ? "可以重新处理" : "请查看技术详情"}</span><details><summary>查看技术详情</summary><div>错误代码：{task.error.code}</div>{task.error.requestId ? <div>请求 ID：{task.error.requestId}</div> : null}{task.error.technicalDetail ? <pre>{task.error.technicalDetail}</pre> : null}</details></div> : task.errorSummary ? <div className="task-error-panel">{task.errorSummary}</div> : null}{task.counts.tableAssets != null ? <div className="task-counts"><span>文件 {number(task.counts.filesDiscovered)}</span><span>表格 {number(task.counts.tableAssets)}</span><span>文本 {number(task.counts.textAssets)}</span><span>质量问题 {number(task.counts.qualityIssues)}</span></div> : null}</article>; }
+function TaskCard({ task, onOpenCatalog }: { task: Task; onOpenCatalog: () => void }) { return <article className="task-card"><div className="task-card-header"><div><span className={`task-status-dot ${task.status}`} /> <strong>{taskStatusLabel(task.status)}</strong></div><span className="task-time">{formatDate(task.startedAt)}</span></div><div className="task-source">{task.source}</div><div className="progress-track"><span style={{ width: `${task.progress * 100}%` }} /></div><div className="task-card-footer"><span>{STAGE_LABELS[task.currentStage] || task.currentStage} · {Math.round(task.progress * 100)}%</span>{task.currentFile ? <span className="task-current-file">当前：{task.currentFile}</span> : null}{task.currentPage ? <span className="task-current-file">Page {task.currentPage}</span> : null}{task.completed || task.total ? <span>{number(task.completed)} / {number(task.total)}</span> : null}<span>已用时 {number(task.elapsedSeconds)} 秒</span>{task.status === "succeeded" ? <button className="text-button" onClick={onOpenCatalog}>查看资产 →</button> : null}</div>{task.currentSubstage ? <div className="task-substage">{task.currentSubstage}</div> : null}{task.error ? <div className="task-error-panel"><strong>{task.error.message}</strong><span>{STAGE_LABELS[task.error.stage] || task.error.stage}{task.error.affectedFile ? ` · ${task.error.affectedFile}` : ""}</span><span>{task.error.retryable ? "可以重新处理" : "请查看技术详情"}</span><details><summary>查看技术详情</summary><div>错误代码：{task.error.code}</div>{task.error.requestId ? <div>请求 ID：{task.error.requestId}</div> : null}{task.error.technicalDetail ? <pre>{task.error.technicalDetail}</pre> : null}</details></div> : task.errorSummary ? <div className="task-error-panel">{task.errorSummary}</div> : null}{task.counts.tableAssets != null ? <div className="task-counts"><span>文件 {number(task.counts.filesDiscovered)}</span><span>表格 {number(task.counts.tableAssets)}</span><span>文本 {number(task.counts.textAssets)}</span><span>质量问题 {number(task.counts.qualityIssues)}</span></div> : null}</article>; }
 
 type SearchPageProps = {
   input: string;
@@ -779,7 +792,7 @@ function SemanticConfirmDialog({ assetName, onCancel, onConfirm }: { assetName: 
   return <div className="dialog-backdrop" role="presentation"><div className="dialog semantic-confirm" role="dialog" aria-modal="true" aria-labelledby="semantic-confirm-title"><div className="dialog-header"><div><div className="eyebrow">EXPLICIT PROVIDER ACTION</div><h2 id="semantic-confirm-title">确认 AI 整理</h2></div><button className="close-button" onClick={onCancel} aria-label="取消">×</button></div><p className="semantic-confirm-asset">当前资产：{assetName}</p><p>AI 整理将向当前配置的大模型服务发送该资产的受控摘要/样本。</p><p>不发送原始文件；不发送完整大型表格；不修改原始或规范化数据。</p><div className="dialog-actions"><button className="secondary-button" onClick={onCancel}>取消</button><button className="primary-button" onClick={onConfirm}>开始整理</button></div></div></div>;
 }
 
-function ProcessDialog({ source, onSource, visionMode, onVisionMode, visionEnabled, onClose, onSubmit }: { source: string; onSource: (value: string) => void; visionMode: VisionMode; onVisionMode: (value: VisionMode) => void; visionEnabled: boolean; onClose: () => void; onSubmit: () => void }) { return <div className="dialog-backdrop" role="presentation"><div className="dialog" role="dialog" aria-modal="true"><div className="dialog-header"><div><div className="eyebrow">NEW PROCESS</div><h2>处理新目录</h2></div><button className="close-button" onClick={onClose}>×</button></div><label className="field-label" htmlFor="source-path">资料目录</label><input id="source-path" className="path-input" value={source} onChange={(event) => onSource(event.target.value)} placeholder="例如：E:\\Research\\Project" autoFocus /><p className="field-help">请输入或粘贴本机目录路径。浏览器不会直接读取本机目录。</p><div className="field-label">图片提取方式</div><div className="process-mode-options"><label><input type="radio" name="vision-mode" checked={visionMode === "local"} onChange={() => onVisionMode("local")} /> 本地提取（离线 OCR / 表格识别）</label><label><input type="radio" name="vision-mode" checked={visionMode === "ai_vision"} disabled={!visionEnabled} onChange={() => onVisionMode("ai_vision")} /> AI Vision 提取（仅 JPG / PNG）</label></div>{visionEnabled ? <p className="field-help">启用 AI Vision 后，图片内容会发送至当前配置的 AI 服务。</p> : <p className="field-help">AI Vision 尚未连接；请先在设置中保存并测试 AI 模型。默认使用本地离线提取。</p>}<div className="dialog-actions"><button className="secondary-button" onClick={onClose}>取消</button><button className="primary-button" disabled={!source.trim()} onClick={onSubmit}>开始处理</button></div></div></div>; }
+function ProcessDialog({ source, onSource, visionMode, onVisionMode, visionEnabled, onClose, onSubmit }: { source: string; onSource: (value: string) => void; visionMode: VisionMode; onVisionMode: (value: VisionMode) => void; visionEnabled: boolean; onClose: () => void; onSubmit: () => void }) { return <div className="dialog-backdrop" role="presentation"><div className="dialog" role="dialog" aria-modal="true"><div className="dialog-header"><div><div className="eyebrow">NEW PROCESS</div><h2>处理新目录</h2></div><button className="close-button" onClick={onClose}>×</button></div><label className="field-label" htmlFor="source-path">资料目录</label><input id="source-path" className="path-input" value={source} onChange={(event) => onSource(event.target.value)} placeholder="例如：E:\\Research\\Project" autoFocus /><p className="field-help">请输入或粘贴本机目录路径。浏览器不会直接读取本机目录。</p><div className="field-label">图片 / 扫描 PDF 提取方式</div><div className="process-mode-options"><label><input type="radio" name="vision-mode" checked={visionMode === "local"} onChange={() => onVisionMode("local")} /> 本地提取（离线 OCR / 表格识别）</label><label><input type="radio" name="vision-mode" checked={visionMode === "ai_vision"} disabled={!visionEnabled} onChange={() => onVisionMode("ai_vision")} /> AI Vision 提取（JPG / PNG / 扫描 PDF 页面）</label></div>{visionEnabled ? <p className="field-help">启用 AI Vision 后，图片和明确扫描 PDF 页面会发送至当前配置的 AI 服务。</p> : <p className="field-help">AI Vision 尚未启用；默认使用本地离线提取。</p>}<div className="dialog-actions"><button className="secondary-button" onClick={onClose}>取消</button><button className="primary-button" disabled={!source.trim()} onClick={onSubmit}>开始处理</button></div></div></div>; }
 
 function Pagination({ offset, limit, total, onOffset }: { offset: number; limit: number; total: number; onOffset: (value: number) => void }) { const page = Math.floor(offset / limit) + 1; const pages = Math.max(1, Math.ceil(total / limit)); return <div className="pagination"><span>第 {number(page)} / {number(pages)} 页</span><div><button disabled={offset === 0} onClick={() => onOffset(Math.max(0, offset - limit))}>上一页</button><button disabled={offset + limit >= total} onClick={() => onOffset(offset + limit)}>下一页</button></div></div>; }
 

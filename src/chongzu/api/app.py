@@ -22,8 +22,15 @@ from chongzu.registry import Registry, RegistryError, is_registry_busy_error
 from chongzu.search import SearchQuery, SearchService, SearchValidationError
 from chongzu.semantic.models import SemanticRequest, SemanticResponse
 from chongzu.semantic.provider import SemanticProviderError
-from chongzu.semantic.settings import AISettingsError, AISettingsStore, load_runtime_ai_settings
+from chongzu.semantic.settings import (
+    AISettingsError,
+    AISettingsStore,
+    ProjectAIConfigStore,
+    load_runtime_ai_settings,
+)
 from chongzu.services import (
+    AnalysisService,
+    AnalysisServiceError,
     CatalogService,
     ProcessTaskManager,
     QualityService,
@@ -70,6 +77,15 @@ def _int_param(params: Mapping[str, list[str]], name: str, default: int, *, maxi
     return value
 
 
+def _safe_exception_detail(value: object, secret: object = "") -> str:
+    """Return bounded technical detail without persisting a provider key."""
+
+    detail = str(value).strip()
+    if isinstance(secret, str) and secret:
+        detail = detail.replace(secret, "[REDACTED]")
+    return detail[:4_000]
+
+
 class BackendApp:
     """A local application object that can be tested without opening a port."""
 
@@ -101,6 +117,13 @@ class BackendApp:
         self.quality = QualityService(registry_path=self.registry_path)
         self.search = SearchService(registry_path=self.registry_path)
         self.sql = SqlQueryService(registry_path=self.registry_path, workspace_root=self.workspace_root)
+        self.analysis = AnalysisService(
+            registry_path=self.registry_path,
+            workspace_root=self.workspace_root,
+            catalog=self.catalog,
+            search=self.search,
+            sql=self.sql,
+        )
         self.tasks = task_manager or ProcessTaskManager.for_paths(
             registry_path=self.registry_path,
             workspace_root=self.workspace_root,
@@ -133,6 +156,8 @@ class BackendApp:
                 "enabled": runtime.enabled,
                 "source": runtime.source,
                 "apiKeyConfigured": runtime.api_key_configured,
+                "visionEnabled": runtime.vision_enabled,
+                "configPath": "config/llm.json",
                 "optional": True,
                 "networkCalls": "disabled",
             }
@@ -143,6 +168,8 @@ class BackendApp:
                 "enabled": False,
                 "source": "offline",
                 "apiKeyConfigured": False,
+                "visionEnabled": False,
+                "configPath": "config/llm.json",
                 "optional": True,
                 "networkCalls": "disabled",
             }
@@ -163,13 +190,14 @@ class BackendApp:
     def _save_ai_settings(self, body: bytes) -> ApiResponse:
         value = self._body_object(body)
         with self._settings_lock:
-            store = AISettingsStore(self.project_root)
+            store = ProjectAIConfigStore(self.project_root)
             try:
                 saved = store.save(
                     base_url=value.get("baseUrl", value.get("base_url", "")),
                     model=value.get("model", ""),
-                    timeout=value.get("timeout", value.get("timeoutSeconds", 60)),
+                    timeout=value.get("timeout", value.get("timeoutSeconds", 120)),
                     api_key=value.get("apiKey", value.get("api_key")),
+                    vision_enabled=value.get("visionEnabled", value.get("vision_enabled", False)),
                     clear_api_key=bool(value.get("clearApiKey", False)),
                 )
             except AISettingsError as exc:
@@ -179,10 +207,11 @@ class BackendApp:
     def _test_ai_connection(self, request_id: str) -> ApiResponse:
         with self._settings_lock:
             store = AISettingsStore(self.project_root)
-            if not store.exists:
+            project_store = ProjectAIConfigStore(self.project_root)
+            if not store.exists and not project_store.exists and not (self.project_root / ".env").is_file():
                 raise ApiError("AI_SETTINGS_NOT_SAVED", "请先保存 AI 模型配置。", 409)
             runtime = load_runtime_ai_settings(self.project_root)
-            if runtime.status in {"INCOMPLETE", "INVALID_CONFIGURATION"} or not runtime.configured:
+            if runtime.status in {"INCOMPLETE", "INVALID_CONFIGURATION", "NOT_CONFIGURED"} or not runtime.configured:
                 raise ApiError("AI_SETTINGS_INCOMPLETE", "AI 模型配置未完成，未发起连接测试。", 409)
             provider = self._semantic_provider_override
             if provider is None:
@@ -208,18 +237,21 @@ class BackendApp:
                         code="malformed_json",
                     )
             except SemanticProviderError as exc:
-                store.mark_test_failure()
+                if store.exists:
+                    store.mark_test_failure()
                 retryable = bool(getattr(exc, "retryable", False))
                 raise ApiError("AI_CONNECTION_FAILED", "AI 连接失败，未启用模型；请检查地址、密钥和模型。", 502, retryable=retryable) from exc
             except Exception as exc:
-                store.mark_test_failure()
+                if store.exists:
+                    store.mark_test_failure()
                 raise ApiError("AI_CONNECTION_FAILED", "AI 连接失败，未启用模型；请检查地址、密钥和模型。", 502, retryable=True) from exc
-            store.mark_test_success()
+            if store.exists:
+                store.mark_test_success()
         return ApiResponse(
             200,
             {
                 "settings": load_runtime_ai_settings(self.project_root).public(),
-                "status": "enabled",
+                "status": "configured",
                 "requestId": request_id,
             },
         )
@@ -304,8 +336,7 @@ class BackendApp:
                 self.logger.error(
                     "request %s semantic provider failed: %s",
                     request_id,
-                    exc,
-                    exc_info=True,
+                    _safe_exception_detail(exc, getattr(config, "api_key", "")),
                 )
                 raise ApiError(
                     "SEMANTIC_PROVIDER_ERROR",
@@ -398,6 +429,47 @@ class BackendApp:
                     return ApiResponse(200, self.search.search(request).as_dict())
                 except SearchValidationError as exc:
                     raise ApiError("invalid_search", str(exc)) from exc
+            if path == "/api/v1/analysis/context" and method == "POST":
+                value = self._body_object(body)
+                try:
+                    return ApiResponse(
+                        200,
+                        self.analysis.asset_context(value.get("assetIds", value.get("asset_ids"))),
+                    )
+                except AnalysisServiceError as exc:
+                    raise ApiError(exc.code, exc.message) from exc
+            if path == "/api/v1/analysis/search" and method == "POST":
+                value = self._body_object(body)
+                try:
+                    return ApiResponse(
+                        200,
+                        self.analysis.search(
+                            value.get("query", ""),
+                            asset_type=value.get("type", "all"),
+                            source_format=value.get("format"),
+                            quality_status=value.get("quality"),
+                            limit=int(value.get("limit", 30)),
+                            offset=int(value.get("offset", 0)),
+                            match=value.get("match", "all"),
+                        ),
+                    )
+                except (AnalysisServiceError, ValueError) as exc:
+                    if isinstance(exc, AnalysisServiceError):
+                        raise ApiError(exc.code, exc.message) from exc
+                    raise ApiError("invalid_search", "analysis search parameters are invalid") from exc
+            if path == "/api/v1/analysis/sql" and method == "POST":
+                value = self._body_object(body)
+                try:
+                    return ApiResponse(
+                        200,
+                        self.analysis.safe_sql(
+                            value.get("assetIds", value.get("asset_ids")),
+                            value.get("sql"),
+                        ),
+                    )
+                except AnalysisServiceError as exc:
+                    status = 408 if exc.code == "query_timeout" else 400
+                    raise ApiError(exc.code, exc.message, status) from exc
             if path == "/api/v1/query/schema" and method == "POST":
                 value = self._body_object(body)
                 asset_ids = value.get("assetIds", value.get("asset_ids"))
@@ -441,7 +513,7 @@ class BackendApp:
                 vision_provider = None
                 if vision_mode == "ai_vision":
                     runtime = load_runtime_ai_settings(self.project_root)
-                    if not runtime.enabled:
+                    if not runtime.configured or not runtime.vision_enabled:
                         if runtime.status == "INCOMPLETE":
                             raise ApiError("AI_SETTINGS_INCOMPLETE", "AI 模型配置未完成，未启动 AI Vision。", 409)
                         if runtime.status == "UNVERIFIED":

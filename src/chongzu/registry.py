@@ -1981,6 +1981,8 @@ class Registry:
         route_reason: str,
         provider_contract: str,
         provider_model: str,
+        pipeline_version: str | None = None,
+        configuration_version: str | None = None,
     ) -> None:
         """Persist the in-progress marker for an explicit image Vision run."""
 
@@ -2002,8 +2004,8 @@ class Registry:
                 source.relative_path,
                 started_at,
                 force,
-                paths.VISION_PIPELINE_VERSION,
-                paths.VISION_CONFIG_VERSION,
+                pipeline_version or paths.VISION_PIPELINE_VERSION,
+                configuration_version or paths.VISION_CONFIG_VERSION,
                 "vision_llm",
                 route_reason,
                 json.dumps(
@@ -2623,8 +2625,20 @@ class Registry:
                     )
             warnings_payload = {
                 "warnings": result.warnings,
-                "provider_contract": paths.VISION_CONTRACT_VERSION,
+                "provider_contract": next(
+                    (
+                        item.get("provider_contract")
+                        for item in result.warnings
+                        if isinstance(item, dict) and item.get("provider_contract")
+                    ),
+                    paths.VISION_CONTRACT_VERSION,
+                ),
                 "route_reason": result.route_reason,
+                "pipeline_version": getattr(result, "pipeline_version", paths.VISION_PIPELINE_VERSION),
+                "configuration_version": getattr(result, "configuration_version", paths.VISION_CONFIG_VERSION),
+                "pages_attempted": int(getattr(result, "pages_attempted", 0) or 0),
+                "pages_succeeded": int(getattr(result, "pages_succeeded", 0) or 0),
+                "pages_failed": int(getattr(result, "pages_failed", 0) or 0),
             }
             connection.execute(
                 """
@@ -2648,8 +2662,8 @@ class Registry:
                     finished_at,
                     result.status,
                     force,
-                    paths.VISION_PIPELINE_VERSION,
-                    paths.VISION_CONFIG_VERSION,
+                    getattr(result, "pipeline_version", paths.VISION_PIPELINE_VERSION),
+                    getattr(result, "configuration_version", paths.VISION_CONFIG_VERSION),
                     "vision_llm",
                     result.route_reason,
                     json.dumps(result.timings.as_dict(), ensure_ascii=False, default=str),

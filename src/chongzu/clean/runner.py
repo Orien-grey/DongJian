@@ -425,6 +425,14 @@ def process_source(
         run_id=extraction.run_id,
     )
     emit("clean", 0.45, completed=extraction.processed, total=extraction.files_discovered, current_substage="准备确定性清洗")
+    if vision_mode == "ai_vision":
+        emit(
+            "clean",
+            0.45,
+            completed=extraction.processed,
+            total=extraction.files_discovered,
+            current_substage="cleaning_assets",
+        )
     summary = clean_source(
         source,
         workers=worker_count,

@@ -645,6 +645,7 @@ def extract_ocr(
     _scan_summary: Any | None = None,
     selected_relative_paths: set[str] | None = None,
     include_images: bool = True,
+    include_pdfs: bool = True,
     progress_callback: Callable[..., None] | None = None,
     cancel_event=None,
 ) -> OCRExtractionSummary:
@@ -703,7 +704,9 @@ def extract_ocr(
         registry.recover_incomplete_extractions(source_root)
         rows = registry.ocr_candidates(source_root)
         if not include_images:
-            rows = [row for row in rows if row.get("business_format") == "pdf"]
+            rows = [row for row in rows if row.get("business_format") != "jpeg" and row.get("business_format") != "png"]
+        if not include_pdfs:
+            rows = [row for row in rows if row.get("business_format") != "pdf"]
         if selected_relative_paths is not None:
             selected = {str(path).replace("\\", "/") for path in selected_relative_paths}
             rows = [

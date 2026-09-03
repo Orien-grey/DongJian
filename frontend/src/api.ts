@@ -54,7 +54,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export const api = {
   health: () => request<HealthResponse>("/api/v1/health"),
   aiSettings: () => request<AISettingsResponse>("/api/v1/settings/ai"),
-  saveAiSettings: (value: { baseUrl: string; apiKey?: string; model: string; timeout: number }) =>
+  saveAiSettings: (value: { baseUrl: string; apiKey?: string; model: string; timeout: number; visionEnabled: boolean }) =>
     request<AISettingsResponse & { saved: boolean }>("/api/v1/settings/ai", {
       method: "PUT",
       body: JSON.stringify(value),

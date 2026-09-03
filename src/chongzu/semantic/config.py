@@ -1,9 +1,8 @@
 """Provider-neutral, project-local semantic configuration.
 
-The product UI may store a project-local encrypted settings snapshot.  The
-advanced ``<project>/.env`` file remains a fallback when that snapshot does
-not exist.  The legacy JSON example remains loadable for compatibility tests
-and documentation, but it is never discovered implicitly.
+The portable product reads the directly editable ``config/llm.json`` contract.
+The encrypted settings store and advanced ``<project>/.env`` file remain only
+as compatibility sources when the project configuration is absent.
 """
 
 from __future__ import annotations
@@ -37,6 +36,14 @@ def _integer(value: object, name: str, default: int) -> int:
     return result
 
 
+def _boolean(value: object, name: str, default: bool = False) -> bool:
+    if value is None or value == "":
+        return default
+    if not isinstance(value, bool):
+        raise ValueError(f"{name} must be a boolean")
+    return value
+
+
 @dataclass(frozen=True)
 class SemanticConfig:
     base_url: str = ""
@@ -44,6 +51,7 @@ class SemanticConfig:
     model: str = ""
     timeout_seconds: int = 60
     max_retries: int = 2
+    vision_enabled: bool = False
     config_version: str = paths.SEMANTIC_CONFIG_VERSION
 
     @classmethod
@@ -56,6 +64,7 @@ class SemanticConfig:
             model=_string(value.get("model", ""), "model"),
             timeout_seconds=_integer(value.get("timeout_seconds", 60), "timeout_seconds", 60),
             max_retries=_integer(value.get("max_retries", 2), "max_retries", 2),
+            vision_enabled=_boolean(value.get("vision_enabled", False), "vision_enabled"),
         )
 
     @classmethod
@@ -94,6 +103,7 @@ class SemanticConfig:
                 "model": values.get("LLM_MODEL", ""),
                 "timeout_seconds": values.get("LLM_TIMEOUT_SECONDS", 60),
                 "max_retries": values.get("LLM_MAX_RETRIES", 2),
+                "vision_enabled": False,
             }
         )
 

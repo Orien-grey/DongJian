@@ -299,6 +299,10 @@ class CatalogService:
                 "extractionRunId": row.get("extraction_run_id"),
                 "sourceRange": (metadata or {}).get("source_range") if isinstance(metadata, Mapping) else None,
                 "bbox": (metadata or {}).get("bbox") if isinstance(metadata, Mapping) else None,
+                "renderMetadata": (metadata or {}).get("render_metadata") if isinstance(metadata, Mapping) else None,
+                "provider": (metadata or {}).get("provider") if isinstance(metadata, Mapping) else None,
+                "providerContract": (metadata or {}).get("provider_contract") if isinstance(metadata, Mapping) else None,
+                "model": (metadata or {}).get("model") if isinstance(metadata, Mapping) else None,
             },
             "artifacts": {
                 "raw": row.get("raw_artifact_path"),

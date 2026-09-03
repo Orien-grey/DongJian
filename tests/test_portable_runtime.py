@@ -174,6 +174,9 @@ def _build_relocated_copy(root: Path, destination: Path) -> None:
     shutil.copytree(root / "src", destination / "src")
     shutil.copytree(root / "scripts", destination / "scripts")
     shutil.copytree(root / "frontend" / "dist", destination / "frontend" / "dist")
+    (destination / "config").mkdir(parents=True, exist_ok=True)
+    shutil.copy2(root / "config" / "llm.example.json", destination / "config" / "llm.example.json")
+    shutil.copy2(root / "config" / "llm.example.json", destination / "config" / "llm.json")
     for filename in ("pyproject.toml", "uv.lock", "doctor.cmd", "chongzu.cmd", "start.cmd", "stop.cmd"):
         shutil.copy2(root / filename, destination / filename)
     for relative in (

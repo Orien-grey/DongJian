@@ -482,15 +482,16 @@ def test_ai_settings_state_machine_and_dpapi_secret_boundary(tmp_path: Path) -> 
             ).encode(),
             request_id="req_save",
         ).payload["settings"]
-        assert saved["status"] == "UNVERIFIED"
-        assert saved["enabled"] is False
-        raw_settings = (project / "workspace" / "state" / "llm-settings.json").read_text(encoding="utf-8")
-        assert secret not in raw_settings
-        assert AISettingsStore(project).read().config().api_key == secret
+        assert saved["status"] == "CONFIGURED"
+        assert saved["enabled"] is True
+        assert saved["visionEnabled"] is False
+        raw_settings = (project / "config" / "llm.json").read_text(encoding="utf-8")
+        assert secret in raw_settings
+        assert not AISettingsStore(project).exists
 
         tested = app.handle_api("POST", "/api/v1/settings/ai/test", {}, request_id="req_test_ok")
         assert tested.status == 200
-        assert tested.payload["settings"]["status"] == "ENABLED"
+        assert tested.payload["settings"]["status"] == "CONFIGURED"
         assert tested.payload["settings"]["enabled"] is True
         assert len(provider.requests) == 1
         assert provider.requests[0].asset_id == "chongzu-settings-connection-test"
@@ -509,15 +510,15 @@ def test_ai_settings_state_machine_and_dpapi_secret_boundary(tmp_path: Path) -> 
             ).encode(),
             request_id="req_changed",
         ).payload["settings"]
-        assert changed["status"] == "UNVERIFIED"
-        assert changed["enabled"] is False
+        assert changed["status"] == "CONFIGURED"
+        assert changed["enabled"] is True
         provider.fail = True
         with pytest.raises(ApiError) as failure:
             app.handle_api("POST", "/api/v1/settings/ai/test", {}, request_id="req_test_fail")
         assert failure.value.code == "AI_CONNECTION_FAILED"
         failed = load_runtime_ai_settings(project)
-        assert failed.status == "CONNECTION_FAILED"
-        assert failed.enabled is False
+        assert failed.status == "CONFIGURED"
+        assert failed.enabled is True
     finally:
         app.close(timeout=5)
 

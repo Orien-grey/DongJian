@@ -2,5 +2,6 @@
   "base_url": "",
   "api_key": "",
   "model": "",
-  "timeout_seconds": 60
+  "timeout_seconds": 120,
+  "vision_enabled": false
 }

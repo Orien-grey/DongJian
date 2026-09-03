@@ -42,6 +42,8 @@ export interface HealthResponse {
     enabled: boolean;
     source: "ui" | "env" | "offline" | string;
     apiKeyConfigured: boolean;
+    visionEnabled: boolean;
+    configPath: string;
     optional: boolean;
     networkCalls: string;
   };
@@ -56,6 +58,8 @@ export interface AISettings {
   status: string;
   configured: boolean;
   enabled: boolean;
+  visionEnabled: boolean;
+  configPath: string;
 }
 
 export interface AISettingsResponse {
@@ -255,6 +259,10 @@ export interface AssetDetail {
     extractionRunId: string;
     sourceRange: unknown;
     bbox: unknown;
+    renderMetadata?: unknown;
+    provider?: string | null;
+    providerContract?: string | null;
+    model?: string | null;
   };
   artifacts: {
     raw: string | null;
@@ -302,6 +310,7 @@ export interface Task {
   progress: number;
   currentStage: string;
   currentFile: string | null;
+  currentPage: number | null;
   completed: number;
   total: number;
   currentSubstage: string | null;

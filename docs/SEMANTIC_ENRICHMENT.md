@@ -24,8 +24,28 @@ change an asset ID. `raw -> normalized -> semantic` is a permanent boundary.
 
 ## Configuration
 
-The only runtime configuration source is a project-root `.env` copied or
-created by the operator from `.env.example`:
+The portable runtime uses the directly editable `config/llm.json` project
+configuration. A blank `config/llm.example.json` is shipped as the template:
+
+```json
+{
+  "base_url": "",
+  "api_key": "",
+  "model": "",
+  "timeout_seconds": 120,
+  "vision_enabled": false
+}
+```
+
+The Settings page reads and writes this same file. The encrypted DPAPI store
+and project-root `.env` remain backward-compatible fallback sources only when
+the project file is absent:
+
+```text
+config/llm.json > legacy DPAPI store > legacy .env > offline
+```
+
+The legacy `.env` form is:
 
 ```text
 LLM_BASE_URL=
@@ -35,10 +55,11 @@ LLM_TIMEOUT_SECONDS=60
 LLM_MAX_RETRIES=2
 ```
 
-The actual `.env` is ignored by Git and no real `.env` is shipped. The tracked
-`config/llm.example.json` is legacy documentation only and is not implicitly
-loaded. Missing base URL, key, or model gives `LLM_STATUS=NOT_CONFIGURED`; this
-is optional and does not fail doctor.
+The actual `.env` and `config/llm.json` are ignored by Git; releases contain a
+blank `config/llm.json` template and no secret. Missing or blank project values
+give `LLM_STATUS=NOT_CONFIGURED`, mean fully offline, and do not fail doctor.
+`vision_enabled=false` permits text Semantic/Analysis only. `true` permits
+Vision only after the user explicitly selects an AI Vision process.
 
 ```text
 .\chongzu.cmd semantic status
@@ -123,5 +144,5 @@ creates embeddings.
 
 Phase 7B real provider acceptance is complete for the configured development
 provider using synthetic assets only. Qwen acceptance remains **NOT RUN**.
-Release bundles contain `.env.example` only and report
+Release bundles contain `.env.example` and a blank `config/llm.json`, and report
 `LLM_STATUS=NOT_CONFIGURED`.

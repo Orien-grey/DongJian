@@ -25,6 +25,17 @@ class RealSemanticProviderDisabled(RuntimeError):
     """Guard preventing real endpoint calls without explicit authorization."""
 
 
+def _safe_provider_error(provider: object, value: object) -> str:
+    """Bound provider detail without allowing the configured key to persist."""
+
+    message = str(value).strip()
+    config = getattr(provider, "config", None)
+    secret = getattr(config, "api_key", "") if config is not None else ""
+    if isinstance(secret, str) and secret:
+        message = message.replace(secret, "[REDACTED]")
+    return message[:4_000]
+
+
 @dataclass
 class SemanticSummary:
     provider: str
@@ -274,17 +285,18 @@ class SemanticRunner:
                 )
                 summary.enriched += 1
             except Exception as exc:  # provider/DB errors remain isolated to one asset
+                message = _safe_provider_error(self.provider, exc)
                 self.registry.record_semantic_failure(
                     semantic_run_id,
                     finished_at=utc_now(),
                     error_code=str(getattr(exc, "code", "semantic_provider_error")),
-                    error_message=str(exc),
+                    error_message=message,
                 )
                 self._record_failure_without_run(
                     summary,
                     current_asset_id,
                     str(getattr(exc, "code", "semantic_provider_error")),
-                    str(exc),
+                    message,
                 )
         summary.wall_time_ms = (time.perf_counter_ns() - started) / 1_000_000
         calls_after = self._provider_counter(self.provider, "call_count")

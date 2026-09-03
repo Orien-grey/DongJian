@@ -7,7 +7,7 @@ from chongzu.semantic import LLMConfig
 def test_example_llm_config_is_provider_neutral_and_inactive() -> None:
     config = LLMConfig.load(paths.PROJECT_ROOT / "config" / "llm.example.json")
     assert config.model == ""
-    assert config.timeout_seconds == 60
+    assert config.timeout_seconds == 120
     with pytest.raises(ValueError, match="base_url"):
         config.validate_for_use()
 

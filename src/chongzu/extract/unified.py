@@ -68,6 +68,7 @@ class UnifiedExtractionSummary:
     pdf_table_summary: PDFTableExtractionSummary | None = field(default=None, repr=False)
     ocr_summary: OCRExtractionSummary | None = field(default=None, repr=False)
     vision_summary: Any | None = field(default=None, repr=False)
+    vision_pdf_summary: Any | None = field(default=None, repr=False)
     text_summary: TextExtractionSummary | None = field(default=None, repr=False)
     vision_mode: str = "local"
 
@@ -195,6 +196,7 @@ def extract_unified(
     """Run all currently implemented deterministic extraction routes once."""
 
     wall_started = time.perf_counter_ns()
+    from chongzu.vision.pdf_runner import extract_vision_pdf
     from chongzu.vision.runner import extract_vision, normalize_vision_mode
 
     vision_mode = normalize_vision_mode(vision_mode)
@@ -275,23 +277,38 @@ def extract_unified(
                 source,
                 **heavy_route_kwargs,
                 include_images=vision_mode != "ai_vision",
+                include_pdfs=vision_mode != "ai_vision",
             ),
         )
         summary.route_timings["ocr"] = elapsed
         summary.ocr_pages_images = summary.ocr_summary.pages_ocred + summary.ocr_summary.images_considered
-    if vision_mode == "ai_vision" and formats & {"jpeg", "png"}:
+    if vision_mode == "ai_vision" and formats & {"pdf", "jpeg", "png"}:
         if vision_provider is None:
             raise UnifiedExtractionError("AI Vision is selected but no verified Vision provider is available")
-        check_cancel(cancel_event)
-        summary.vision_summary, elapsed = _run_route(
-            "vision",
-            lambda: extract_vision(
-                source,
-                provider=vision_provider,
-                **heavy_route_kwargs,
-            ),
-        )
-        summary.route_timings["vision"] = elapsed
+        if formats & {"jpeg", "png"}:
+            check_cancel(cancel_event)
+            summary.vision_summary, elapsed = _run_route(
+                "vision",
+                lambda: extract_vision(
+                    source,
+                    provider=vision_provider,
+                    **heavy_route_kwargs,
+                ),
+            )
+            summary.route_timings["vision"] = elapsed
+        if "pdf" in formats:
+            check_cancel(cancel_event)
+            summary.vision_pdf_summary, elapsed = _run_route(
+                "vision_pdf",
+                lambda: extract_vision_pdf(
+                    source,
+                    provider=vision_provider,
+                    **heavy_route_kwargs,
+                ),
+            )
+            summary.route_timings["vision_pdf"] = elapsed
+            if summary.vision_summary is None:
+                summary.vision_summary = summary.vision_pdf_summary
     if "txt" in formats:
         check_cancel(cancel_event)
         summary.text_summary, elapsed = _run_route(
@@ -310,18 +327,21 @@ def extract_unified(
     summary.processed = processed
     summary.failed = failed
     summary.deferred = deferred
-    summary.reused = sum(
-        int(getattr(stage, "reused", 0) or 0)
-        for stage in (
-            summary.structured_summary,
-            summary.pdf_summary,
-            summary.pdf_table_summary,
-            summary.ocr_summary,
-            summary.vision_summary,
-            summary.text_summary,
-        )
-        if stage is not None
-    )
+    seen_stage_ids: set[int] = set()
+    summary.reused = 0
+    for stage in (
+        summary.structured_summary,
+        summary.pdf_summary,
+        summary.pdf_table_summary,
+        summary.ocr_summary,
+        summary.vision_summary,
+        summary.vision_pdf_summary,
+        summary.text_summary,
+    ):
+        if stage is None or id(stage) in seen_stage_ids:
+            continue
+        seen_stage_ids.add(id(stage))
+        summary.reused += int(getattr(stage, "reused", 0) or 0)
     summary.table_assets = int(catalog.get("table_assets", 0))
     summary.text_assets = int(catalog.get("text_assets", 0))
     summary.text_chunks = int(catalog.get("text_chunks", 0))

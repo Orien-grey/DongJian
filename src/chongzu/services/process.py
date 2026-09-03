@@ -38,6 +38,7 @@ class ProgressCallback(Protocol):
         current_file: str | None = None,
         completed: int | None = None,
         total: int | None = None,
+        current_page: int | None = None,
         current_substage: str | None = None,
         run_id: str | None = None,
     ) -> None: ...
@@ -67,6 +68,7 @@ class ProcessTask:
     progress: float = 0.0
     current_stage: str = "queued"
     current_file: str | None = None
+    current_page: int | None = None
     completed: int = 0
     total: int = 0
     current_substage: str | None = None
@@ -93,6 +95,7 @@ class ProcessTask:
             "progress": round(float(self.progress), 4),
             "currentStage": self.current_stage,
             "currentFile": self.current_file,
+            "currentPage": self.current_page,
             "completed": self.completed,
             "total": self.total,
             "currentSubstage": self.current_substage,
@@ -169,6 +172,7 @@ class ProcessTaskManager:
         current_file: str | None = None,
         completed: int | None = None,
         total: int | None = None,
+        current_page: int | None = None,
         current_substage: str | None = None,
         run_id: str | None = None,
     ) -> None:
@@ -192,6 +196,8 @@ class ProcessTaskManager:
                 task.completed = max(0, int(completed))
             if total is not None:
                 task.total = max(0, int(total))
+            if current_page is not None:
+                task.current_page = max(1, int(current_page))
             if current_substage is not None:
                 task.current_substage = current_substage
             if run_id is not None:
@@ -202,6 +208,10 @@ class ProcessTaskManager:
     @staticmethod
     def _error_for(task: ProcessTask, exc: Exception) -> dict[str, Any]:
         detail = str(exc).strip()
+        provider_config = getattr(task._vision_provider, "config", None)
+        provider_secret = getattr(provider_config, "api_key", "") if provider_config is not None else ""
+        if isinstance(provider_secret, str) and provider_secret:
+            detail = detail.replace(provider_secret, "[REDACTED]")
         lowered = detail.casefold()
         if isinstance(exc, CancellationRequested) or task._cancel_event.is_set():
             code = "TASK_CANCELLED"
@@ -291,6 +301,7 @@ class ProcessTaskManager:
                 current_file: str | None = None,
                 completed: int | None = None,
                 total: int | None = None,
+                current_page: int | None = None,
                 current_substage: str | None = None,
                 run_id: str | None = None,
             ) -> None:
@@ -301,6 +312,7 @@ class ProcessTaskManager:
                     current_file=current_file,
                     completed=completed,
                     total=total,
+                    current_page=current_page,
                     current_substage=current_substage,
                     run_id=run_id,
                 )

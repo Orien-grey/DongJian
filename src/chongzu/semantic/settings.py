@@ -19,6 +19,8 @@ from .config import SemanticConfig
 
 SETTINGS_VERSION = 1
 SETTINGS_FILE_NAME = "llm-settings.json"
+PROJECT_CONFIG_VERSION = 1
+PROJECT_CONFIG_FIELDS = frozenset({"base_url", "api_key", "model", "timeout_seconds", "vision_enabled"})
 
 
 class AISettingsError(ValueError):
@@ -115,6 +117,11 @@ def settings_path(project_root: Path | str | None = None) -> Path:
     return root / "workspace" / "state" / SETTINGS_FILE_NAME
 
 
+def project_config_path(project_root: Path | str | None = None) -> Path:
+    root = Path(project_root or paths.PROJECT_ROOT).resolve()
+    return root / "config" / "llm.json"
+
+
 def _text(value: object, field: str) -> str:
     if not isinstance(value, str):
         raise AISettingsError(f"{field} must be text")
@@ -133,12 +140,20 @@ def _timeout(value: object) -> int:
     return parsed
 
 
-def _config(base_url: str, model: str, timeout: int, api_key: str) -> SemanticConfig:
+def _config(
+    base_url: str,
+    model: str,
+    timeout: int,
+    api_key: str,
+    *,
+    vision_enabled: bool = False,
+) -> SemanticConfig:
     value = SemanticConfig(
         base_url=base_url,
         api_key=api_key,
         model=model,
         timeout_seconds=timeout,
+        vision_enabled=vision_enabled,
     )
     if value.configured:
         try:
@@ -214,7 +229,7 @@ class AISettingsStore:
 
     def read(self) -> StoredAISettings:
         try:
-            raw = json.loads(self.path.read_text(encoding="utf-8"))
+            raw = json.loads(self.path.read_text(encoding="utf-8-sig"))
         except (OSError, UnicodeError, json.JSONDecodeError) as exc:
             raise AISettingsError("saved AI settings cannot be read") from exc
         if not isinstance(raw, Mapping):
@@ -329,12 +344,156 @@ class AISettingsStore:
 
 
 @dataclass(frozen=True)
+class ProjectAIConfig:
+    """The portable, directly editable project configuration contract."""
+
+    base_url: str
+    api_key: str
+    model: str
+    timeout_seconds: int = 120
+    vision_enabled: bool = False
+
+    def config(self) -> SemanticConfig:
+        return _config(
+            self.base_url,
+            self.model,
+            self.timeout_seconds,
+            self.api_key,
+            vision_enabled=self.vision_enabled,
+        )
+
+    def as_mapping(self) -> dict[str, object]:
+        return {
+            "base_url": self.base_url,
+            "api_key": self.api_key,
+            "model": self.model,
+            "timeout_seconds": self.timeout_seconds,
+            "vision_enabled": self.vision_enabled,
+        }
+
+
+class ProjectAIConfigStore:
+    """Atomic JSON store used by the portable product and its Settings UI."""
+
+    def __init__(self, project_root: Path | str | None = None) -> None:
+        self.project_root = Path(project_root or paths.PROJECT_ROOT).resolve()
+        self.path = project_config_path(self.project_root)
+
+    @property
+    def exists(self) -> bool:
+        return self.path.is_file()
+
+    def read(self) -> ProjectAIConfig:
+        try:
+            encoded = self.path.read_text(encoding="utf-8-sig")
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            raise AISettingsError("project AI configuration cannot be read") from exc
+        # A copied portable bundle may contain a zero-byte placeholder while
+        # it is being filled in.  Treat that as the documented offline state,
+        # just like an object whose contract fields are all blank.
+        if not encoded.strip():
+            return ProjectAIConfig(base_url="", api_key="", model="")
+        try:
+            raw = json.loads(encoded)
+        except json.JSONDecodeError as exc:
+            raise AISettingsError("project AI configuration cannot be read") from exc
+        if not isinstance(raw, Mapping):
+            raise AISettingsError("project AI configuration must be a JSON object")
+        unknown = set(raw) - PROJECT_CONFIG_FIELDS
+        if unknown:
+            raise AISettingsError("project AI configuration contains unsupported fields")
+        try:
+            base_url = _text(raw.get("base_url", ""), "base URL")
+            api_key = _text(raw.get("api_key", ""), "API key")
+            model = _text(raw.get("model", ""), "model")
+            timeout = _timeout(raw.get("timeout_seconds", 120))
+            vision_enabled = raw.get("vision_enabled", False)
+            if not isinstance(vision_enabled, bool):
+                raise AISettingsError("vision_enabled must be a boolean")
+        except AISettingsError:
+            raise
+        config = ProjectAIConfig(
+            base_url=base_url,
+            api_key=api_key,
+            model=model,
+            timeout_seconds=timeout,
+            vision_enabled=vision_enabled,
+        )
+        # Incomplete values are a supported offline state. Complete values
+        # still receive the same URL and bound validation as legacy settings.
+        try:
+            config.config()
+        except ValueError as exc:
+            raise AISettingsError(str(exc)) from exc
+        return config
+
+    def _write(self, value: ProjectAIConfig) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        temporary: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                dir=self.path.parent,
+                prefix=f"{self.path.name}.",
+                suffix=".tmp",
+                delete=False,
+            ) as handle:
+                temporary = Path(handle.name)
+                json.dump(value.as_mapping(), handle, ensure_ascii=False, indent=2)
+                handle.write("\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, self.path)
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
+
+    def save(
+        self,
+        *,
+        base_url: object,
+        model: object,
+        timeout: object,
+        vision_enabled: object = False,
+        api_key: object | None = None,
+        clear_api_key: bool = False,
+    ) -> ProjectAIConfig:
+        existing = self.read() if self.exists else None
+        normalized_base = _text(base_url, "base URL")
+        normalized_model = _text(model, "model")
+        normalized_timeout = _timeout(timeout)
+        if not isinstance(vision_enabled, bool):
+            raise AISettingsError("vision_enabled must be a boolean")
+        if clear_api_key:
+            normalized_key = ""
+        elif isinstance(api_key, str) and api_key.strip():
+            normalized_key = api_key.strip()
+        else:
+            normalized_key = existing.api_key if existing is not None else ""
+        saved = ProjectAIConfig(
+            base_url=normalized_base,
+            api_key=normalized_key,
+            model=normalized_model,
+            timeout_seconds=normalized_timeout,
+            vision_enabled=vision_enabled,
+        )
+        try:
+            saved.config()
+        except ValueError as exc:
+            raise AISettingsError(str(exc)) from exc
+        self._write(saved)
+        return saved
+
+
+@dataclass(frozen=True)
 class RuntimeAISettings:
     config: SemanticConfig
     source: str
     status: str
     enabled: bool
     api_key_configured: bool
+    vision_enabled: bool = False
     error: str | None = None
 
     @property
@@ -351,11 +510,37 @@ class RuntimeAISettings:
             "status": self.status,
             "configured": self.configured,
             "enabled": self.enabled,
+            "visionEnabled": self.vision_enabled,
+            "configPath": "config/llm.json",
         }
 
 
 def load_runtime_ai_settings(project_root: Path | str | None = None) -> RuntimeAISettings:
     root = Path(project_root or paths.PROJECT_ROOT).resolve()
+    project_store = ProjectAIConfigStore(root)
+    if project_store.exists:
+        try:
+            project = project_store.read()
+            config = project.config()
+            has_any_value = bool(config.base_url or config.api_key or config.model)
+            return RuntimeAISettings(
+                config=config,
+                source="project",
+                status="CONFIGURED" if config.configured else "INCOMPLETE" if has_any_value else "NOT_CONFIGURED",
+                enabled=config.configured,
+                api_key_configured=bool(config.api_key),
+                vision_enabled=bool(config.configured and config.vision_enabled),
+            )
+        except AISettingsError as exc:
+            return RuntimeAISettings(
+                config=SemanticConfig(),
+                source="project",
+                status="INVALID_CONFIGURATION",
+                enabled=False,
+                api_key_configured=False,
+                vision_enabled=False,
+                error=str(exc),
+            )
     store = AISettingsStore(root)
     if store.exists:
         try:
@@ -379,6 +564,7 @@ def load_runtime_ai_settings(project_root: Path | str | None = None) -> RuntimeA
                 status=status,
                 enabled=enabled,
                 api_key_configured=bool(saved.encrypted_api_key),
+                vision_enabled=False,
             )
         except AISettingsError as exc:
             return RuntimeAISettings(
@@ -387,6 +573,7 @@ def load_runtime_ai_settings(project_root: Path | str | None = None) -> RuntimeA
                 status="INVALID_CONFIGURATION",
                 enabled=False,
                 api_key_configured=False,
+                vision_enabled=False,
                 error=str(exc),
             )
     try:
@@ -402,12 +589,13 @@ def load_runtime_ai_settings(project_root: Path | str | None = None) -> RuntimeA
         )
     return RuntimeAISettings(
         config=config,
-        source="env",
+        source="env" if (root / ".env").is_file() else "offline",
         status="CONFIGURED" if config.configured else "NOT_CONFIGURED",
         # The advanced .env fallback is explicitly supplied configuration and
         # remains compatible with the existing authorized CLI/API path.
         enabled=config.configured,
         api_key_configured=bool(config.api_key),
+        vision_enabled=False,
     )
 
 
