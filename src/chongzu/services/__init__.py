@@ -6,7 +6,19 @@ Parquet implementation details.
 """
 
 from .catalog import CatalogService
-from .analysis import AnalysisService, AnalysisServiceError
+from .analysis import (
+    ANALYSIS_ACTION_CONTRACT_VERSION,
+    ANALYSIS_PROMPT_VERSION,
+    MAX_ANALYSIS_HISTORY_LIMIT,
+    MAX_ANALYSIS_STEPS,
+    AnalysisExecutionError,
+    AnalysisOrchestrator,
+    AnalysisRunStore,
+    AnalysisService,
+    AnalysisServiceError,
+    normalize_analysis_request,
+    validate_analysis_action,
+)
 from .process import ProcessTaskManager, SourceValidationError, TaskAdmissionError, validate_source_directory
 from .quality import QualityService
 from .sql import (
@@ -26,6 +38,15 @@ __all__ = [
     "CatalogService",
     "AnalysisService",
     "AnalysisServiceError",
+    "AnalysisExecutionError",
+    "AnalysisOrchestrator",
+    "AnalysisRunStore",
+    "ANALYSIS_ACTION_CONTRACT_VERSION",
+    "ANALYSIS_PROMPT_VERSION",
+    "MAX_ANALYSIS_HISTORY_LIMIT",
+    "MAX_ANALYSIS_STEPS",
+    "normalize_analysis_request",
+    "validate_analysis_action",
     "ProcessTaskManager",
     "QualityService",
     "SqlAssetError",

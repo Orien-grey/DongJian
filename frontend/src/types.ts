@@ -1,4 +1,4 @@
-export type Page = "overview" | "catalog" | "search" | "query" | "quality" | "tasks" | "settings" | "detail";
+export type Page = "overview" | "catalog" | "search" | "query" | "quality" | "analysis" | "tasks" | "settings" | "detail";
 export type AssetType = "table" | "text";
 export type QualityStatus = "ready" | "needs_review" | "unusable";
 export type TaskStatus = "queued" | "running" | "cancelling" | "succeeded" | "failed" | "cancelled" | "interrupted";
@@ -305,6 +305,7 @@ export interface TextPreview {
 export interface Task {
   taskId: string;
   source: string;
+  taskType?: "process" | "ai_analysis" | string;
   visionMode: VisionMode;
   status: TaskStatus;
   progress: number;
@@ -314,7 +315,10 @@ export interface Task {
   completed: number;
   total: number;
   currentSubstage: string | null;
+  currentStep?: number;
+  maxSteps?: number;
   elapsedSeconds: number;
+  analysisRunId?: string | null;
   counts: Record<string, number>;
   startedAt: string | null;
   finishedAt: string | null;
@@ -331,10 +335,111 @@ export interface TaskError {
   affectedFile: string | null;
   runId: string | null;
   requestId: string | null;
-  scope: "file" | "directory";
+  scope: "file" | "directory" | "analysis";
   technicalDetail?: string;
 }
 
 export interface TasksResponse {
   items: Task[];
+}
+
+export type AnalysisScopeKind = "all" | "selected";
+export type AnalysisRunStatus = "running" | "completed" | "insufficient_evidence" | "failed" | "cancelled" | string;
+export type AnalysisSupportLevel = "direct" | "inference" | "unconfirmed";
+
+export interface AnalysisScope {
+  kind: AnalysisScopeKind;
+  asset_ids: string[];
+}
+
+export interface AnalysisEvidence {
+  evidence_id: string;
+  kind: string;
+  asset_id?: string;
+  asset_ids?: string[];
+  asset_type?: AssetType | string;
+  chunk_id?: string | null;
+  display_name?: string;
+  source?: {
+    fileId?: string | null;
+    relativePath?: string | null;
+    format?: string | null;
+    sha256?: string | null;
+    pageNumber?: number | null;
+    sheetName?: string | null;
+    [key: string]: unknown;
+  };
+  provenance?: Record<string, unknown>;
+  snippet?: string;
+  text?: string;
+  columns?: string[];
+  rows?: Array<Record<string, unknown>>;
+  row_count?: number;
+  truncated?: boolean;
+  execution_ms?: number;
+  sql?: string;
+  [key: string]: unknown;
+}
+
+export interface AnalysisFinding {
+  statement: string;
+  evidence_ids: string[];
+  support_level: AnalysisSupportLevel;
+}
+
+export interface AnalysisStep {
+  step: number;
+  action: string;
+  evidence_ids?: string[];
+  asset_ids?: string[];
+  query?: string;
+  sql?: string;
+  result?: unknown;
+}
+
+export interface AnalysisRunError {
+  code: string;
+  message: string;
+  retryable?: boolean;
+}
+
+export interface AnalysisRun {
+  analysis_run_id: string;
+  created_at: string;
+  finished_at: string | null;
+  status: AnalysisRunStatus;
+  question: string;
+  scope: AnalysisScope;
+  scope_asset_ids: string[];
+  model_identity: Record<string, unknown>;
+  answer: string;
+  findings: AnalysisFinding[];
+  unverified_findings: AnalysisFinding[];
+  limitations: string[];
+  grounding_summary: { grounded: number; unverified: number };
+  evidence_manifest: Record<string, AnalysisEvidence>;
+  executed_safe_sql: Array<Record<string, unknown>>;
+  source_asset_ids: string[];
+  steps_used: number;
+  max_steps: number;
+  steps: AnalysisStep[];
+  provider_calls: number;
+  error: AnalysisRunError | null;
+}
+
+export interface AnalysisRunSummary extends Pick<AnalysisRun, "analysis_run_id" | "created_at" | "finished_at" | "status" | "question" | "scope" | "model_identity" | "steps_used" | "source_asset_ids" | "answer" | "error"> {}
+
+export interface AnalysisRunsResponse {
+  items: AnalysisRunSummary[];
+  limit: number;
+}
+
+export interface AnalysisRunResponse {
+  run: AnalysisRun;
+}
+
+export interface AnalysisStartResponse {
+  analysisRunId: string;
+  taskId: string;
+  task: Task;
 }

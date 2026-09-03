@@ -7,6 +7,7 @@ HTTP contract and delegates catalog, quality, and process work to services.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 import json
 import logging
 from pathlib import Path
@@ -30,6 +31,9 @@ from chongzu.semantic.settings import (
 )
 from chongzu.services import (
     AnalysisService,
+    AnalysisExecutionError,
+    AnalysisOrchestrator,
+    AnalysisRunStore,
     AnalysisServiceError,
     CatalogService,
     ProcessTaskManager,
@@ -40,6 +44,7 @@ from chongzu.services import (
     SourceValidationError,
     TaskAdmissionError,
 )
+from chongzu.services.analysis import normalize_analysis_request, new_analysis_run_id, MAX_ANALYSIS_HISTORY_LIMIT, MAX_ANALYSIS_STEPS
 from chongzu.semantic.runner import SemanticRunner, provider_for_name
 from chongzu.vision.openai_compatible import OpenAICompatibleVisionProvider
 from chongzu.vision.runner import normalize_vision_mode
@@ -124,6 +129,7 @@ class BackendApp:
             search=self.search,
             sql=self.sql,
         )
+        self.analysis_runs = AnalysisRunStore(self.workspace_root)
         self.tasks = task_manager or ProcessTaskManager.for_paths(
             registry_path=self.registry_path,
             workspace_root=self.workspace_root,
@@ -142,7 +148,14 @@ class BackendApp:
             self.logger.info("recovered %d incomplete registry runs: %s", recovered_total, recovered)
 
     def request_shutdown(self) -> None:
+        analysis_tasks = [item for item in self.tasks.list(limit=50) if item.task_type == "ai_analysis"]
         self.tasks.request_shutdown()
+        for task in analysis_tasks:
+            if task.analysis_run_id and task.status in {"cancelled", "cancelling", "interrupted"}:
+                try:
+                    self.analysis_runs.mark_cancelled(task.analysis_run_id)
+                except Exception:
+                    pass
 
     def close(self, *, timeout: float = 5.0) -> bool:
         return self.tasks.shutdown(timeout=timeout)
@@ -380,6 +393,81 @@ class BackendApp:
             raise ApiError("invalid_json", "request body must be a JSON object")
         return value
 
+    def _analysis_provider(self) -> object:
+        """Resolve the one project-local provider without exposing credentials."""
+
+        if self._semantic_provider_override is not None:
+            return self._semantic_provider_override
+        try:
+            runtime = load_runtime_ai_settings(self.project_root)
+        except Exception as exc:
+            raise ApiError("MODEL_NOT_CONFIGURED", "AI 模型未配置，当前保持完全离线。", 409) from exc
+        if runtime.status in {"NOT_CONFIGURED", "INCOMPLETE", "INVALID_CONFIGURATION"} or not runtime.configured:
+            raise ApiError("MODEL_NOT_CONFIGURED", "AI 模型未配置，当前保持完全离线。", 409)
+        if not runtime.enabled:
+            raise ApiError(
+                "MODEL_UNVERIFIED",
+                "AI 模型已配置但尚未验证可用，请先完成连接测试。",
+                409,
+                retryable=True,
+            )
+        try:
+            runtime.config.validate_for_use()
+            return provider_for_name("openai-compatible", runtime.config, allow_real_provider=True)
+        except Exception as exc:
+            raise ApiError("MODEL_NOT_CONFIGURED", "AI 模型配置不可用，请检查项目内 config/llm.json。", 409) from exc
+
+    def _start_analysis(self, body: bytes, *, request_id: str) -> ApiResponse:
+        value = self._body_object(body)
+        try:
+            question, scope, asset_ids = normalize_analysis_request(
+                value.get("question"),
+                scope=value.get("scope", "all"),
+                asset_ids=value.get("assetIds", value.get("asset_ids")),
+            )
+        except AnalysisExecutionError as exc:
+            raise ApiError(exc.code, exc.message) from exc
+        provider = self._analysis_provider()
+        run_id = new_analysis_run_id()
+        orchestrator = AnalysisOrchestrator(
+            self.analysis,
+            provider,
+            workspace_root=self.workspace_root,
+            run_store=self.analysis_runs,
+            logger=self.logger,
+        )
+        pending = orchestrator.new_run_record(question, scope=scope, asset_ids=asset_ids, run_id=run_id)
+        self.analysis_runs.write(pending)
+
+        def runner(progress: object, cancel_event: object) -> dict[str, object]:
+            return orchestrator.run(
+                question,
+                scope=scope,
+                asset_ids=asset_ids,
+                run_id=run_id,
+                progress_callback=progress if callable(progress) else None,
+                cancel_event=cancel_event if hasattr(cancel_event, "is_set") else None,
+            )
+
+        try:
+            task = self.tasks.submit_analysis(
+                run_id,
+                runner,
+                provider=provider,
+                request_id=request_id,
+                max_steps=MAX_ANALYSIS_STEPS,
+            )
+        except TaskAdmissionError as exc:
+            pending["status"] = "failed"
+            pending["finished_at"] = datetime.now(timezone.utc).isoformat()
+            pending["error"] = {"code": "TASKS_STOPPING", "message": "analysis task could not be started", "retryable": True}
+            self.analysis_runs.write(pending)
+            raise ApiError("TASKS_STOPPING", "应用正在停止，暂时不能开始 AI 分析。", 503, retryable=True) from exc
+        return ApiResponse(
+            202,
+            {"analysisRunId": run_id, "taskId": task.task_id, "task": task.public_dict()},
+        )
+
     def handle_api(
         self,
         method: str,
@@ -429,6 +517,11 @@ class BackendApp:
                     return ApiResponse(200, self.search.search(request).as_dict())
                 except SearchValidationError as exc:
                     raise ApiError("invalid_search", str(exc)) from exc
+            if path == "/api/v1/analysis/runs" and method == "POST":
+                return self._start_analysis(body, request_id=request_id)
+            if path == "/api/v1/analysis/runs" and method == "GET":
+                limit = _int_param(query, "limit", 20, maximum=MAX_ANALYSIS_HISTORY_LIMIT)
+                return ApiResponse(200, self.analysis_runs.list(limit=limit))
             if path == "/api/v1/analysis/context" and method == "POST":
                 value = self._body_object(body)
                 try:
@@ -543,6 +636,21 @@ class BackendApp:
                 return ApiResponse(200, {"items": [item.public_dict() for item in self.tasks.list(limit=limit)]})
 
             parts = [unquote(part) for part in path.split("/") if part]
+            if len(parts) == 5 and parts[:3] == ["api", "v1", "analysis"] and parts[3] == "runs" and method == "GET":
+                run = self.analysis_runs.read(parts[4])
+                if run is None:
+                    raise ApiError("analysis_run_not_found", "analysis run was not found", 404)
+                return ApiResponse(200, {"run": run})
+            if len(parts) == 5 and parts[:3] == ["api", "v1", "tasks"] and parts[4] == "cancel" and method == "POST":
+                task = self.tasks.cancel(parts[3])
+                if task is None:
+                    raise ApiError("task_not_found", "task was not found", 404)
+                if task.task_type == "ai_analysis" and task.analysis_run_id and task.status in {"cancelled", "cancelling"}:
+                    try:
+                        self.analysis_runs.mark_cancelled(task.analysis_run_id)
+                    except Exception:
+                        pass
+                return ApiResponse(200, {"task": task.public_dict()})
             if len(parts) == 4 and parts[:3] == ["api", "v1", "tasks"] and method == "GET":
                 task = self.tasks.get(parts[3])
                 if task is None:

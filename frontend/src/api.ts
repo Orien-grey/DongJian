@@ -1,4 +1,7 @@
 import type {
+  AnalysisRunResponse,
+  AnalysisRunsResponse,
+  AnalysisStartResponse,
   AssetDetail,
   AISettingsResponse,
   CatalogResponse,
@@ -94,6 +97,18 @@ export const api = {
     }),
   tasks: () => request<TasksResponse>("/api/v1/tasks?limit=20"),
   task: (taskId: string) => request<Task>(`/api/v1/tasks/${encodeURIComponent(taskId)}`),
+  cancelTask: (taskId: string) =>
+    request<{ task: Task }>(`/api/v1/tasks/${encodeURIComponent(taskId)}/cancel`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    }),
+  analysisStart: (question: string, scope: "all" | "selected", assetIds: string[]) =>
+    request<AnalysisStartResponse>("/api/v1/analysis/runs", {
+      method: "POST",
+      body: JSON.stringify({ question, scope, assetIds }),
+    }),
+  analysisRuns: (limit = 20) => request<AnalysisRunsResponse>(`/api/v1/analysis/runs?limit=${limit}`),
+  analysisRun: (runId: string) => request<AnalysisRunResponse>(`/api/v1/analysis/runs/${encodeURIComponent(runId)}`),
   querySchema: (assetIds: string[]) =>
     request<SqlSchemaResponse>("/api/v1/query/schema", {
       method: "POST",

@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiClientError } from "./api";
 import type {
+  AnalysisEvidence,
+  AnalysisRun,
+  AnalysisRunSummary,
+  AnalysisScopeKind,
   AISettings,
   AssetDetail,
   AssetSummary,
@@ -20,6 +24,7 @@ import type {
 } from "./types";
 
 const STAGE_LABELS: Record<string, string> = {
+  ai_analysis: "AI Analysis",
   vision_extraction: "AI Vision 提取",
   queued: "排队中",
   scan: "扫描",
@@ -187,6 +192,15 @@ function App() {
   const [queryError, setQueryError] = useState("");
   const [issues, setIssues] = useState<QualityIssue[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [analysisQuestion, setAnalysisQuestion] = useState("");
+  const [analysisScope, setAnalysisScope] = useState<AnalysisScopeKind>("all");
+  const [analysisSelectedIds, setAnalysisSelectedIds] = useState<string[]>([]);
+  const [analysisAssets, setAnalysisAssets] = useState<AssetSummary[]>([]);
+  const [analysisHistory, setAnalysisHistory] = useState<AnalysisRunSummary[]>([]);
+  const [analysisRun, setAnalysisRun] = useState<AnalysisRun | null>(null);
+  const [analysisTaskId, setAnalysisTaskId] = useState<string | null>(null);
+  const [analysisLoading, setAnalysisLoading] = useState(false);
+  const [analysisError, setAnalysisError] = useState("");
   const [selected, setSelected] = useState<AssetDetail | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detailTab, setDetailTab] = useState<"data" | "profile" | "quality" | "source" | "semantic">("data");
@@ -317,6 +331,28 @@ function App() {
     }
   }, []);
 
+  const refreshAnalysis = useCallback(async () => {
+    try {
+      const [catalog, history] = await Promise.all([
+        api.catalog(new URLSearchParams({ limit: "100", offset: "0" })),
+        api.analysisRuns(20),
+      ]);
+      setAnalysisAssets(catalog.items);
+      setAnalysisHistory(history.items);
+    } catch (cause) {
+      setAnalysisError(errorText(cause));
+    }
+  }, []);
+
+  const loadAnalysisRun = useCallback(async (runId: string) => {
+    try {
+      setAnalysisRun((current) => current?.analysis_run_id === runId ? current : null);
+      setAnalysisRun((await api.analysisRun(runId)).run);
+    } catch (cause) {
+      setAnalysisError(errorText(cause));
+    }
+  }, []);
+
   useEffect(() => {
     void refreshHealth();
     void refreshOverview();
@@ -368,6 +404,19 @@ function App() {
   useEffect(() => {
     if (page === "settings") void refreshAISettings();
   }, [page, refreshAISettings]);
+
+  useEffect(() => {
+    if (page === "analysis") void refreshAnalysis();
+  }, [page, refreshAnalysis]);
+
+  useEffect(() => {
+    if (!analysisTaskId) return;
+    const task = tasks.find((item) => item.taskId === analysisTaskId);
+    if (!task || !task.analysisRunId) return;
+    if (!["succeeded", "failed", "cancelled", "interrupted"].includes(task.status)) return;
+    if (analysisRun?.analysis_run_id === task.analysisRunId && analysisRun.status !== "running") return;
+    void loadAnalysisRun(task.analysisRunId);
+  }, [analysisRun, analysisTaskId, loadAnalysisRun, tasks]);
 
   useEffect(() => {
     if (page !== "search" || !searchSubmitted || !searchQuery.trim()) return;
@@ -443,6 +492,66 @@ function App() {
       void refreshOverview();
     } catch (cause) {
       setError(errorText(cause));
+    }
+  };
+
+  const toggleAnalysisAsset = (assetId: string) => {
+    setAnalysisRun(null);
+    setAnalysisSelectedIds((current) => current.includes(assetId)
+      ? current.filter((value) => value !== assetId)
+      : [...current, assetId].slice(0, 8));
+  };
+
+  const startAnalysis = async () => {
+    setAnalysisError("");
+    if (!health?.llm.configured) {
+      setAnalysisError("未配置 AI 模型，当前完全离线。请在“设置 → AI模型”填写项目配置。");
+      return;
+    }
+    if (!health.llm.enabled) {
+      setAnalysisError("AI 模型已配置但不可用，请先完成连接测试。");
+      return;
+    }
+    if (!analysisQuestion.trim()) {
+      setAnalysisError("请输入分析问题。");
+      return;
+    }
+    if (analysisScope === "selected" && !analysisSelectedIds.length) {
+      setAnalysisError("选择特定数据时，至少选择一个 TableAsset 或 TextAsset。");
+      return;
+    }
+    setAnalysisLoading(true);
+    try {
+      const result = await api.analysisStart(
+        analysisQuestion.trim(),
+        analysisScope,
+        analysisScope === "selected" ? analysisSelectedIds : [],
+      );
+      setAnalysisTaskId(result.taskId);
+      setAnalysisRun(null);
+      knownTaskStatuses.current[result.taskId] = result.task.status;
+      setTasks((current) => [result.task, ...current.filter((item) => item.taskId !== result.taskId)]);
+      void refreshAnalysis();
+    } catch (cause) {
+      if (cause instanceof ApiClientError && cause.code === "MODEL_NOT_CONFIGURED") {
+        setAnalysisError("未配置 AI 模型，当前完全离线。");
+      } else if (cause instanceof ApiClientError && cause.code === "MODEL_UNVERIFIED") {
+        setAnalysisError("AI 模型已配置但不可用，请先完成连接测试。");
+      } else {
+        setAnalysisError(errorText(cause));
+      }
+    } finally {
+      setAnalysisLoading(false);
+    }
+  };
+
+  const cancelAnalysis = async () => {
+    if (!analysisTaskId) return;
+    try {
+      const result = await api.cancelTask(analysisTaskId);
+      setTasks((current) => current.map((item) => item.taskId === result.task.taskId ? result.task : item));
+    } catch (cause) {
+      setAnalysisError(errorText(cause));
     }
   };
 
@@ -546,6 +655,7 @@ function App() {
           <NavButton active={page === "catalog" || page === "detail"} onClick={() => setPage("catalog")}>数据目录</NavButton>
           <NavButton active={page === "search"} onClick={() => setPage("search")}>数据检索</NavButton>
           <NavButton active={page === "query"} onClick={() => setPage("query")}>数据查询</NavButton>
+          <NavButton active={page === "analysis"} onClick={() => setPage("analysis")}>AI 分析</NavButton>
           <NavButton active={page === "quality"} onClick={() => setPage("quality")}>质量检查{overview.openQualityIssues ? <span className="nav-count">{overview.openQualityIssues}</span> : null}</NavButton>
           <NavButton active={page === "tasks"} onClick={() => setPage("tasks")}>处理任务</NavButton>
           <NavButton active={page === "settings"} onClick={() => setPage("settings")}>设置</NavButton>
@@ -559,6 +669,7 @@ function App() {
         {page === "catalog" ? <CatalogPage assets={assets} total={catalogTotal} offset={catalogOffset} loading={loading} type={catalogType} quality={catalogQuality} format={catalogFormat} query={catalogQuery} formats={overview.formats} onType={(value) => resetCatalog(() => setCatalogType(value))} onQuality={(value) => resetCatalog(() => setCatalogQuality(value))} onFormat={(value) => resetCatalog(() => setCatalogFormat(value))} onQuery={(value) => { setCatalogOffset(0); setCatalogQuery(value); }} onOffset={setCatalogOffset} onOpen={openAsset} onProcess={() => setShowProcess(true)} /> : null}
         {page === "search" ? <SearchPage input={searchInput} query={searchQuery} results={searchResults} total={searchTotal} offset={searchOffset} loading={searchLoading} submitted={searchSubmitted} hasAssets={overview.tableAssets + overview.textAssets > 0} type={searchType} quality={searchQuality} format={searchFormat} match={searchMatch} formats={overview.formats} onInput={setSearchInput} onSubmit={submitSearch} onType={(value) => { setSearchType(value); setSearchOffset(0); }} onQuality={(value) => { setSearchQuality(value); setSearchOffset(0); }} onFormat={(value) => { setSearchFormat(value); setSearchOffset(0); }} onMatch={(value) => { setSearchMatch(value); setSearchOffset(0); }} onOffset={(value) => { setSearchOffset(value); void refreshSearch(value); }} onOpen={openSearchResult} /> : null}
         {page === "query" ? <QueryPage assets={queryAssets} selectedIds={querySelectedIds} schema={querySchema} sql={querySql} result={queryResult} loading={queryLoading} error={queryError} onToggle={toggleQueryAsset} onSql={setQuerySql} onRun={runSql} onOpen={openAsset} /> : null}
+        {page === "analysis" ? <AnalysisPage health={health} assets={analysisAssets} selectedIds={analysisSelectedIds} scope={analysisScope} question={analysisQuestion} history={analysisHistory} run={analysisRun} task={analysisTaskId ? tasks.find((item) => item.taskId === analysisTaskId) ?? null : null} loading={analysisLoading} error={analysisError} onQuestion={setAnalysisQuestion} onScope={(value) => { setAnalysisScope(value); setAnalysisRun(null); }} onToggleAsset={toggleAnalysisAsset} onStart={() => void startAnalysis()} onCancel={() => void cancelAnalysis()} onHistory={(runId) => void loadAnalysisRun(runId)} onOpenAsset={openAsset} /> : null}
         {page === "quality" ? <QualityPage issues={issues} onUpdate={updateIssue} onOpen={openAsset} /> : null}
         {page === "tasks" ? <TasksPage tasks={tasks} onProcess={() => setShowProcess(true)} onOpenCatalog={() => setPage("catalog")} /> : null}
         {page === "settings" ? <SettingsPage settings={aiSettings} form={aiForm} busy={aiBusy} message={aiMessage} messageKind={aiMessageKind} onForm={setAiForm} onSave={() => void saveAISettings(false)} onTest={() => void saveAISettings(true)} /> : null}
@@ -590,6 +701,110 @@ function aiStatusLabel(settings: AISettings | null): string {
     ENABLED: "已连接，AI 已启用",
     CONFIGURED: "使用 .env 高级配置",
   }[settings.status] ?? settings.status;
+}
+
+type AnalysisPageProps = {
+  health: HealthResponse | null;
+  assets: AssetSummary[];
+  selectedIds: string[];
+  scope: AnalysisScopeKind;
+  question: string;
+  history: AnalysisRunSummary[];
+  run: AnalysisRun | null;
+  task: Task | null;
+  loading: boolean;
+  error: string;
+  onQuestion: (value: string) => void;
+  onScope: (value: AnalysisScopeKind) => void;
+  onToggleAsset: (assetId: string) => void;
+  onStart: () => void;
+  onCancel: () => void;
+  onHistory: (runId: string) => void;
+  onOpenAsset: (assetId: string) => void;
+};
+
+function analysisModelStatus(health: HealthResponse | null): { label: string; tone: string } {
+  if (!health) return { label: "正在读取 AI 状态", tone: "muted" };
+  if (!health.llm.configured || ["NOT_CONFIGURED", "INCOMPLETE", "INVALID_CONFIGURATION"].includes(health.llm.status)) {
+    return { label: "未配置 · 完全离线", tone: "muted" };
+  }
+  if (!health.llm.enabled) return { label: "已配置但不可用", tone: "review" };
+  return { label: "可执行分析", tone: "good" };
+}
+
+function AnalysisPage({ health, assets, selectedIds, scope, question, history, run, task, loading, error, onQuestion, onScope, onToggleAsset, onStart, onCancel, onHistory, onOpenAsset }: AnalysisPageProps) {
+  const status = analysisModelStatus(health);
+  const running = task != null && ["queued", "running", "cancelling"].includes(task.status);
+  return <section className="page-section analysis-page">
+    <div className="page-heading"><div><div className="eyebrow">AI DATA ANALYSIS V1</div><h1>AI 分析</h1><p className="heading-note">一次问题 → 一次分析结果。模型只能通过本地 Search、Context 和 Safe SQL 获取当前工作区证据。</p></div></div>
+    <div className="analysis-layout">
+      <section className="panel analysis-input-panel">
+        <div className="panel-title"><div><h2>提出一个问题</h2><span className="panel-note">仅基于已入库的 TableAsset / TextAsset，不进行通用知识问答。</span></div></div>
+        <div className="analysis-form">
+          <label className="field-label" htmlFor="analysis-question">分析问题</label>
+          <textarea id="analysis-question" className="analysis-question" value={question} onChange={(event) => onQuestion(event.target.value)} placeholder="例如：2025 年各地区业务量有什么变化？" maxLength={2000} />
+          <div className="analysis-scope-title">数据范围</div>
+          <label className="analysis-scope-option"><input type="radio" checked={scope === "all"} onChange={() => onScope("all")} /> 全部已入库数据</label>
+          <label className="analysis-scope-option"><input type="radio" checked={scope === "selected"} onChange={() => onScope("selected")} /> 用户选择的 TableAsset / TextAsset（最多 8 个）</label>
+          {scope === "selected" ? <div className="analysis-asset-picker">{assets.length ? assets.map((asset) => <label className="analysis-asset-option" key={asset.assetId}><input type="checkbox" checked={selectedIds.includes(asset.assetId)} onChange={() => onToggleAsset(asset.assetId)} /><span><strong>{asset.effectiveDisplayName || asset.fallbackDisplayName}</strong><small>{asset.source.relativePath} · {typeLabel(asset.assetType)}</small></span></label>) : <span className="muted">暂无已入库资产。</span>}</div> : <p className="analysis-scope-note">系统会按需检索和加载有界上下文，不会一次发送整个数据库或全部文件内容。</p>}
+          <div className="analysis-ai-status"><span>AI 状态</span><strong className={`status-${status.tone}`}>{status.label}</strong></div>
+          <button className="primary-button analysis-start" disabled={loading || running || !question.trim() || !health?.llm.enabled || (scope === "selected" && !selectedIds.length)} onClick={onStart}>{loading ? "准备中…" : running ? "分析进行中…" : "开始分析"}</button>
+          {running ? <button className="secondary-button analysis-cancel" onClick={onCancel}>取消分析</button> : null}
+          {error ? <div className="analysis-error" role="alert">{error}</div> : null}
+        </div>
+      </section>
+      <section className="analysis-output-column">
+        {running && task ? <AnalysisProgress task={task} /> : null}
+        {run ? <AnalysisResult run={run} onOpenAsset={onOpenAsset} /> : <div className="panel analysis-empty"><strong>{running ? "分析运行中" : "结果将在这里显示"}</strong><span>{running ? "本地正在按步骤获取证据并验证引用。" : "完成一次分析后，这里会展示结论、关键发现、来源、SQL 摘要和局限。"}</span></div>}
+        <section className="panel analysis-history"><div className="panel-title"><div><h2>历史分析</h2><span className="panel-note">刷新页面后仍可查看已保存的单次分析结果。</span></div></div>{history.length ? <div className="analysis-history-list">{history.map((item) => <button type="button" className="analysis-history-item" key={item.analysis_run_id} onClick={() => onHistory(item.analysis_run_id)}><span><strong>{item.question}</strong><small>{formatDate(item.created_at)} · {analysisRunStatusLabel(item.status)}</small></span><span className="text-button">查看</span></button>)}</div> : <div className="analysis-history-empty">暂无历史分析。</div>}</section>
+      </section>
+    </div>
+  </section>;
+}
+
+function AnalysisProgress({ task }: { task: Task }) {
+  const step = task.currentStep ?? 0;
+  const max = task.maxSteps ?? 6;
+  return <div className="panel analysis-progress"><div className="panel-title"><div><h2>分析运行中</h2><span className="panel-note">当前阶段：{task.currentSubstage || STAGE_LABELS[task.currentStage] || task.currentStage}</span></div><strong>{step} / {max}</strong></div><div className="progress-track"><span style={{ width: `${task.progress * 100}%` }} /></div><div className="analysis-progress-meta"><span>当前步骤：{task.currentStep ?? 0} / {task.maxSteps ?? 6}</span><span>已用时 {number(task.elapsedSeconds)} 秒</span><span>{task.status === "cancelling" ? "正在取消" : `${Math.round(task.progress * 100)}%`}</span></div></div>;
+}
+
+function analysisRunStatusLabel(status: string): string {
+  return {
+    running: "运行中",
+    completed: "已完成",
+    insufficient_evidence: "证据不足",
+    failed: "失败",
+    cancelled: "已取消",
+  }[status] ?? status;
+}
+
+function evidenceSourceLabel(evidence: AnalysisEvidence): string {
+  const source = evidence.source ?? {};
+  const provenance = evidence.provenance ?? {};
+  const name = String(source.relativePath ?? evidence.display_name ?? evidence.asset_id ?? "本地证据");
+  const sheetName = source.sheetName ?? provenance.sheetName;
+  const pageNumber = source.pageNumber ?? provenance.pageNumber;
+  const location = [sheetName ? `Sheet ${sheetName}` : "", pageNumber ? `Page ${pageNumber}` : ""].filter(Boolean).join(" · ");
+  return location ? `${name} · ${location}` : name;
+}
+
+function EvidenceView({ evidence, onOpenAsset }: { evidence: AnalysisEvidence; onOpenAsset: (assetId: string) => void }) {
+  const assetId = evidence.asset_id ?? (Array.isArray(evidence.asset_ids) ? evidence.asset_ids[0] : undefined);
+  const rows = Array.isArray(evidence.rows) ? evidence.rows : [];
+  const columns = Array.isArray(evidence.columns) ? evidence.columns : [];
+  return <div className="analysis-evidence"><div className="analysis-evidence-heading"><span>{evidenceSourceLabel(evidence)}</span>{assetId ? <button className="text-button" onClick={() => onOpenAsset(assetId)}>查看来源</button> : null}</div>{evidence.kind === "sql_result" && columns.length ? <div className="table-wrap analysis-evidence-table"><table><thead><tr>{columns.map((column) => <th key={column}>{column}</th>)}</tr></thead><tbody>{rows.slice(0, 20).map((row, index) => <tr key={index}>{columns.map((column) => <td key={column}>{displayValue(row[column])}</td>)}</tr>)}</tbody></table></div> : null}{evidence.snippet || evidence.text ? <p className="analysis-evidence-snippet">{evidence.snippet || String(evidence.text).slice(0, 1000)}</p> : null}{evidence.kind === "sql_result" ? <small>{number(evidence.row_count ?? rows.length)} 行{evidence.truncated ? " · 结果已截断" : ""}</small> : null}</div>;
+}
+
+function AnalysisResult({ run, onOpenAsset }: { run: AnalysisRun; onOpenAsset: (assetId: string) => void }) {
+  const evidence = run.evidence_manifest ?? {};
+  const referenced = new Set(run.findings.flatMap((finding) => finding.evidence_ids));
+  const referencedEvidence = Array.from(referenced).map((id) => evidence[id]).filter(Boolean);
+  const sqlCount = Object.values(evidence).filter((item) => item.kind === "sql_result").length;
+  return <div className="analysis-result-stack"><section className="panel analysis-result"><div className="panel-title"><div><div className="eyebrow">ANALYSIS RESULT</div><h2>分析结论</h2></div><span className={`analysis-result-status ${run.status}`}>{analysisRunStatusLabel(run.status)}</span></div><p className="analysis-answer">{run.answer || "当前数据不足以支持该结论。"}</p><div className="analysis-meta">{run.model_identity.model ? `模型：${String(run.model_identity.model)}` : "模型：provider-neutral"} · {run.steps_used} / {run.max_steps} 步 · {run.provider_calls} 次模型调用</div></section>
+    <section className="panel analysis-findings"><div className="panel-title"><h2>关键发现</h2><span>{run.findings.length} 条有依据发现</span></div>{run.findings.length ? <div className="analysis-finding-list">{run.findings.map((finding, index) => <article className="analysis-finding" key={`${finding.statement}-${index}`}><strong>{finding.statement}</strong><small>{finding.support_level === "inference" ? "分析推断" : "数据直接支持"} · 证据 {finding.evidence_ids.join(", ")}</small></article>)}</div> : <div className="analysis-history-empty">没有可验证的关键发现。</div>}{run.unverified_findings.length ? <div className="analysis-unverified"><strong>无法确认</strong>{run.unverified_findings.map((finding, index) => <p key={`${finding.statement}-${index}`}>{finding.statement}</p>)}</div> : null}</section>
+    <section className="panel analysis-sources"><div className="panel-title"><div><h2>使用的数据来源</h2><span>{referencedEvidence.length} 个证据 · {sqlCount} 个 SQL 结果</span></div></div>{referencedEvidence.length ? referencedEvidence.map((item) => <EvidenceView key={item.evidence_id} evidence={item} onOpenAsset={onOpenAsset} />) : <div className="analysis-history-empty">没有已解析的来源证据。</div>}</section>
+    {run.limitations.length ? <section className="panel analysis-limitations"><div className="panel-title"><h2>局限 / 无法确认事项</h2></div><ul>{run.limitations.map((item, index) => <li key={`${item}-${index}`}>{item}</li>)}</ul></section> : null}
+  </div>;
 }
 
 function SettingsPage({ settings, form, busy, message, messageKind, onForm, onSave, onTest }: {

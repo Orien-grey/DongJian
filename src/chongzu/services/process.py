@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
@@ -17,6 +18,8 @@ from chongzu.locking import registry_write_mutex
 from chongzu.registry import Registry, RegistryError, is_registry_busy_error
 from chongzu.worker_runtime import configure_hidden_worker_executable
 from chongzu.vision.runner import normalize_vision_mode
+
+from .analysis import AnalysisExecutionError
 
 
 class SourceValidationError(ValueError):
@@ -40,6 +43,8 @@ class ProgressCallback(Protocol):
         total: int | None = None,
         current_page: int | None = None,
         current_substage: str | None = None,
+        current_step: int | None = None,
+        max_steps: int | None = None,
         run_id: str | None = None,
     ) -> None: ...
 
@@ -63,6 +68,7 @@ def validate_source_directory(value: object) -> Path:
 class ProcessTask:
     task_id: str
     source: str
+    task_type: str = "process"
     vision_mode: str = "local"
     status: str = "queued"
     progress: float = 0.0
@@ -72,6 +78,8 @@ class ProcessTask:
     completed: int = 0
     total: int = 0
     current_substage: str | None = None
+    current_step: int = 0
+    max_steps: int = 0
     elapsed_seconds: float = 0.0
     run_id: str | None = None
     counts: dict[str, Any] = field(default_factory=dict)
@@ -85,11 +93,15 @@ class ProcessTask:
     _started_clock: float | None = field(default=None, repr=False)
     _future: Future[Any] | None = field(default=None, repr=False)
     _vision_provider: object | None = field(default=None, repr=False)
+    analysis_run_id: str | None = None
+    _analysis_runner: Callable[..., Mapping[str, Any]] | None = field(default=None, repr=False)
+    _analysis_provider: object | None = field(default=None, repr=False)
 
     def public_dict(self) -> dict[str, Any]:
         return {
             "taskId": self.task_id,
             "source": self.source,
+            "taskType": self.task_type,
             "visionMode": self.vision_mode,
             "status": self.status,
             "progress": round(float(self.progress), 4),
@@ -99,8 +111,11 @@ class ProcessTask:
             "completed": self.completed,
             "total": self.total,
             "currentSubstage": self.current_substage,
+            "currentStep": self.current_step,
+            "maxSteps": self.max_steps,
             "elapsedSeconds": round(float(self.elapsed_seconds), 2),
             "runId": self.run_id,
+            "analysisRunId": self.analysis_run_id,
             "counts": dict(self.counts),
             "startedAt": self.started_at.isoformat() if self.started_at else None,
             "finishedAt": self.finished_at.isoformat() if self.finished_at else None,
@@ -163,6 +178,42 @@ class ProcessTaskManager:
             task._future = self._executor.submit(self._run, task.task_id, validated, force)
         return task
 
+    def submit_analysis(
+        self,
+        analysis_run_id: str,
+        runner: Callable[..., Mapping[str, Any]],
+        *,
+        provider: object | None = None,
+        request_id: str | None = None,
+        max_steps: int = 6,
+    ) -> ProcessTask:
+        """Admit one bounded AI Analysis run onto the existing task worker."""
+
+        if not isinstance(analysis_run_id, str) or not analysis_run_id.strip():
+            raise TaskAdmissionError("analysis run ID is required")
+        if not callable(runner):
+            raise TaskAdmissionError("analysis runner is unavailable")
+        if not isinstance(max_steps, int) or isinstance(max_steps, bool) or max_steps < 1 or max_steps > 6:
+            raise TaskAdmissionError("analysis step limit is invalid")
+        with self._lock:
+            if self._shutdown_requested:
+                raise TaskAdmissionError("server is stopping and cannot accept new analysis tasks")
+            task = ProcessTask(
+                task_id=f"task_{uuid4().hex}",
+                source="AI Analysis",
+                task_type="ai_analysis",
+                vision_mode="local",
+                request_id=request_id,
+                analysis_run_id=analysis_run_id,
+                run_id=analysis_run_id,
+                max_steps=max_steps,
+                _analysis_runner=runner,
+                _analysis_provider=provider,
+            )
+            self._tasks[task.task_id] = task
+            task._future = self._executor.submit(self._run_analysis, task.task_id)
+        return task
+
     def _set_stage(
         self,
         task: ProcessTask,
@@ -174,6 +225,8 @@ class ProcessTaskManager:
         total: int | None = None,
         current_page: int | None = None,
         current_substage: str | None = None,
+        current_step: int | None = None,
+        max_steps: int | None = None,
         run_id: str | None = None,
     ) -> None:
         with self._lock:
@@ -200,6 +253,10 @@ class ProcessTaskManager:
                 task.current_page = max(1, int(current_page))
             if current_substage is not None:
                 task.current_substage = current_substage
+            if current_step is not None:
+                task.current_step = max(0, int(current_step))
+            if max_steps is not None:
+                task.max_steps = max(0, int(max_steps))
             if run_id is not None:
                 task.run_id = run_id
             if task._started_clock is not None:
@@ -208,31 +265,53 @@ class ProcessTaskManager:
     @staticmethod
     def _error_for(task: ProcessTask, exc: Exception) -> dict[str, Any]:
         detail = str(exc).strip()
-        provider_config = getattr(task._vision_provider, "config", None)
+        provider = task._analysis_provider if task.task_type == "ai_analysis" else task._vision_provider
+        provider_config = getattr(provider, "config", None)
         provider_secret = getattr(provider_config, "api_key", "") if provider_config is not None else ""
         if isinstance(provider_secret, str) and provider_secret:
             detail = detail.replace(provider_secret, "[REDACTED]")
         lowered = detail.casefold()
-        if isinstance(exc, CancellationRequested) or task._cancel_event.is_set():
+        if task.task_type == "ai_analysis":
+            if isinstance(exc, AnalysisExecutionError):
+                code = exc.code
+                message = exc.message
+                retryable = exc.retryable
+                stage = exc.stage
+            elif isinstance(exc, CancellationRequested) or task._cancel_event.is_set():
+                code = "ANALYSIS_CANCELLED"
+                message = "analysis was cancelled"
+                retryable = True
+                stage = task.current_stage if task.current_stage not in {"queued", "cancelling"} else "cancelled"
+            else:
+                code = "ANALYSIS_FAILED"
+                message = "AI analysis could not be completed"
+                retryable = True
+                stage = task.current_stage
+            scope = "analysis"
+        elif isinstance(exc, CancellationRequested) or task._cancel_event.is_set():
             code = "TASK_CANCELLED"
             message = "用户已请求停止处理。"
             retryable = True
             stage = task.current_stage if task.current_stage not in {"queued", "cancelling"} else "shutdown"
+            scope = "file" if task.current_file else "directory"
         elif is_registry_busy_error(exc):
             code = "REGISTRY_BUSY"
             message = "数据目录正在更新，请稍后重试。"
             retryable = True
             stage = "registry_init" if "initialize registry" in lowered else task.current_stage
+            scope = "file" if task.current_file else "directory"
         elif isinstance(exc, RegistryError) or type(exc).__name__.casefold() in {"ioexception", "catalogexception"}:
             code = "REGISTRY_UNAVAILABLE"
             message = "数据目录暂时不可用，请稍后重试。"
             retryable = True
             stage = "registry_init"
+            scope = "file" if task.current_file else "directory"
         else:
             code = "PROCESS_FAILED"
             message = "目录处理失败，请查看技术详情后重试。"
             retryable = True
             stage = task.current_stage
+            scope = "file" if task.current_file else "directory"
         technical = f"{type(exc).__name__}: {detail}" if detail else type(exc).__name__
         return {
             "code": code,
@@ -242,7 +321,7 @@ class ProcessTaskManager:
             "affectedFile": task.current_file,
             "runId": task.run_id,
             "requestId": task.request_id,
-            "scope": "file" if task.current_file else "directory",
+            "scope": scope,
             "technicalDetail": technical,
         }
 
@@ -303,6 +382,8 @@ class ProcessTaskManager:
                 total: int | None = None,
                 current_page: int | None = None,
                 current_substage: str | None = None,
+                current_step: int | None = None,
+                max_steps: int | None = None,
                 run_id: str | None = None,
             ) -> None:
                 self._set_stage(
@@ -314,6 +395,8 @@ class ProcessTaskManager:
                     total=total,
                     current_page=current_page,
                     current_substage=current_substage,
+                    current_step=current_step,
+                    max_steps=max_steps,
                     run_id=run_id,
                 )
 
@@ -391,6 +474,96 @@ class ProcessTaskManager:
                     task.elapsed_seconds = max(0.0, time.perf_counter() - task._started_clock)
             _ = started
 
+    def _run_analysis(self, task_id: str) -> None:
+        with self._lock:
+            task = self._tasks[task_id]
+        started = time.perf_counter()
+        try:
+            def progress(
+                stage: str,
+                value: float,
+                *,
+                current_file: str | None = None,
+                completed: int | None = None,
+                total: int | None = None,
+                current_page: int | None = None,
+                current_substage: str | None = None,
+                current_step: int | None = None,
+                max_steps: int | None = None,
+                run_id: str | None = None,
+            ) -> None:
+                self._set_stage(
+                    task,
+                    stage,
+                    value,
+                    current_file=current_file,
+                    completed=completed,
+                    total=total,
+                    current_page=current_page,
+                    current_substage=current_substage,
+                    current_step=current_step,
+                    max_steps=max_steps,
+                    run_id=run_id or task.analysis_run_id,
+                )
+
+            self._set_stage(
+                task,
+                "ai_analysis",
+                0.01,
+                current_file="AI Analysis",
+                completed=0,
+                total=task.max_steps,
+                current_substage="preparing_scope",
+                current_step=0,
+                max_steps=task.max_steps,
+                run_id=task.analysis_run_id,
+            )
+            runner = task._analysis_runner
+            if runner is None:
+                raise AnalysisExecutionError("ANALYSIS_FAILED", "AI analysis runner is unavailable")
+            result = runner(progress, task._cancel_event)
+            if task._cancel_event.is_set() or task.status == "cancelling":
+                raise AnalysisExecutionError("ANALYSIS_CANCELLED", "analysis was cancelled", stage="cancelled", retryable=True)
+            result_status = str(result.get("status") or "completed") if isinstance(result, Mapping) else "completed"
+            steps_used = int(result.get("steps_used", task.current_step)) if isinstance(result, Mapping) else task.current_step
+            provider_calls = int(result.get("provider_calls", 0)) if isinstance(result, Mapping) else 0
+            with self._lock:
+                task.status = "succeeded"
+                task.progress = 1.0
+                task.current_stage = "completed"
+                task.current_substage = "completed"
+                task.current_step = max(0, steps_used)
+                task.finished_at = datetime.now().astimezone().replace(tzinfo=None)
+                task.counts = {"steps": max(0, steps_used), "providerCalls": max(0, provider_calls)}
+                task.summary = {
+                    "analysisRunId": task.analysis_run_id,
+                    "analysisStatus": result_status,
+                    "stepsUsed": max(0, steps_used),
+                    "maxSteps": task.max_steps,
+                    "providerCalls": max(0, provider_calls),
+                }
+                if task._started_clock is not None:
+                    task.elapsed_seconds = max(0.0, time.perf_counter() - task._started_clock)
+        except (CancellationRequested, AnalysisExecutionError) as exc:
+            with self._lock:
+                task.status = "cancelled" if isinstance(exc, CancellationRequested) or getattr(exc, "code", "") == "ANALYSIS_CANCELLED" else "failed"
+                task.current_stage = "cancelled" if task.status == "cancelled" else "failed"
+                task.finished_at = datetime.now().astimezone().replace(tzinfo=None)
+                task.error = self._error_for(task, exc)
+                task.error_summary = task.error["message"]
+        except Exception as exc:
+            with self._lock:
+                task.status = "cancelled" if task._cancel_event.is_set() else "failed"
+                task.current_stage = "cancelled" if task.status == "cancelled" else "failed"
+                task.finished_at = datetime.now().astimezone().replace(tzinfo=None)
+                task.error = self._error_for(task, exc)
+                task.error_summary = task.error["message"]
+        finally:
+            with self._lock:
+                if task._started_clock is not None:
+                    task.elapsed_seconds = max(0.0, time.perf_counter() - task._started_clock)
+            _ = started
+
     def get(self, task_id: str) -> ProcessTask | None:
         with self._lock:
             return self._tasks.get(task_id)
@@ -399,6 +572,26 @@ class ProcessTaskManager:
         with self._lock:
             values = sorted(self._tasks.values(), key=lambda item: item.task_id, reverse=True)
             return values[:limit]
+
+    def cancel(self, task_id: str) -> ProcessTask | None:
+        with self._lock:
+            task = self._tasks.get(task_id)
+            if task is None:
+                return None
+            if task.status in {"succeeded", "failed", "cancelled", "interrupted"}:
+                return task
+            task._cancel_event.set()
+            future = task._future
+            if task.status == "queued" and future is not None and future.cancel():
+                task.status = "cancelled"
+                task.current_stage = "cancelled"
+                task.finished_at = datetime.now().astimezone().replace(tzinfo=None)
+                task.error = self._error_for(task, CancellationRequested())
+                task.error_summary = task.error["message"]
+            else:
+                task.status = "cancelling"
+                task.current_stage = "cancelling"
+            return task
 
     def request_shutdown(self) -> None:
         with self._lock:
