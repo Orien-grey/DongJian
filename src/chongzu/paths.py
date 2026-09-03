@@ -49,6 +49,9 @@ SEMANTIC_PIPELINE_VERSION = "phase7a-semantic-infrastructure"
 SEMANTIC_CONFIG_VERSION = "semantic-v1"
 SEMANTIC_TABLE_PROMPT_VERSION = "table-semantic-v2"
 SEMANTIC_TEXT_PROMPT_VERSION = "text-semantic-v2"
+VISION_PIPELINE_VERSION = "phase-m1-vision-image"
+VISION_CONFIG_VERSION = "vision-json-v1"
+VISION_CONTRACT_VERSION = "vision-json-v1"
 # Extraction identities must not change merely because the metadata registry
 # gains additive catalog tables.  Extractor/config versions remain the cache
 # invalidation boundary for raw extraction.

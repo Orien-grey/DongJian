@@ -2,6 +2,7 @@ export type Page = "overview" | "catalog" | "search" | "query" | "quality" | "ta
 export type AssetType = "table" | "text";
 export type QualityStatus = "ready" | "needs_review" | "unusable";
 export type TaskStatus = "queued" | "running" | "cancelling" | "succeeded" | "failed" | "cancelled" | "interrupted";
+export type VisionMode = "local" | "ai_vision";
 
 export interface Overview {
   files: number;
@@ -296,6 +297,7 @@ export interface TextPreview {
 export interface Task {
   taskId: string;
   source: string;
+  visionMode: VisionMode;
   status: TaskStatus;
   progress: number;
   currentStage: string;

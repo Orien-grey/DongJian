@@ -1070,6 +1070,25 @@ class Registry:
         columns = [item[0] for item in cursor.description]
         return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
+    def vision_candidates(self, source_root: str) -> list[dict[str, Any]]:
+        """Return only image files eligible for the explicit Vision route."""
+
+        cursor = self.connection.execute(
+            """
+            SELECT file_id, sha256, source_root, relative_path, business_format,
+                   size_bytes, mtime_ns
+            FROM files
+            WHERE source_root=? AND current_presence_state='present'
+              AND support_status='supported'
+              AND business_format IN ('jpeg', 'png')
+              AND sha256 IS NOT NULL
+            ORDER BY relative_path
+            """,
+            [source_root],
+        )
+        columns = [item[0] for item in cursor.description]
+        return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
     def text_candidates(self, source_root: str) -> list[dict[str, Any]]:
         """Return supported plain-text files for the deterministic text pass."""
 
@@ -1415,6 +1434,77 @@ class Registry:
             )
             if artifact
         )
+        return result
+
+    def reusable_vision_extraction(self, extraction_identity: str) -> dict[str, Any] | None:
+        """Return a reusable explicit Vision result and its asset artifacts."""
+
+        cursor = self.connection.execute(
+            """
+            SELECT extraction_run_id, file_id, content_sha256, status,
+                   quality_issue_count, total_bytes, timings_json, warnings_json,
+                   table_count, total_rows
+            FROM extraction_runs
+            WHERE extraction_identity=? AND attempted_route='vision_llm'
+              AND status IN ('successful', 'partial')
+            ORDER BY finished_at DESC NULLS LAST, started_at DESC
+            LIMIT 1
+            """,
+            [extraction_identity],
+        )
+        row = cursor.fetchone()
+        if row is None:
+            return None
+        columns = [item[0] for item in cursor.description]
+        result = dict(zip(columns, row))
+        text_cursor = self.connection.execute(
+            """
+            SELECT text_asset_id, raw_artifact_path, normalized_artifact_path,
+                   metadata_artifact_path
+            FROM text_assets
+            WHERE extraction_run_id=? AND is_current=TRUE
+            ORDER BY text_asset_id
+            """,
+            [result["extraction_run_id"]],
+        )
+        result["text_assets"] = [
+            {
+                "text_asset_id": item[0],
+                "raw_artifact_path": item[1],
+                "normalized_artifact_path": item[2],
+                "metadata_artifact_path": item[3],
+            }
+            for item in text_cursor.fetchall()
+        ]
+        table_cursor = self.connection.execute(
+            """
+            SELECT table_id, raw_artifact_path, normalized_artifact_path,
+                   metadata_artifact_path
+            FROM table_assets
+            WHERE extraction_run_id=? AND is_current=TRUE
+            ORDER BY table_id
+            """,
+            [result["extraction_run_id"]],
+        )
+        result["table_assets"] = [
+            {
+                "table_id": item[0],
+                "raw_artifact_path": item[1],
+                "normalized_artifact_path": item[2],
+                "metadata_artifact_path": item[3],
+            }
+            for item in table_cursor.fetchall()
+        ]
+        result["artifacts"] = [
+            artifact
+            for asset in (*result["text_assets"], *result["table_assets"])
+            for artifact in (
+                asset.get("raw_artifact_path"),
+                asset.get("normalized_artifact_path"),
+                asset.get("metadata_artifact_path"),
+            )
+            if artifact
+        ]
         return result
 
     def reusable_text_extraction(self, extraction_identity: str) -> dict[str, Any] | None:
@@ -1878,6 +1968,56 @@ class Registry:
             ],
         )
 
+    def start_vision_extraction(
+        self,
+        *,
+        extraction_run_id: str,
+        extraction_identity: str,
+        source: Any,
+        extractor: str,
+        extractor_version: str,
+        started_at: datetime,
+        force: bool,
+        route_reason: str,
+        provider_contract: str,
+        provider_model: str,
+    ) -> None:
+        """Persist the in-progress marker for an explicit image Vision run."""
+
+        self.connection.execute(
+            """
+            INSERT INTO extraction_runs(
+                extraction_run_id, file_id, content_sha256, extraction_identity,
+                source_root, source_relative_path, started_at, status, force,
+                pipeline_version, configuration_version, attempted_route,
+                route_reason, extractor_versions_json, warnings_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'running', ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                extraction_run_id,
+                source.file_id,
+                source.content_sha256,
+                extraction_identity,
+                source.source_root,
+                source.relative_path,
+                started_at,
+                force,
+                paths.VISION_PIPELINE_VERSION,
+                paths.VISION_CONFIG_VERSION,
+                "vision_llm",
+                route_reason,
+                json.dumps(
+                    {
+                        extractor: extractor_version,
+                        "provider_contract": provider_contract,
+                        "model": provider_model,
+                    },
+                    ensure_ascii=False,
+                ),
+                json.dumps({"provider_contract": provider_contract, "model": provider_model}, ensure_ascii=False),
+            ],
+        )
+
     def start_text_extraction(
         self,
         *,
@@ -2327,6 +2467,196 @@ class Registry:
                     ),
                     len(result.table_assets),
                     result.target_count,
+                    len(result.issues),
+                    result.total_rows,
+                    result.source.size_bytes,
+                    result.error_category,
+                    result.error_message,
+                ],
+            )
+            for asset in result.table_assets:
+                connection.execute(
+                    """
+                    INSERT OR REPLACE INTO table_assets(
+                        table_id, file_id, content_sha256, extraction_run_id, extractor,
+                        extractor_version, source_kind, source_relative_path, sheet_name,
+                        page_number, bbox_json, source_row_start, source_row_end,
+                        source_column_start, source_column_end, row_count, column_count,
+                        columns_json, raw_artifact_path, normalized_artifact_path,
+                        metadata_artifact_path, extraction_confidence, quality_status,
+                        created_at, is_current
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE)
+                    """,
+                    [
+                        asset.table_id,
+                        asset.file_id,
+                        asset.content_sha256,
+                        asset.extraction_run_id,
+                        asset.extractor,
+                        asset.extractor_version,
+                        asset.source_kind.value,
+                        asset.source_relative_path,
+                        asset.sheet_name,
+                        asset.page_number,
+                        json.dumps(asset.bbox.__dict__) if asset.bbox else None,
+                        asset.source_row_start,
+                        asset.source_row_end,
+                        asset.source_column_start,
+                        asset.source_column_end,
+                        asset.row_count,
+                        asset.column_count,
+                        json.dumps(asset.columns, ensure_ascii=False),
+                        asset.raw_artifact_path,
+                        asset.normalized_artifact_path,
+                        asset.metadata_artifact_path,
+                        asset.extraction_confidence,
+                        asset.quality_status.value,
+                        asset.created_at.replace(tzinfo=None),
+                    ],
+                )
+            for asset in result.text_assets:
+                connection.execute(
+                    """
+                    INSERT OR REPLACE INTO text_assets(
+                        text_asset_id, file_id, content_sha256, extraction_run_id,
+                        extractor, extractor_version, source_kind, page_number, section,
+                        bbox_json, text, language, created_at, source_relative_path,
+                        raw_artifact_path, normalized_artifact_path, metadata_artifact_path,
+                        is_current
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE)
+                    """,
+                    [
+                        asset.text_asset_id,
+                        asset.file_id,
+                        asset.content_sha256,
+                        asset.extraction_run_id,
+                        asset.extractor,
+                        asset.extractor_version,
+                        asset.source_kind.value,
+                        asset.page_number,
+                        asset.section,
+                        json.dumps(asset.bbox.__dict__) if asset.bbox else None,
+                        asset.text,
+                        asset.language,
+                        asset.created_at.replace(tzinfo=None),
+                        asset.source_relative_path,
+                        asset.raw_artifact_path,
+                        asset.normalized_artifact_path,
+                        asset.metadata_artifact_path,
+                    ],
+                )
+            for chunk in result.text_chunks:
+                connection.execute(
+                    """
+                    INSERT OR REPLACE INTO text_chunks(
+                        chunk_id, text_asset_id, file_id, chunk_index, text,
+                        char_start, char_end, provenance_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    [
+                        chunk.chunk_id,
+                        chunk.text_asset_id,
+                        chunk.file_id,
+                        chunk.chunk_index,
+                        chunk.text,
+                        chunk.char_start,
+                        chunk.char_end,
+                        json.dumps(chunk.provenance.__dict__, ensure_ascii=False, default=str),
+                    ],
+                )
+            for issue in result.issues:
+                connection.execute(
+                    """
+                    INSERT INTO quality_issues(
+                        issue_id, extraction_run_id, asset_id, severity, issue_type,
+                        description, evidence_json, detected_by, suggested_action,
+                        status, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(issue_id) DO UPDATE SET
+                        extraction_run_id=excluded.extraction_run_id,
+                        evidence_json=excluded.evidence_json,
+                        description=excluded.description
+                    """,
+                    [
+                        issue.issue_id,
+                        result.extraction_run_id,
+                        issue.asset_id,
+                        issue.severity.value,
+                        issue.issue_type,
+                        issue.description,
+                        json.dumps(issue.evidence, ensure_ascii=False, default=str),
+                        issue.detected_by,
+                        issue.suggested_action,
+                        issue.status.value,
+                        finished_at,
+                    ],
+                )
+            connection.execute("COMMIT")
+        except Exception:
+            connection.execute("ROLLBACK")
+            raise
+
+    def record_vision_result(
+        self,
+        result: Any,
+        *,
+        started_at: datetime,
+        finished_at: datetime,
+        force: bool,
+    ) -> None:
+        """Persist one isolated Vision image result using existing assets."""
+
+        connection = self.connection
+        connection.execute("BEGIN TRANSACTION")
+        try:
+            for table_or_text, extractor in (("table_assets", "vision_llm"), ("text_assets", "vision_llm")):
+                if result.status in {"successful", "partial"}:
+                    connection.execute(
+                        f"UPDATE {table_or_text} SET is_current=FALSE WHERE file_id=? AND extractor=? AND is_current=TRUE",
+                        [result.source.file_id, extractor],
+                    )
+                elif result.status == "failed":
+                    connection.execute(
+                        f"""UPDATE {table_or_text} SET is_current=FALSE
+                            WHERE file_id=? AND extractor=? AND content_sha256<>? AND is_current=TRUE""",
+                        [result.source.file_id, extractor, result.source.content_sha256],
+                    )
+            warnings_payload = {
+                "warnings": result.warnings,
+                "provider_contract": paths.VISION_CONTRACT_VERSION,
+                "route_reason": result.route_reason,
+            }
+            connection.execute(
+                """
+                INSERT OR REPLACE INTO extraction_runs(
+                    extraction_run_id, file_id, content_sha256, extraction_identity,
+                    source_root, source_relative_path, started_at, finished_at, status,
+                    force, pipeline_version, configuration_version, attempted_route,
+                    route_reason, timings_json, warnings_json, extractor_versions_json,
+                    table_count, sheet_count, quality_issue_count, total_rows, total_bytes,
+                    error_category, error_message
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    result.extraction_run_id,
+                    result.source.file_id,
+                    result.source.content_sha256,
+                    result.extraction_identity,
+                    result.source.source_root,
+                    result.source.relative_path,
+                    started_at,
+                    finished_at,
+                    result.status,
+                    force,
+                    paths.VISION_PIPELINE_VERSION,
+                    paths.VISION_CONFIG_VERSION,
+                    "vision_llm",
+                    result.route_reason,
+                    json.dumps(result.timings.as_dict(), ensure_ascii=False, default=str),
+                    json.dumps(warnings_payload, ensure_ascii=False, default=str),
+                    json.dumps({result.extractor: result.extractor_version}, ensure_ascii=False),
+                    len(result.table_assets),
+                    0,
                     len(result.issues),
                     result.total_rows,
                     result.source.size_bytes,
@@ -3075,14 +3405,30 @@ class Registry:
                 SELECT file_id, content_sha256, attempted_route, status
                 FROM ranked
                 WHERE row_number=1
+            ), image_ranked AS (
+                SELECT e.file_id, e.content_sha256, e.status,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY e.file_id, e.content_sha256
+                           ORDER BY e.finished_at DESC NULLS LAST,
+                                    e.started_at DESC, e.extraction_run_id DESC
+                       ) AS row_number
+                FROM extraction_runs e
+                JOIN present p ON p.file_id=e.file_id AND p.sha256=e.content_sha256
+                WHERE e.attempted_route IN ('ocr_rapidocr', 'vision_llm')
+            ), image_latest AS (
+                SELECT file_id, content_sha256, status
+                FROM image_ranked
+                WHERE row_number=1
             ), pivoted AS (
                 SELECT p.file_id, p.support_status, p.business_format, p.sha256,
                        MAX(CASE WHEN l.attempted_route='structured_native' THEN l.status END) AS structured_status,
                        MAX(CASE WHEN l.attempted_route='pdf_native_text' THEN l.status END) AS pdf_native_status,
                        MAX(CASE WHEN l.attempted_route='ocr_rapidocr' THEN l.status END) AS ocr_status,
-                       MAX(CASE WHEN l.attempted_route='text_plain' THEN l.status END) AS text_status
+                       MAX(CASE WHEN l.attempted_route='text_plain' THEN l.status END) AS text_status,
+                       MAX(il.status) AS image_status
                 FROM present p
                 LEFT JOIN latest l ON l.file_id=p.file_id AND l.content_sha256=p.sha256
+                LEFT JOIN image_latest il ON il.file_id=p.file_id AND il.content_sha256=p.sha256
                 GROUP BY p.file_id, p.support_status, p.business_format, p.sha256
             ), classified AS (
                 SELECT CASE
@@ -3094,7 +3440,7 @@ class Registry:
                         WHEN pdf_native_status IN ('successful','partial') OR ocr_status IN ('successful','partial') THEN 'successful'
                         ELSE COALESCE(pdf_native_status, ocr_status)
                     END
-                    WHEN business_format IN ('jpeg','png') THEN ocr_status
+                    WHEN business_format IN ('jpeg','png') THEN image_status
                     WHEN business_format='txt' THEN text_status
                     ELSE NULL
                 END AS status

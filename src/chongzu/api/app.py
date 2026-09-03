@@ -34,6 +34,8 @@ from chongzu.services import (
     TaskAdmissionError,
 )
 from chongzu.semantic.runner import SemanticRunner, provider_for_name
+from chongzu.vision.openai_compatible import OpenAICompatibleVisionProvider
+from chongzu.vision.runner import normalize_vision_mode
 
 
 APP_NAME = "ChongZu"
@@ -433,7 +435,32 @@ class BackendApp:
                 source = value.get("source")
                 force = bool(value.get("force", False))
                 try:
-                    task = self.tasks.submit(source, force=force, request_id=request_id)
+                    vision_mode = normalize_vision_mode(value.get("visionMode", value.get("vision_mode", "local")))
+                except ValueError as exc:
+                    raise ApiError("VISION_MODE_INVALID", "图片提取方式无效，请选择本地提取或 AI Vision。") from exc
+                vision_provider = None
+                if vision_mode == "ai_vision":
+                    runtime = load_runtime_ai_settings(self.project_root)
+                    if not runtime.enabled:
+                        if runtime.status == "INCOMPLETE":
+                            raise ApiError("AI_SETTINGS_INCOMPLETE", "AI 模型配置未完成，未启动 AI Vision。", 409)
+                        if runtime.status == "UNVERIFIED":
+                            raise ApiError("AI_VISION_NOT_VERIFIED", "请先在设置中测试 AI 连接，成功后才能启用 AI Vision。", 409)
+                        if runtime.status == "CONNECTION_FAILED":
+                            raise ApiError("AI_VISION_NOT_VERIFIED", "AI 连接测试失败，AI Vision 保持关闭。", 409, retryable=True)
+                        raise ApiError("AI_VISION_NOT_CONFIGURED", "尚未配置可用的 AI Vision 模型。", 409)
+                    try:
+                        vision_provider = OpenAICompatibleVisionProvider(runtime.config)
+                    except ValueError as exc:
+                        raise ApiError("AI_VISION_NOT_CONFIGURED", "AI Vision 配置不可用，请检查设置。", 409) from exc
+                try:
+                    task = self.tasks.submit(
+                        source,
+                        force=force,
+                        request_id=request_id,
+                        vision_mode=vision_mode,
+                        vision_provider=vision_provider,
+                    )
                 except SourceValidationError as exc:
                     raise ApiError("invalid_source", str(exc)) from exc
                 except TaskAdmissionError as exc:

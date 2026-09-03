@@ -87,10 +87,10 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify({ status }),
     }),
-  process: (source: string) =>
+  process: (source: string, visionMode: "local" | "ai_vision" = "local") =>
     request<{ taskId: string; task: Task }>("/api/v1/process", {
       method: "POST",
-      body: JSON.stringify({ source }),
+      body: JSON.stringify({ source, visionMode }),
     }),
   tasks: () => request<TasksResponse>("/api/v1/tasks?limit=20"),
   task: (taskId: string) => request<Task>(`/api/v1/tasks/${encodeURIComponent(taskId)}`),

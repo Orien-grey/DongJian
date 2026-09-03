@@ -16,6 +16,7 @@ from chongzu.clean.runner import process_source
 from chongzu.locking import registry_write_mutex
 from chongzu.registry import Registry, RegistryError, is_registry_busy_error
 from chongzu.worker_runtime import configure_hidden_worker_executable
+from chongzu.vision.runner import normalize_vision_mode
 
 
 class SourceValidationError(ValueError):
@@ -61,6 +62,7 @@ def validate_source_directory(value: object) -> Path:
 class ProcessTask:
     task_id: str
     source: str
+    vision_mode: str = "local"
     status: str = "queued"
     progress: float = 0.0
     current_stage: str = "queued"
@@ -80,11 +82,13 @@ class ProcessTask:
     _cancel_event: threading.Event = field(default_factory=threading.Event, repr=False)
     _started_clock: float | None = field(default=None, repr=False)
     _future: Future[Any] | None = field(default=None, repr=False)
+    _vision_provider: object | None = field(default=None, repr=False)
 
     def public_dict(self) -> dict[str, Any]:
         return {
             "taskId": self.task_id,
             "source": self.source,
+            "visionMode": self.vision_mode,
             "status": self.status,
             "progress": round(float(self.progress), 4),
             "currentStage": self.current_stage,
@@ -129,12 +133,29 @@ class ProcessTaskManager:
         manager.workspace_root = Path(workspace_root).resolve() if workspace_root is not None else None
         return manager
 
-    def submit(self, source: Path | str, *, force: bool = False, request_id: str | None = None) -> ProcessTask:
+    def submit(
+        self,
+        source: Path | str,
+        *,
+        force: bool = False,
+        request_id: str | None = None,
+        vision_mode: str = "local",
+        vision_provider: object | None = None,
+    ) -> ProcessTask:
         validated = validate_source_directory(source)
+        normalized_vision_mode = normalize_vision_mode(vision_mode)
+        if normalized_vision_mode == "ai_vision" and vision_provider is None:
+            raise TaskAdmissionError("AI Vision provider is not verified")
         with self._lock:
             if self._shutdown_requested:
                 raise TaskAdmissionError("server is stopping and cannot accept new processing tasks")
-            task = ProcessTask(task_id=f"task_{uuid4().hex}", source=str(validated), request_id=request_id)
+            task = ProcessTask(
+                task_id=f"task_{uuid4().hex}",
+                source=str(validated),
+                vision_mode=normalized_vision_mode,
+                request_id=request_id,
+                _vision_provider=vision_provider,
+            )
             self._tasks[task.task_id] = task
             task._future = self._executor.submit(self._run, task.task_id, validated, force)
         return task
@@ -292,6 +313,8 @@ class ProcessTaskManager:
                     workspace_root=self.workspace_root,
                     progress_callback=progress,
                     cancel_event=task._cancel_event,
+                    vision_mode=task.vision_mode,
+                    vision_provider=task._vision_provider,
                 )
             public_summary = {
                 "sourceRoot": summary.source_root,

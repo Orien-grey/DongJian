@@ -16,9 +16,11 @@ import type {
   TablePreview,
   Task,
   TextPreview,
+  VisionMode,
 } from "./types";
 
 const STAGE_LABELS: Record<string, string> = {
+  vision_extraction: "AI Vision 提取",
   queued: "排队中",
   scan: "扫描",
   extract: "提取",
@@ -193,6 +195,7 @@ function App() {
   const [tablePreview, setTablePreview] = useState<TablePreview | null>(null);
   const [textPreview, setTextPreview] = useState<TextPreview | null>(null);
   const [taskSource, setTaskSource] = useState("");
+  const [taskVisionMode, setTaskVisionMode] = useState<VisionMode>("local");
   const [showProcess, setShowProcess] = useState(false);
   const [showSemanticConfirm, setShowSemanticConfirm] = useState(false);
   const [semanticEnriching, setSemanticEnriching] = useState(false);
@@ -427,9 +430,10 @@ function App() {
   const startProcess = async () => {
     setError("");
     try {
-      const result = await api.process(taskSource.trim());
+      const result = await api.process(taskSource.trim(), taskVisionMode);
       setShowProcess(false);
       setTaskSource("");
+      setTaskVisionMode("local");
       setPage("tasks");
       // Register the task before the first poll so a very fast task still
       // produces the queued/running -> terminal refresh transition.
@@ -560,7 +564,7 @@ function App() {
         {page === "detail" && !selected ? <EmptyState title="正在加载资产" body="正在读取本地目录与画像信息。" /> : null}
       </main>
 
-      {showProcess ? <ProcessDialog source={taskSource} onSource={setTaskSource} onClose={() => setShowProcess(false)} onSubmit={startProcess} /> : null}
+      {showProcess ? <ProcessDialog source={taskSource} onSource={setTaskSource} visionMode={taskVisionMode} onVisionMode={setTaskVisionMode} visionEnabled={health?.llm.enabled === true} onClose={() => setShowProcess(false)} onSubmit={startProcess} /> : null}
       {showSemanticConfirm && selected ? <SemanticConfirmDialog assetName={selected.displayName} onCancel={() => setShowSemanticConfirm(false)} onConfirm={() => void confirmSemanticEnrichment()} /> : null}
     </div>
   );
@@ -775,7 +779,7 @@ function SemanticConfirmDialog({ assetName, onCancel, onConfirm }: { assetName: 
   return <div className="dialog-backdrop" role="presentation"><div className="dialog semantic-confirm" role="dialog" aria-modal="true" aria-labelledby="semantic-confirm-title"><div className="dialog-header"><div><div className="eyebrow">EXPLICIT PROVIDER ACTION</div><h2 id="semantic-confirm-title">确认 AI 整理</h2></div><button className="close-button" onClick={onCancel} aria-label="取消">×</button></div><p className="semantic-confirm-asset">当前资产：{assetName}</p><p>AI 整理将向当前配置的大模型服务发送该资产的受控摘要/样本。</p><p>不发送原始文件；不发送完整大型表格；不修改原始或规范化数据。</p><div className="dialog-actions"><button className="secondary-button" onClick={onCancel}>取消</button><button className="primary-button" onClick={onConfirm}>开始整理</button></div></div></div>;
 }
 
-function ProcessDialog({ source, onSource, onClose, onSubmit }: { source: string; onSource: (value: string) => void; onClose: () => void; onSubmit: () => void }) { return <div className="dialog-backdrop" role="presentation"><div className="dialog" role="dialog" aria-modal="true"><div className="dialog-header"><div><div className="eyebrow">NEW PROCESS</div><h2>处理新目录</h2></div><button className="close-button" onClick={onClose}>×</button></div><label className="field-label" htmlFor="source-path">资料目录</label><input id="source-path" className="path-input" value={source} onChange={(event) => onSource(event.target.value)} placeholder="例如：E:\\Research\\Project" autoFocus /><p className="field-help">请输入或粘贴本机目录路径。浏览器不会直接读取本机目录。</p><div className="dialog-actions"><button className="secondary-button" onClick={onClose}>取消</button><button className="primary-button" disabled={!source.trim()} onClick={onSubmit}>开始处理</button></div></div></div>; }
+function ProcessDialog({ source, onSource, visionMode, onVisionMode, visionEnabled, onClose, onSubmit }: { source: string; onSource: (value: string) => void; visionMode: VisionMode; onVisionMode: (value: VisionMode) => void; visionEnabled: boolean; onClose: () => void; onSubmit: () => void }) { return <div className="dialog-backdrop" role="presentation"><div className="dialog" role="dialog" aria-modal="true"><div className="dialog-header"><div><div className="eyebrow">NEW PROCESS</div><h2>处理新目录</h2></div><button className="close-button" onClick={onClose}>×</button></div><label className="field-label" htmlFor="source-path">资料目录</label><input id="source-path" className="path-input" value={source} onChange={(event) => onSource(event.target.value)} placeholder="例如：E:\\Research\\Project" autoFocus /><p className="field-help">请输入或粘贴本机目录路径。浏览器不会直接读取本机目录。</p><div className="field-label">图片提取方式</div><div className="process-mode-options"><label><input type="radio" name="vision-mode" checked={visionMode === "local"} onChange={() => onVisionMode("local")} /> 本地提取（离线 OCR / 表格识别）</label><label><input type="radio" name="vision-mode" checked={visionMode === "ai_vision"} disabled={!visionEnabled} onChange={() => onVisionMode("ai_vision")} /> AI Vision 提取（仅 JPG / PNG）</label></div>{visionEnabled ? <p className="field-help">启用 AI Vision 后，图片内容会发送至当前配置的 AI 服务。</p> : <p className="field-help">AI Vision 尚未连接；请先在设置中保存并测试 AI 模型。默认使用本地离线提取。</p>}<div className="dialog-actions"><button className="secondary-button" onClick={onClose}>取消</button><button className="primary-button" disabled={!source.trim()} onClick={onSubmit}>开始处理</button></div></div></div>; }
 
 function Pagination({ offset, limit, total, onOffset }: { offset: number; limit: number; total: number; onOffset: (value: number) => void }) { const page = Math.floor(offset / limit) + 1; const pages = Math.max(1, Math.ceil(total / limit)); return <div className="pagination"><span>第 {number(page)} / {number(pages)} 页</span><div><button disabled={offset === 0} onClick={() => onOffset(Math.max(0, offset - limit))}>上一页</button><button disabled={offset + limit >= total} onClick={() => onOffset(offset + limit)}>下一页</button></div></div>; }
 

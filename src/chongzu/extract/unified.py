@@ -67,7 +67,9 @@ class UnifiedExtractionSummary:
     pdf_summary: PDFExtractionSummary | None = field(default=None, repr=False)
     pdf_table_summary: PDFTableExtractionSummary | None = field(default=None, repr=False)
     ocr_summary: OCRExtractionSummary | None = field(default=None, repr=False)
+    vision_summary: Any | None = field(default=None, repr=False)
     text_summary: TextExtractionSummary | None = field(default=None, repr=False)
+    vision_mode: str = "local"
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -91,6 +93,7 @@ class UnifiedExtractionSummary:
             "extraction_ms": self.extraction_ms,
             "wall_time_ms": self.wall_time_ms,
             "route_timings": dict(self.route_timings),
+            "vision_mode": self.vision_mode,
         }
 
 
@@ -153,7 +156,11 @@ def _processing_counts(registry: Registry, rows: list[dict[str, Any]]) -> tuple[
                 else native_status or ocr_status
             )
         elif fmt in {"jpeg", "png"}:
-            expected = statuses.get("ocr_rapidocr")
+            # An explicitly selected Vision run supersedes the local image
+            # route for the same content.  The fallback branch is used only
+            # for callers that intentionally pass a mixed source list; keep
+            # it aligned with Registry.processing_counts().
+            expected = statuses.get("vision_llm") or statuses.get("ocr_rapidocr")
         elif fmt == "txt":
             expected = statuses.get("text_plain")
         else:
@@ -182,10 +189,15 @@ def extract_unified(
     workspace_root: Path | str | None = None,
     cancel_event: Event | None = None,
     progress_callback=None,
+    vision_mode: str = "local",
+    vision_provider: Any | None = None,
 ) -> UnifiedExtractionSummary:
     """Run all currently implemented deterministic extraction routes once."""
 
     wall_started = time.perf_counter_ns()
+    from chongzu.vision.runner import extract_vision, normalize_vision_mode
+
+    vision_mode = normalize_vision_mode(vision_mode)
     worker_count = normalize_unified_workers(workers)
     registry_file = Path(registry_path or paths.REGISTRY_PATH).resolve()
     workspace = Path(workspace_root or paths.WORKSPACE_ROOT).resolve()
@@ -206,6 +218,7 @@ def extract_unified(
         source_root=source_root,
         files_discovered=scan_summary.discovered_count,
         scan_ms=scan_summary.elapsed_ms,
+        vision_mode=vision_mode,
     )
 
     registry = Registry.open(registry_file, initialize=False)
@@ -257,10 +270,28 @@ def extract_unified(
     if formats & {"pdf", "jpeg", "png"}:
         check_cancel(cancel_event)
         summary.ocr_summary, elapsed = _run_route(
-            "ocr", lambda: extract_ocr(source, **heavy_route_kwargs)
+            "ocr",
+            lambda: extract_ocr(
+                source,
+                **heavy_route_kwargs,
+                include_images=vision_mode != "ai_vision",
+            ),
         )
         summary.route_timings["ocr"] = elapsed
         summary.ocr_pages_images = summary.ocr_summary.pages_ocred + summary.ocr_summary.images_considered
+    if vision_mode == "ai_vision" and formats & {"jpeg", "png"}:
+        if vision_provider is None:
+            raise UnifiedExtractionError("AI Vision is selected but no verified Vision provider is available")
+        check_cancel(cancel_event)
+        summary.vision_summary, elapsed = _run_route(
+            "vision",
+            lambda: extract_vision(
+                source,
+                provider=vision_provider,
+                **heavy_route_kwargs,
+            ),
+        )
+        summary.route_timings["vision"] = elapsed
     if "txt" in formats:
         check_cancel(cancel_event)
         summary.text_summary, elapsed = _run_route(
@@ -286,6 +317,7 @@ def extract_unified(
             summary.pdf_summary,
             summary.pdf_table_summary,
             summary.ocr_summary,
+            summary.vision_summary,
             summary.text_summary,
         )
         if stage is not None

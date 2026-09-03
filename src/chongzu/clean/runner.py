@@ -378,6 +378,8 @@ def process_source(
     workspace_root: Path | str | None = None,
     progress_callback: ProgressCallback | None = None,
     cancel_event: Event | None = None,
+    vision_mode: str = "local",
+    vision_provider: Any | None = None,
 ) -> CleaningSummary:
     """Run scan, independent extraction, deterministic cleaning, and profiling."""
 
@@ -410,6 +412,8 @@ def process_source(
         workspace_root=workspace,
         cancel_event=cancel_event,
         progress_callback=progress_callback,
+        vision_mode=vision_mode,
+        vision_provider=vision_provider,
     )
     check_cancel(cancel_event)
     emit(
