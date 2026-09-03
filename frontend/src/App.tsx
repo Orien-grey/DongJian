@@ -13,6 +13,9 @@ import type {
   Page,
   QualityIssue,
   QualityStatus,
+  Report,
+  ReportEvidence,
+  ReportSummary,
   SearchResponse,
   SearchResult,
   SqlQueryResponse,
@@ -25,6 +28,7 @@ import type {
 
 const STAGE_LABELS: Record<string, string> = {
   ai_analysis: "AI Analysis",
+  report_generation: "报告生成",
   vision_extraction: "AI Vision 提取",
   queued: "排队中",
   scan: "扫描",
@@ -201,6 +205,15 @@ function App() {
   const [analysisTaskId, setAnalysisTaskId] = useState<string | null>(null);
   const [analysisLoading, setAnalysisLoading] = useState(false);
   const [analysisError, setAnalysisError] = useState("");
+  const [reports, setReports] = useState<ReportSummary[]>([]);
+  const [reportAnalysisRuns, setReportAnalysisRuns] = useState<AnalysisRunSummary[]>([]);
+  const [selectedReport, setSelectedReport] = useState<Report | null>(null);
+  const [reportRunIds, setReportRunIds] = useState<string[]>([]);
+  const [reportTitle, setReportTitle] = useState("");
+  const [reportPurpose, setReportPurpose] = useState("");
+  const [reportTaskId, setReportTaskId] = useState<string | null>(null);
+  const [reportLoading, setReportLoading] = useState(false);
+  const [reportError, setReportError] = useState("");
   const [selected, setSelected] = useState<AssetDetail | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detailTab, setDetailTab] = useState<"data" | "profile" | "quality" | "source" | "semantic">("data");
@@ -344,6 +357,25 @@ function App() {
     }
   }, []);
 
+  const refreshReports = useCallback(async () => {
+    try {
+      const [reportResult, analysisResult] = await Promise.all([api.reports(50), api.analysisRuns(50)]);
+      setReports(reportResult.items);
+      setReportAnalysisRuns(analysisResult.items.filter((item) => ["completed", "insufficient_evidence"].includes(item.status)));
+    } catch (cause) {
+      setReportError(errorText(cause));
+    }
+  }, []);
+
+  const loadReport = useCallback(async (reportId: string) => {
+    try {
+      setSelectedReport((current) => current?.report_id === reportId ? current : null);
+      setSelectedReport((await api.report(reportId)).report);
+    } catch (cause) {
+      setReportError(errorText(cause));
+    }
+  }, []);
+
   const loadAnalysisRun = useCallback(async (runId: string) => {
     try {
       setAnalysisRun((current) => current?.analysis_run_id === runId ? current : null);
@@ -410,6 +442,10 @@ function App() {
   }, [page, refreshAnalysis]);
 
   useEffect(() => {
+    if (page === "reports") void refreshReports();
+  }, [page, refreshReports]);
+
+  useEffect(() => {
     if (!analysisTaskId) return;
     const task = tasks.find((item) => item.taskId === analysisTaskId);
     if (!task || !task.analysisRunId) return;
@@ -417,6 +453,14 @@ function App() {
     if (analysisRun?.analysis_run_id === task.analysisRunId && analysisRun.status !== "running") return;
     void loadAnalysisRun(task.analysisRunId);
   }, [analysisRun, analysisTaskId, loadAnalysisRun, tasks]);
+
+  useEffect(() => {
+    if (!reportTaskId) return;
+    const task = tasks.find((item) => item.taskId === reportTaskId);
+    if (!task || ["queued", "running", "cancelling"].includes(task.status)) return;
+    if (task.status === "succeeded" && task.reportId) void loadReport(task.reportId);
+    void refreshReports();
+  }, [loadReport, reportTaskId, refreshReports, tasks]);
 
   useEffect(() => {
     if (page !== "search" || !searchSubmitted || !searchQuery.trim()) return;
@@ -555,6 +599,57 @@ function App() {
     }
   };
 
+  const toggleReportRun = (runId: string) => {
+    setReportRunIds((current) => current.includes(runId)
+      ? current.filter((value) => value !== runId)
+      : [...current, runId].slice(0, 8));
+  };
+
+  const startReport = async () => {
+    setReportError("");
+    if (!reportRunIds.length) {
+      setReportError("请至少选择一次已完成的分析。");
+      return;
+    }
+    setReportLoading(true);
+    try {
+      const result = await api.reportStart(reportRunIds, reportTitle.trim(), reportPurpose.trim());
+      setReportTaskId(result.taskId);
+      knownTaskStatuses.current[result.taskId] = result.task.status;
+      setTasks((current) => [result.task, ...current.filter((item) => item.taskId !== result.taskId)]);
+    } catch (cause) {
+      setReportError(errorText(cause));
+    } finally {
+      setReportLoading(false);
+    }
+  };
+
+  const cancelReport = async () => {
+    if (!reportTaskId) return;
+    try {
+      const result = await api.cancelTask(reportTaskId);
+      setTasks((current) => current.map((item) => item.taskId === result.task.taskId ? result.task : item));
+    } catch (cause) {
+      setReportError(errorText(cause));
+    }
+  };
+
+  const exportReport = async (format: "markdown" | "html") => {
+    if (!selectedReport) return;
+    try {
+      const result = await api.reportExport(selectedReport.report_id, format);
+      const blob = new Blob([result.content], { type: result.contentType });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `${selectedReport.title || "analysis-report"}.${format === "html" ? "html" : "md"}`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (cause) {
+      setReportError(errorText(cause));
+    }
+  };
+
   const updateIssue = async (issue: QualityIssue, status: QualityIssue["status"]) => {
     if (pendingIssueUpdates.current.has(issue.issue_id)) return;
     pendingIssueUpdates.current.add(issue.issue_id);
@@ -660,6 +755,7 @@ function App() {
           <NavButton active={page === "tasks"} onClick={() => setPage("tasks")}>处理任务</NavButton>
           <NavButton active={page === "settings"} onClick={() => setPage("settings")}>设置</NavButton>
         </nav>
+        <div className="report-nav-shortcut"><NavButton active={page === "reports"} onClick={() => setPage("reports")}>报告</NavButton></div>
         <div className="topbar-status"><span className="status-dot" />本地离线模式</div>
       </header>
 
@@ -675,6 +771,7 @@ function App() {
         {page === "settings" ? <SettingsPage settings={aiSettings} form={aiForm} busy={aiBusy} message={aiMessage} messageKind={aiMessageKind} onForm={setAiForm} onSave={() => void saveAISettings(false)} onTest={() => void saveAISettings(true)} /> : null}
         {page === "detail" && selected ? <DetailPage detail={selected} tab={detailTab} onTab={setDetailTab} tableLayer={tableLayer} onTableLayer={setTableLayer} tableOffset={tableOffset} onTableOffset={setTableOffset} tablePreview={tablePreview} textPreview={textPreview} semanticConfigured={health?.llm.enabled === true} semanticEnriching={semanticEnriching} semanticNotice={semanticNotice} onSemanticEnrich={requestSemanticEnrichment} onBack={() => setPage("catalog")} onUpdateIssue={updateIssue} /> : null}
         {page === "detail" && !selected ? <EmptyState title="正在加载资产" body="正在读取本地目录与画像信息。" /> : null}
+        {page === "reports" ? <ReportsPage runs={reportAnalysisRuns} reports={reports} selected={selectedReport} selectedRunIds={reportRunIds} title={reportTitle} purpose={reportPurpose} task={reportTaskId ? tasks.find((item) => item.taskId === reportTaskId) ?? null : null} loading={reportLoading} error={reportError} onToggleRun={toggleReportRun} onTitle={setReportTitle} onPurpose={setReportPurpose} onStart={() => void startReport()} onCancel={() => void cancelReport()} onOpen={(id) => void loadReport(id)} onExport={(format) => void exportReport(format)} onOpenAsset={openAsset} /> : null}
       </main>
 
       {showProcess ? <ProcessDialog source={taskSource} onSource={setTaskSource} visionMode={taskVisionMode} onVisionMode={setTaskVisionMode} visionEnabled={health?.llm.visionEnabled === true} onClose={() => setShowProcess(false)} onSubmit={startProcess} /> : null}
@@ -1015,5 +1112,86 @@ function EmptyState({ title, body, compact = false }: { title: string; body: str
 
 function compactValue(value: unknown): string { if (value == null) return "—"; const text = typeof value === "string" ? value : JSON.stringify(value); return text.length > 180 ? `${text.slice(0, 180)}…` : text; }
 function displayValue(value: unknown): string { if (value == null || value === "") return "NULL"; if (typeof value === "object") return compactValue(value); return String(value); }
+
+type ReportsPageProps = {
+  runs: AnalysisRunSummary[];
+  reports: ReportSummary[];
+  selected: Report | null;
+  selectedRunIds: string[];
+  title: string;
+  purpose: string;
+  task: Task | null;
+  loading: boolean;
+  error: string;
+  onToggleRun: (runId: string) => void;
+  onTitle: (value: string) => void;
+  onPurpose: (value: string) => void;
+  onStart: () => void;
+  onCancel: () => void;
+  onOpen: (reportId: string) => void;
+  onExport: (format: "markdown" | "html") => void;
+  onOpenAsset: (assetId: string) => void;
+};
+
+function reportEvidenceLabel(evidence: ReportEvidence): string {
+  if (evidence.kind === "sql_result") return "SQL 分析结果";
+  const source = evidence.source ?? {};
+  const parts = [String(source.relativePath ?? evidence.display_name ?? "数据来源")];
+  if (source.sheetName) parts.push(`Sheet ${source.sheetName}`);
+  if (source.pageNumber != null) parts.push(`第 ${source.pageNumber} 页`);
+  return parts.join(" / ");
+}
+
+function reportSources(ids: string[], evidence: ReportEvidence[]): ReportEvidence[] {
+  const byId = new Map(evidence.map((item) => [item.evidence_id, item]));
+  return ids.map((id) => byId.get(id)).filter((item): item is ReportEvidence => item != null);
+}
+
+function ReportsPage({ runs, reports, selected, selectedRunIds, title, purpose, task, loading, error, onToggleRun, onTitle, onPurpose, onStart, onCancel, onOpen, onExport, onOpenAsset }: ReportsPageProps) {
+  const running = task != null && ["queued", "running", "cancelling"].includes(task.status);
+  return <section className="page-section reports-page">
+    <div className="page-heading"><div><div className="eyebrow">ANALYSIS REPORT V1</div><h1>报告</h1><p className="heading-note">报告只基于已保存的 Analysis Run 与其中已经验证的证据，不会重新扫描工作区或执行查询。</p></div></div>
+    <div className="reports-layout">
+      <section className="panel report-compose-panel">
+        <div className="panel-title"><div><h2>生成新报告</h2><span className="panel-note">最多选择 8 次已完成分析，可离线生成基础报告。</span></div></div>
+        <div className="report-form">
+          <label className="field-label" htmlFor="report-title">报告标题（可选）</label>
+          <input id="report-title" className="path-input" value={title} onChange={(event) => onTitle(event.target.value)} maxLength={200} placeholder="例如：2025 年度业务情况综合分析" />
+          <label className="field-label report-label-gap" htmlFor="report-purpose">报告目的 / 补充说明（可选）</label>
+          <textarea id="report-purpose" className="report-purpose" value={purpose} onChange={(event) => onPurpose(event.target.value)} maxLength={2000} placeholder="说明希望读者重点关注的内容" />
+          <div className="report-run-picker"><div className="field-label">报告来源 Analysis Runs（{selectedRunIds.length} / 8）</div>{runs.length ? runs.map((run) => <label className="report-run-option" key={run.analysis_run_id}><input type="checkbox" checked={selectedRunIds.includes(run.analysis_run_id)} onChange={() => onToggleRun(run.analysis_run_id)} /><span><strong>{run.question}</strong><small>{formatDate(run.created_at)} · {run.status === "insufficient_evidence" ? "证据不足" : "已完成"}</small></span></label>) : <div className="report-empty-note">暂无已完成的分析 Run，请先在 AI 分析页完成一次分析。</div>}</div>
+          <div className="report-ai-note">{task?.status === "succeeded" ? "报告已保存" : "模型不可用时自动生成基础报告；模型失败不会丢失报告。"}</div>
+          <button className="primary-button" disabled={loading || running || !selectedRunIds.length} onClick={onStart}>{loading ? "准备中…" : running ? "报告生成中…" : "生成报告"}</button>
+          {running ? <button className="secondary-button report-cancel" onClick={onCancel}>取消生成</button> : null}
+          {error ? <div className="analysis-error" role="alert">{error}</div> : null}
+        </div>
+      </section>
+      <section className="reports-result-column">
+        {running && task ? <section className="panel report-progress"><div className="panel-title"><div><h2>报告生成中</h2><span className="panel-note">当前阶段：{task.currentSubstage || task.currentStage}</span></div><strong>{Math.round(task.progress * 100)}%</strong></div><div className="progress-track"><span style={{ width: `${task.progress * 100}%` }} /></div><div className="analysis-progress-meta"><span>当前步骤：{task.currentStep ?? 0} / 1</span><span>已用时 {number(task.elapsedSeconds)} 秒</span><span>{task.status === "cancelling" ? "正在取消" : "有界处理"}</span></div></section> : null}
+        {selected ? <ReportDetail report={selected} onExport={onExport} onOpenAsset={onOpenAsset} /> : <div className="panel analysis-empty"><strong>{running ? "正在整理报告" : "选择一个报告查看详情"}</strong><span>报告会在生成完成后保存在本地，刷新页面或重启应用后仍可查看。</span></div>}
+        <section className="panel report-history"><div className="panel-title"><div><h2>最近报告</h2><span className="panel-note">损坏的单个报告文件不会影响其他报告。</span></div></div>{reports.length ? <div className="report-history-list">{reports.map((item) => <button className="report-history-item" type="button" key={item.report_id} onClick={() => onOpen(item.report_id)}><span><strong>{item.title}</strong><small>基于 {item.source_analysis_run_ids.length} 次分析 · {formatDate(item.created_at)} · {item.generation_mode === "ai_enhanced" ? "AI 辅助整理" : "基础报告"}</small></span><span className="text-button">查看</span></button>)}</div> : <div className="report-empty-note">暂无报告。</div>}</section>
+      </section>
+    </div>
+  </section>;
+}
+
+function ReportDetail({ report, onExport, onOpenAsset }: { report: Report; onExport: (format: "markdown" | "html") => void; onOpenAsset: (assetId: string) => void }) {
+  const structured = report.structured_report;
+  const evidence = report.evidence_snapshot;
+  return <div className="report-detail-stack">
+    <section className="panel report-detail"><div className="panel-title"><div><div className="eyebrow">SAVED REPORT</div><h2>{report.title}</h2></div><span className={`report-mode ${report.generation_mode}`}>{report.generation_mode === "ai_enhanced" ? "AI 辅助整理" : "基础报告"}</span></div><div className="report-detail-meta">创建于 {formatDate(report.created_at)} · 基于 {report.source_analysis_run_ids.length} 次分析</div><div className="report-block"><h3>分析概述</h3><p>{structured.executive_summary}</p></div></section>
+    <section className="panel report-block"><h3>主要发现</h3>{structured.key_findings.length ? <div className="report-finding-list">{structured.key_findings.map((finding, index) => <article className="report-finding" key={`${finding.statement}-${index}`}><strong>{finding.statement}</strong><ReportEvidenceList ids={finding.evidence_ids} evidence={evidence} onOpenAsset={onOpenAsset} /></article>)}</div> : <div className="report-empty-note">当前没有可验证的关键发现。</div>}</section>
+    {structured.sections.map((section, index) => <section className="panel report-block" key={`${section.heading}-${index}`}><h3>{section.heading}</h3><p className="report-content">{section.content}</p><ReportEvidenceList ids={section.evidence_ids} evidence={evidence} onOpenAsset={onOpenAsset} /></section>)}
+    <section className="panel report-block"><h3>局限与待核实事项</h3>{structured.limitations.length ? <div><h4>局限</h4><ul>{structured.limitations.map((item) => <li key={item}>{item}</li>)}</ul></div> : null}{structured.items_to_verify.length ? <div className="report-verify"><h4>待核实事项</h4><ul>{structured.items_to_verify.map((item) => <li key={item}>{item}</li>)}</ul></div> : null}{!structured.limitations.length && !structured.items_to_verify.length ? <div className="report-empty-note">无额外说明。</div> : null}</section>
+    {report.generation_error ? <div className="report-fallback-note" role="status">AI 整理失败，已生成基础报告。</div> : null}
+    <div className="report-export-actions"><button className="secondary-button" onClick={() => onExport("markdown")}>导出 Markdown</button><button className="secondary-button" onClick={() => onExport("html")}>导出 HTML</button></div>
+  </div>;
+}
+
+function ReportEvidenceList({ ids, evidence, onOpenAsset }: { ids: string[]; evidence: ReportEvidence[]; onOpenAsset: (assetId: string) => void }) {
+  const values = reportSources(ids, evidence);
+  if (!values.length) return null;
+  return <div className="report-evidence-list">{values.map((item) => <div className="report-evidence" key={item.evidence_id}><span>来源：{reportEvidenceLabel(item)}</span>{item.asset_id ? <button className="text-button" onClick={() => onOpenAsset(String(item.asset_id))}>查看来源</button> : null}{item.kind === "sql_result" && item.rows?.length ? <div className="report-sql-summary">已保存 {number(item.row_count ?? item.rows.length)} 行 SQL 结果快照</div> : null}{item.snippet || item.text ? <small>{String(item.snippet || item.text).slice(0, 500)}</small> : null}</div>)}</div>;
+}
 
 export default App;

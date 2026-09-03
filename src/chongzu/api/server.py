@@ -67,6 +67,19 @@ class ChongZuHTTPServer(ThreadingHTTPServer):
                 if self.command != "HEAD":
                     self.wfile.write(encoded)
 
+            def _send_response(self, response: Any) -> None:
+                if getattr(response, "raw_body", None) is None:
+                    self._send_json(response.status, response.payload)
+                    return
+                encoded = response.raw_body
+                self.send_response(response.status)
+                self.send_header("Content-Type", response.content_type)
+                self.send_header("Content-Length", str(len(encoded)))
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                if self.command != "HEAD":
+                    self.wfile.write(encoded)
+
             def _send_error(self, error: ApiError) -> None:
                 request_id = self._ensure_request_id()
                 # Keep the browser response concise while retaining a stable
@@ -129,7 +142,7 @@ class ChongZuHTTPServer(ThreadingHTTPServer):
                             body,
                             request_id=self.request_id,
                         )
-                        self._send_json(response.status, response.payload)
+                        self._send_response(response)
                     except ApiError as exc:
                         self._send_error(exc)
                     return

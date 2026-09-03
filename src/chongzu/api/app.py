@@ -43,6 +43,12 @@ from chongzu.services import (
     SqlTimeoutError,
     SourceValidationError,
     TaskAdmissionError,
+    ReportComposer,
+    ReportExecutionError,
+    ReportRunStore,
+    new_report_id,
+    render_report_html,
+    render_report_markdown,
 )
 from chongzu.services.analysis import normalize_analysis_request, new_analysis_run_id, MAX_ANALYSIS_HISTORY_LIMIT, MAX_ANALYSIS_STEPS
 from chongzu.semantic.runner import SemanticRunner, provider_for_name
@@ -69,6 +75,8 @@ class ApiError(Exception):
 class ApiResponse:
     status: int
     payload: dict[str, Any]
+    raw_body: bytes | None = None
+    content_type: str = "application/json; charset=utf-8"
 
 
 def _int_param(params: Mapping[str, list[str]], name: str, default: int, *, maximum: int) -> int:
@@ -130,6 +138,7 @@ class BackendApp:
             sql=self.sql,
         )
         self.analysis_runs = AnalysisRunStore(self.workspace_root)
+        self.reports = ReportRunStore(self.workspace_root)
         self.tasks = task_manager or ProcessTaskManager.for_paths(
             registry_path=self.registry_path,
             workspace_root=self.workspace_root,
@@ -468,6 +477,77 @@ class BackendApp:
             {"analysisRunId": run_id, "taskId": task.task_id, "task": task.public_dict()},
         )
 
+    def _report_provider(self) -> object | None:
+        """Resolve the configured provider, or None for offline fallback."""
+
+        if self._semantic_provider_override is not None:
+            return self._semantic_provider_override
+        try:
+            runtime = load_runtime_ai_settings(self.project_root)
+            if not runtime.configured or not runtime.enabled:
+                return None
+            runtime.config.validate_for_use()
+            return provider_for_name("openai-compatible", runtime.config, allow_real_provider=True)
+        except Exception:
+            # Report generation remains useful offline.  The sanitized report
+            # artifact records the fallback mode without configuration data.
+            return None
+
+    def _start_report(self, body: bytes, *, request_id: str) -> ApiResponse:
+        value = self._body_object(body)
+        run_ids = value.get("analysisRunIds", value.get("sourceAnalysisRunIds", value.get("analysis_run_ids")))
+        title = value.get("title", "")
+        purpose = value.get("purpose", value.get("description", ""))
+        provider = self._report_provider()
+        composer = ReportComposer(
+            self.analysis_runs,
+            self.workspace_root,
+            provider=provider,
+            report_store=self.reports,
+        )
+        try:
+            composer.validate_inputs(run_ids)
+        except ReportExecutionError as exc:
+            raise ApiError(exc.code, exc.message, 400, retryable=exc.retryable) from exc
+        report_id = new_report_id()
+
+        def runner(progress: object, cancel_event: object) -> dict[str, object]:
+            return composer.compose(
+                run_ids,
+                report_id=report_id,
+                title=title,
+                purpose=purpose,
+                progress_callback=progress if callable(progress) else None,
+                cancel_event=cancel_event if hasattr(cancel_event, "is_set") else None,
+            )
+
+        try:
+            task = self.tasks.submit_report(
+                report_id,
+                runner,
+                provider=provider,
+                request_id=request_id,
+            )
+        except TaskAdmissionError as exc:
+            raise ApiError("TASKS_STOPPING", "应用正在停止，暂时不能生成报告。", 503, retryable=True) from exc
+        return ApiResponse(
+            202,
+            {"reportId": report_id, "taskId": task.task_id, "task": task.public_dict()},
+        )
+
+    def _report_export(self, report_id: str, format_name: str) -> ApiResponse:
+        try:
+            record = self.reports.read(report_id)
+        except ReportExecutionError as exc:
+            raise ApiError("REPORT_PERSISTENCE_ERROR", exc.message, 500) from exc
+        if record is None:
+            raise ApiError("report_not_found", "report was not found", 404)
+        if format_name == "markdown":
+            return ApiResponse(200, {}, raw_body=render_report_markdown(record).encode("utf-8"), content_type="text/markdown; charset=utf-8")
+        if format_name == "html":
+            return ApiResponse(200, {}, raw_body=render_report_html(record).encode("utf-8"), content_type="text/html; charset=utf-8")
+        raise ApiError("REPORT_FORMAT_INVALID", "report export format must be markdown or html")
+
     def handle_api(
         self,
         method: str,
@@ -522,6 +602,11 @@ class BackendApp:
             if path == "/api/v1/analysis/runs" and method == "GET":
                 limit = _int_param(query, "limit", 20, maximum=MAX_ANALYSIS_HISTORY_LIMIT)
                 return ApiResponse(200, self.analysis_runs.list(limit=limit))
+            if path == "/api/v1/reports" and method == "POST":
+                return self._start_report(body, request_id=request_id)
+            if path == "/api/v1/reports" and method == "GET":
+                limit = _int_param(query, "limit", 50, maximum=100)
+                return ApiResponse(200, self.reports.list(limit=limit))
             if path == "/api/v1/analysis/context" and method == "POST":
                 value = self._body_object(body)
                 try:
@@ -641,6 +726,16 @@ class BackendApp:
                 if run is None:
                     raise ApiError("analysis_run_not_found", "analysis run was not found", 404)
                 return ApiResponse(200, {"run": run})
+            if len(parts) == 5 and parts[:3] == ["api", "v1", "reports"] and parts[4] == "export" and method == "GET":
+                return self._report_export(parts[3], query.get("format", [""])[0].casefold())
+            if len(parts) == 4 and parts[:3] == ["api", "v1", "reports"] and method == "GET":
+                try:
+                    report = self.reports.read(parts[3])
+                except ReportExecutionError as exc:
+                    raise ApiError("REPORT_PERSISTENCE_ERROR", exc.message, 500) from exc
+                if report is None:
+                    raise ApiError("report_not_found", "report was not found", 404)
+                return ApiResponse(200, {"report": report})
             if len(parts) == 5 and parts[:3] == ["api", "v1", "tasks"] and parts[4] == "cancel" and method == "POST":
                 task = self.tasks.cancel(parts[3])
                 if task is None:

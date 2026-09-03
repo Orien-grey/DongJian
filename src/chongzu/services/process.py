@@ -18,6 +18,7 @@ from chongzu.locking import registry_write_mutex
 from chongzu.registry import Registry, RegistryError, is_registry_busy_error
 from chongzu.worker_runtime import configure_hidden_worker_executable
 from chongzu.vision.runner import normalize_vision_mode
+from .report import ReportExecutionError
 
 from .analysis import AnalysisExecutionError
 
@@ -96,6 +97,9 @@ class ProcessTask:
     analysis_run_id: str | None = None
     _analysis_runner: Callable[..., Mapping[str, Any]] | None = field(default=None, repr=False)
     _analysis_provider: object | None = field(default=None, repr=False)
+    report_id: str | None = None
+    _report_runner: Callable[..., Mapping[str, Any]] | None = field(default=None, repr=False)
+    _report_provider: object | None = field(default=None, repr=False)
 
     def public_dict(self) -> dict[str, Any]:
         return {
@@ -116,6 +120,7 @@ class ProcessTask:
             "elapsedSeconds": round(float(self.elapsed_seconds), 2),
             "runId": self.run_id,
             "analysisRunId": self.analysis_run_id,
+            "reportId": self.report_id,
             "counts": dict(self.counts),
             "startedAt": self.started_at.isoformat() if self.started_at else None,
             "finishedAt": self.finished_at.isoformat() if self.finished_at else None,
@@ -214,6 +219,39 @@ class ProcessTaskManager:
             task._future = self._executor.submit(self._run_analysis, task.task_id)
         return task
 
+    def submit_report(
+        self,
+        report_id: str,
+        runner: Callable[..., Mapping[str, Any]],
+        *,
+        provider: object | None = None,
+        request_id: str | None = None,
+    ) -> ProcessTask:
+        """Admit one bounded report composition task onto the same worker."""
+
+        if not isinstance(report_id, str) or not report_id.strip():
+            raise TaskAdmissionError("report ID is required")
+        if not callable(runner):
+            raise TaskAdmissionError("report runner is unavailable")
+        with self._lock:
+            if self._shutdown_requested:
+                raise TaskAdmissionError("server is stopping and cannot accept new report tasks")
+            task = ProcessTask(
+                task_id=f"task_{uuid4().hex}",
+                source="Analysis Report",
+                task_type="report_generation",
+                vision_mode="local",
+                request_id=request_id,
+                report_id=report_id,
+                run_id=report_id,
+                max_steps=1,
+                _report_runner=runner,
+                _report_provider=provider,
+            )
+            self._tasks[task.task_id] = task
+            task._future = self._executor.submit(self._run_report, task.task_id)
+        return task
+
     def _set_stage(
         self,
         task: ProcessTask,
@@ -265,7 +303,7 @@ class ProcessTaskManager:
     @staticmethod
     def _error_for(task: ProcessTask, exc: Exception) -> dict[str, Any]:
         detail = str(exc).strip()
-        provider = task._analysis_provider if task.task_type == "ai_analysis" else task._vision_provider
+        provider = task._analysis_provider if task.task_type == "ai_analysis" else task._report_provider if task.task_type == "report_generation" else task._vision_provider
         provider_config = getattr(provider, "config", None)
         provider_secret = getattr(provider_config, "api_key", "") if provider_config is not None else ""
         if isinstance(provider_secret, str) and provider_secret:
@@ -288,6 +326,23 @@ class ProcessTaskManager:
                 retryable = True
                 stage = task.current_stage
             scope = "analysis"
+        elif task.task_type == "report_generation":
+            if isinstance(exc, ReportExecutionError):
+                code = exc.code
+                message = exc.message
+                retryable = exc.retryable
+                stage = exc.stage
+            elif isinstance(exc, CancellationRequested) or task._cancel_event.is_set():
+                code = "REPORT_CANCELLED"
+                message = "report generation was cancelled"
+                retryable = True
+                stage = task.current_stage if task.current_stage not in {"queued", "cancelling"} else "cancelled"
+            else:
+                code = "REPORT_FAILED"
+                message = "analysis report could not be generated"
+                retryable = True
+                stage = task.current_stage
+            scope = "report"
         elif isinstance(exc, CancellationRequested) or task._cancel_event.is_set():
             code = "TASK_CANCELLED"
             message = "用户已请求停止处理。"
@@ -547,6 +602,92 @@ class ProcessTaskManager:
         except (CancellationRequested, AnalysisExecutionError) as exc:
             with self._lock:
                 task.status = "cancelled" if isinstance(exc, CancellationRequested) or getattr(exc, "code", "") == "ANALYSIS_CANCELLED" else "failed"
+                task.current_stage = "cancelled" if task.status == "cancelled" else "failed"
+                task.finished_at = datetime.now().astimezone().replace(tzinfo=None)
+                task.error = self._error_for(task, exc)
+                task.error_summary = task.error["message"]
+        except Exception as exc:
+            with self._lock:
+                task.status = "cancelled" if task._cancel_event.is_set() else "failed"
+                task.current_stage = "cancelled" if task.status == "cancelled" else "failed"
+                task.finished_at = datetime.now().astimezone().replace(tzinfo=None)
+                task.error = self._error_for(task, exc)
+                task.error_summary = task.error["message"]
+        finally:
+            with self._lock:
+                if task._started_clock is not None:
+                    task.elapsed_seconds = max(0.0, time.perf_counter() - task._started_clock)
+            _ = started
+
+    def _run_report(self, task_id: str) -> None:
+        with self._lock:
+            task = self._tasks[task_id]
+        started = time.perf_counter()
+        try:
+            def progress(
+                stage: str,
+                value: float,
+                *,
+                current_file: str | None = None,
+                completed: int | None = None,
+                total: int | None = None,
+                current_page: int | None = None,
+                current_substage: str | None = None,
+                current_step: int | None = None,
+                max_steps: int | None = None,
+                run_id: str | None = None,
+            ) -> None:
+                self._set_stage(
+                    task,
+                    stage,
+                    value,
+                    current_file=current_file,
+                    completed=completed,
+                    total=total,
+                    current_page=current_page,
+                    current_substage=current_substage,
+                    current_step=current_step,
+                    max_steps=max_steps,
+                    run_id=run_id or task.report_id,
+                )
+
+            self._set_stage(
+                task,
+                "report_generation",
+                0.01,
+                current_file="Analysis Report",
+                completed=0,
+                total=1,
+                current_substage="loading_analysis",
+                current_step=0,
+                max_steps=1,
+                run_id=task.report_id,
+            )
+            runner = task._report_runner
+            if runner is None:
+                raise ReportExecutionError("REPORT_FAILED", "report runner is unavailable")
+            result = runner(progress, task._cancel_event)
+            if task._cancel_event.is_set() or task.status == "cancelling":
+                raise ReportExecutionError("REPORT_CANCELLED", "report generation was cancelled", stage="cancelled", retryable=True)
+            with self._lock:
+                task.status = "succeeded"
+                task.progress = 1.0
+                task.current_stage = "completed"
+                task.current_substage = "completed"
+                task.current_step = 1
+                task.finished_at = datetime.now().astimezone().replace(tzinfo=None)
+                task.completed = 1
+                task.total = 1
+                task.counts = {"reports": 1}
+                task.summary = {
+                    "reportId": task.report_id,
+                    "generationMode": result.get("generation_mode") if isinstance(result, Mapping) else None,
+                }
+                if task._started_clock is not None:
+                    task.elapsed_seconds = max(0.0, time.perf_counter() - task._started_clock)
+        except (CancellationRequested, ReportExecutionError) as exc:
+            with self._lock:
+                task.status = "cancelled" if isinstance(exc, CancellationRequested) or getattr(exc, "code", "") == "REPORT_CANCELLED" else "failed"
                 task.current_stage = "cancelled" if task.status == "cancelled" else "failed"
                 task.finished_at = datetime.now().astimezone().replace(tzinfo=None)
                 task.error = self._error_for(task, exc)

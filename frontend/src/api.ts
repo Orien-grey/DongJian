@@ -2,6 +2,9 @@ import type {
   AnalysisRunResponse,
   AnalysisRunsResponse,
   AnalysisStartResponse,
+  ReportResponse,
+  ReportsResponse,
+  ReportStartResponse,
   AssetDetail,
   AISettingsResponse,
   CatalogResponse,
@@ -109,6 +112,27 @@ export const api = {
     }),
   analysisRuns: (limit = 20) => request<AnalysisRunsResponse>(`/api/v1/analysis/runs?limit=${limit}`),
   analysisRun: (runId: string) => request<AnalysisRunResponse>(`/api/v1/analysis/runs/${encodeURIComponent(runId)}`),
+  reports: (limit = 50) => request<ReportsResponse>(`/api/v1/reports?limit=${limit}`),
+  report: (reportId: string) => request<ReportResponse>(`/api/v1/reports/${encodeURIComponent(reportId)}`),
+  reportStart: (analysisRunIds: string[], title: string, purpose: string) =>
+    request<ReportStartResponse>("/api/v1/reports", {
+      method: "POST",
+      body: JSON.stringify({ analysisRunIds, title, purpose }),
+    }),
+  reportExport: async (reportId: string, format: "markdown" | "html"): Promise<{ content: string; contentType: string }> => {
+    const response = await fetch(`/api/v1/reports/${encodeURIComponent(reportId)}/export?format=${format}`);
+    if (!response.ok) {
+      const payload = (await response.json().catch(() => ({}))) as ApiErrorBody;
+      const error = payload.error;
+      throw new ApiClientError(
+        error?.code ?? "http_error",
+        error?.message ?? `请求失败（${response.status}）`,
+        error?.requestId,
+        error?.retryable ?? false,
+      );
+    }
+    return { content: await response.text(), contentType: response.headers.get("Content-Type") ?? "text/plain; charset=utf-8" };
+  },
   querySchema: (assetIds: string[]) =>
     request<SqlSchemaResponse>("/api/v1/query/schema", {
       method: "POST",

@@ -1,4 +1,4 @@
-export type Page = "overview" | "catalog" | "search" | "query" | "quality" | "analysis" | "tasks" | "settings" | "detail";
+export type Page = "overview" | "catalog" | "search" | "query" | "quality" | "analysis" | "reports" | "tasks" | "settings" | "detail";
 export type AssetType = "table" | "text";
 export type QualityStatus = "ready" | "needs_review" | "unusable";
 export type TaskStatus = "queued" | "running" | "cancelling" | "succeeded" | "failed" | "cancelled" | "interrupted";
@@ -305,7 +305,7 @@ export interface TextPreview {
 export interface Task {
   taskId: string;
   source: string;
-  taskType?: "process" | "ai_analysis" | string;
+  taskType?: "process" | "ai_analysis" | "report_generation" | string;
   visionMode: VisionMode;
   status: TaskStatus;
   progress: number;
@@ -319,6 +319,7 @@ export interface Task {
   maxSteps?: number;
   elapsedSeconds: number;
   analysisRunId?: string | null;
+  reportId?: string | null;
   counts: Record<string, number>;
   startedAt: string | null;
   finishedAt: string | null;
@@ -335,7 +336,7 @@ export interface TaskError {
   affectedFile: string | null;
   runId: string | null;
   requestId: string | null;
-  scope: "file" | "directory" | "analysis";
+  scope: "file" | "directory" | "analysis" | "report";
   technicalDetail?: string;
 }
 
@@ -442,4 +443,93 @@ export interface AnalysisStartResponse {
   analysisRunId: string;
   taskId: string;
   task: Task;
+}
+
+export interface ReportSection {
+  heading: string;
+  content: string;
+  evidence_ids: string[];
+}
+
+export interface ReportFinding {
+  statement: string;
+  evidence_ids: string[];
+}
+
+export interface StructuredReport {
+  title: string;
+  executive_summary: string;
+  sections: ReportSection[];
+  key_findings: ReportFinding[];
+  limitations: string[];
+  items_to_verify: string[];
+}
+
+export interface ReportEvidence {
+  evidence_id: string;
+  kind: string;
+  asset_id?: string | null;
+  asset_ids?: string[];
+  asset_type?: string | null;
+  display_name?: string;
+  source?: {
+    fileId?: string | null;
+    relativePath?: string | null;
+    format?: string | null;
+    sha256?: string | null;
+    pageNumber?: number | null;
+    sheetName?: string | null;
+    [key: string]: unknown;
+  };
+  snippet?: string;
+  text?: string;
+  columns?: string[];
+  rows?: Array<Record<string, unknown>>;
+  row_count?: number;
+  truncated?: boolean;
+  [key: string]: unknown;
+}
+
+export interface Report {
+  report_id: string;
+  created_at: string;
+  updated_at: string;
+  title: string;
+  purpose: string;
+  source_analysis_run_ids: string[];
+  generation_mode: "ai_enhanced" | "deterministic_fallback" | string;
+  model_identity: Record<string, unknown>;
+  structured_report: StructuredReport;
+  evidence_snapshot: ReportEvidence[];
+  source_asset_ids: string[];
+  render_metadata: Record<string, unknown>;
+  schema_version: string;
+  status: string;
+  generation_error: { code: string; message: string; retryable?: boolean } | null;
+}
+
+export interface ReportSummary {
+  report_id: string;
+  created_at: string;
+  updated_at: string;
+  title: string;
+  source_analysis_run_ids: string[];
+  generation_mode: string;
+  status: string;
+  executive_summary: string;
+}
+
+export interface ReportsResponse {
+  items: ReportSummary[];
+  limit: number;
+}
+
+export interface ReportStartResponse {
+  reportId: string;
+  taskId: string;
+  task: Task;
+}
+
+export interface ReportResponse {
+  report: Report;
 }
