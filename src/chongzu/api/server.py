@@ -6,13 +6,16 @@ import argparse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import logging
+import os
 from pathlib import Path
 import sys
 import threading
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
+from uuid import uuid4
 
 from .app import ApiError, BackendApp
+from .ownership import JobObject, LockUnavailable, acquire_server_lock, job_name
 
 
 DEFAULT_HOST = "127.0.0.1"
@@ -65,10 +68,28 @@ class ChongZuHTTPServer(ThreadingHTTPServer):
                     self.wfile.write(encoded)
 
             def _send_error(self, error: ApiError) -> None:
-                request_id = getattr(self, "request_id", "req_unknown")
+                request_id = self._ensure_request_id()
+                # Keep the browser response concise while retaining a stable
+                # correlation point in the server log.  The error object is
+                # already sanitized by BackendApp; no traceback or secret is
+                # sent to the client here.
+                app.logger.warning(
+                    "request %s api error code=%s status=%d retryable=%s",
+                    request_id,
+                    error.code,
+                    error.status,
+                    bool(getattr(error, "retryable", False)),
+                )
                 self._send_json(
                     error.status,
-                    {"error": {"code": error.code, "message": error.message, "requestId": request_id}},
+                    {
+                        "error": {
+                            "code": error.code,
+                            "message": error.message,
+                            "retryable": bool(getattr(error, "retryable", False)),
+                            "requestId": request_id,
+                        }
+                    },
                 )
 
             def _request_body(self) -> bytes:
@@ -81,19 +102,33 @@ class ChongZuHTTPServer(ThreadingHTTPServer):
                     raise ApiError("request_too_large", "request body exceeds the local limit", 413)
                 return self.rfile.read(length)
 
+            def _ensure_request_id(self) -> str:
+                request_id = getattr(self, "request_id", None)
+                if not request_id:
+                    request_id = f"req_{uuid4().hex}"
+                    self.request_id = request_id
+                return request_id
+
             def _dispatch(self, body: bytes = b"") -> None:
                 parsed = urlsplit(self.path)
-                self.request_id = f"req_{__import__('uuid').uuid4().hex}"
+                self._ensure_request_id()
                 if parsed.path.startswith("/api/"):
                     if parsed.path == "/api/v1/internal/shutdown" and self.command == "POST":
                         if not app_server_token_matches(self.server, self.headers.get("X-ChongZu-Control")):
                             self._send_error(ApiError("not_found", "resource was not found", 404))
                             return
+                        app.request_shutdown()
                         self._send_json(202, {"status": "shutting_down"})
                         threading.Thread(target=self.server.shutdown, name="chongzu-shutdown", daemon=True).start()
                         return
                     try:
-                        response = app.handle_api(self.command, parsed.path, parse_qs(parsed.query), body)
+                        response = app.handle_api(
+                            self.command,
+                            parsed.path,
+                            parse_qs(parsed.query),
+                            body,
+                            request_id=self.request_id,
+                        )
                         self._send_json(response.status, response.payload)
                     except ApiError as exc:
                         self._send_error(exc)
@@ -124,12 +159,14 @@ class ChongZuHTTPServer(ThreadingHTTPServer):
                 self._dispatch()
 
             def do_POST(self) -> None:  # noqa: N802
+                self._ensure_request_id()
                 try:
                     self._dispatch(self._request_body())
                 except ApiError as exc:
                     self._send_error(exc)
 
             def do_PATCH(self) -> None:  # noqa: N802
+                self._ensure_request_id()
                 try:
                     self._dispatch(self._request_body())
                 except ApiError as exc:
@@ -153,15 +190,53 @@ def run_server(
     port: int = DEFAULT_PORT,
     project_root: Path | str | None = None,
     control_token: str | None = None,
+    instance_id: str | None = None,
 ) -> int:
     root = Path(project_root).resolve() if project_root else Path(__file__).resolve().parents[3]
     logger = _logger(root)
-    app = BackendApp(project_root=root, logger=logger)
+    instance = instance_id or f"server_{uuid4().hex}"
+    try:
+        ownership_lock = acquire_server_lock(
+            root,
+            metadata={"pid": __import__("os").getpid(), "instanceId": instance, "port": port},
+        )
+    except LockUnavailable:
+        print("ChongZu 项目已有运行中的服务实例，当前服务未启动。", file=sys.stderr)
+        return 3
+    job = JobObject.create_for_process(root, instance)
+    if job is None and sys.platform == "win32":
+        logger.warning("Windows Job Object unavailable; using verified process-tree fallback")
+    app: BackendApp | None = None
+
+    def finish_ownership(graceful: bool) -> None:
+        if app is not None:
+            completed = app.close(timeout=5.0)
+            graceful = graceful and completed
+        if job is not None:
+            if graceful:
+                job.disarm_and_close()
+            else:
+                job.handoff_to_process_exit()
+        if graceful:
+            ownership_lock.release()
+
+    try:
+        app = BackendApp(
+            project_root=root,
+            logger=logger,
+            instance_id=instance,
+            server_pid=os.getpid(),
+        )
+    except Exception as exc:  # noqa: BLE001 - startup error is logged and sanitized
+        logger.error("server startup failed: %s", exc, exc_info=True)
+        print("ChongZu server 启动失败，请查看 workspace/logs/server.log。", file=sys.stderr)
+        finish_ownership(False)
+        return 2
     try:
         server = ChongZuHTTPServer((host, port), app, control_token=control_token)
     except OSError as exc:
         logger.error("could not bind %s:%s: %s", host, port, exc, exc_info=True)
-        app.close()
+        finish_ownership(True)
         print(f"ChongZu server could not bind {host}:{port}: {exc}", file=sys.stderr)
         return 2
     print(f"ChongZu local server listening at http://{host}:{port}/", flush=True)
@@ -171,7 +246,7 @@ def run_server(
         pass
     finally:
         server.server_close()
-        app.close()
+        finish_ownership(True)
     return 0
 
 
@@ -181,12 +256,19 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     parser.add_argument("--project-root", type=Path, default=None)
     parser.add_argument("--control-token", default=None)
+    parser.add_argument("--instance-id", default=None)
     args = parser.parse_args(argv)
     if args.host != DEFAULT_HOST:
         parser.error("server host must remain 127.0.0.1")
     if not 1 <= args.port <= 65_535:
         parser.error("port must be between 1 and 65535")
-    return run_server(host=args.host, port=args.port, project_root=args.project_root, control_token=args.control_token)
+    return run_server(
+        host=args.host,
+        port=args.port,
+        project_root=args.project_root,
+        control_token=args.control_token,
+        instance_id=args.instance_id,
+    )
 
 
 if __name__ == "__main__":

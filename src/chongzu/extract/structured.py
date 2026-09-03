@@ -10,9 +10,11 @@ import json
 import os
 from pathlib import Path
 import time
+from typing import Callable
 from uuid import uuid4
 
 from chongzu import paths
+from chongzu.cancellation import check_cancel
 from chongzu.registry import Registry, canonical_source_root, utc_now
 from chongzu.scan import ScanError, scan_source
 
@@ -116,6 +118,8 @@ def extract_structured(
     registry_path: Path | str | None = None,
     workspace_root: Path | str | None = None,
     _scan_summary=None,
+    progress_callback: Callable[..., None] | None = None,
+    cancel_event=None,
 ) -> StructuredExtractionSummary:
     """Scan *source*, then extract current CSV/TSV/XLS/XLSX registry rows."""
 
@@ -126,37 +130,66 @@ def extract_structured(
     workspace.mkdir(parents=True, exist_ok=True)
     if _scan_summary is None:
         try:
-            scan_summary = scan_source(source, workers=worker_count, registry_path=registry_file)
+            scan_summary = scan_source(
+                source,
+                workers=worker_count,
+                registry_path=registry_file,
+                cancel_event=cancel_event,
+            )
         except ScanError as exc:
             raise StructuredExtractionError(str(exc)) from exc
     else:
         scan_summary = _scan_summary
     source_root = canonical_source_root(source, require_directory=True)
     summary = StructuredExtractionSummary(source_root=source_root, discovery_scan_ms=scan_summary.elapsed_ms)
-    registry = Registry.open(registry_file)
+    registry = Registry.open(registry_file, initialize=False)
     try:
         registry.recover_incomplete_extractions(source_root)
         rows = registry.structured_candidates(source_root)
         summary.files_considered = registry.count_present_files(source_root)
         summary.structured_supported = len(rows)
         summary.total_bytes = sum(int(row["size_bytes"] or 0) for row in rows)
+        completed = 0
+
+        def emit(file_name: str | None, substage: str) -> None:
+            if progress_callback is None:
+                return
+            progress = 0.30 + (0.15 * completed / max(1, len(rows)))
+            try:
+                progress_callback(
+                    "extract",
+                    progress,
+                    current_file=file_name,
+                    completed=completed,
+                    total=len(rows),
+                    current_substage=substage,
+                )
+            except TypeError:
+                progress_callback("extract", progress)
+
         pending: dict[Future[FileExtractionResult], tuple[StructuredSource, str, datetime, bool]] = {}
         sources = iter(_source_from_row(row, workspace) for row in rows)
         exhausted = False
-        with ThreadPoolExecutor(max_workers=worker_count, thread_name_prefix="chongzu-structured") as executor:
+        executor = ThreadPoolExecutor(max_workers=worker_count, thread_name_prefix="chongzu-structured")
+        try:
             while pending or not exhausted:
+                check_cancel(cancel_event)
                 while not exhausted and len(pending) < worker_count * 2:
+                    check_cancel(cancel_event)
                     try:
                         structured_source = next(sources)
                     except StopIteration:
                         exhausted = True
                         break
+                    emit(structured_source.relative_path, "读取表格")
                     extractor, extractor_version = _extractor(structured_source.business_format)
                     identity = extraction_identity(structured_source, extractor, extractor_version)
                     reusable = None if force else registry.reusable_extraction(identity)
                     if reusable is not None and _artifacts_exist(reusable, workspace):
                         summary.reused += 1
                         summary.sheets += int(reusable.get("sheet_count", 0) or 0)
+                        completed += 1
+                        emit(structured_source.relative_path, "复用已有表格结果")
                         continue
                     run_id = f"xrun_{uuid4().hex}"
                     started_at = utc_now()
@@ -175,7 +208,7 @@ def extract_structured(
                     pending[future] = (structured_source, run_id, started_at, force)
                 if not pending:
                     continue
-                done, _ = wait(tuple(pending), return_when=FIRST_COMPLETED)
+                done, _ = wait(tuple(pending), timeout=0.1, return_when=FIRST_COMPLETED)
                 for future in done:
                     structured_source, run_id, started_at, was_forced = pending.pop(future)
                     try:
@@ -210,6 +243,15 @@ def extract_structured(
                         summary.extracted += 1
                         summary.tables_produced += len(result.assets)
                         summary.total_rows += result.total_rows
+                    completed += 1
+                    emit(structured_source.relative_path, "表格提取完成")
+        except BaseException:
+            for future in pending:
+                future.cancel()
+            executor.shutdown(wait=False, cancel_futures=True)
+            raise
+        else:
+            executor.shutdown(wait=True)
     finally:
         registry.close()
     summary.wall_time_ms = (time.perf_counter_ns() - wall_started) / 1_000_000

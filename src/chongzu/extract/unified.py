@@ -10,11 +10,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from threading import Event
 import time
 from typing import Any
 from uuid import uuid4
 
 from chongzu import paths
+from chongzu.cancellation import check_cancel
 from chongzu.registry import Registry, canonical_source_root
 from chongzu.scan import ScanError, scan_source
 
@@ -120,9 +122,16 @@ def _processing_counts(registry: Registry, rows: list[dict[str, Any]]) -> tuple[
     on the summary.
     """
 
+    if not rows:
+        return 0, 0, 0, 0
+    source_roots = {str(row.get("source_root") or "") for row in rows}
+    if len(source_roots) == 1:
+        return registry.processing_counts(next(iter(source_roots)))
+    # This branch is retained for callers that intentionally pass a mixed
+    # source list (the production coordinator passes one directory). It keeps
+    # the original semantics without changing the public helper contract.
     processed = failed = deferred = 0
     for row in rows:
-        fmt = str(row.get("business_format") or "")
         if str(row.get("support_status")) != "supported":
             continue
         sha = row.get("sha256")
@@ -130,21 +139,19 @@ def _processing_counts(registry: Registry, rows: list[dict[str, Any]]) -> tuple[
             failed += 1
             continue
         statuses = _latest_route_statuses(registry, str(row["file_id"]), str(sha))
+        fmt = str(row.get("business_format") or "")
         if fmt in {"csv", "tsv", "xls", "xlsx"}:
             expected = statuses.get("structured_native")
         elif fmt == "pdf":
             native_status = statuses.get("pdf_native_text")
             ocr_status = statuses.get("ocr_rapidocr")
-            # Native profiling is required for every PDF, while OCR is
-            # required only when the profile selected scanned pages. A failed
-            # selected OCR route is a file failure even if native pages were
-            # successfully preserved.
-            if native_status == "failed" or ocr_status == "failed":
-                expected = "failed"
-            elif native_status in {"successful", "partial"} or ocr_status in {"successful", "partial"}:
-                expected = "successful"
-            else:
-                expected = native_status or ocr_status
+            expected = (
+                "failed"
+                if native_status == "failed" or ocr_status == "failed"
+                else "successful"
+                if native_status in {"successful", "partial"} or ocr_status in {"successful", "partial"}
+                else native_status or ocr_status
+            )
         elif fmt in {"jpeg", "png"}:
             expected = statuses.get("ocr_rapidocr")
         elif fmt == "txt":
@@ -173,6 +180,8 @@ def extract_unified(
     force: bool = False,
     registry_path: Path | str | None = None,
     workspace_root: Path | str | None = None,
+    cancel_event: Event | None = None,
+    progress_callback=None,
 ) -> UnifiedExtractionSummary:
     """Run all currently implemented deterministic extraction routes once."""
 
@@ -181,8 +190,14 @@ def extract_unified(
     registry_file = Path(registry_path or paths.REGISTRY_PATH).resolve()
     workspace = Path(workspace_root or paths.WORKSPACE_ROOT).resolve()
     workspace.mkdir(parents=True, exist_ok=True)
+    check_cancel(cancel_event)
     try:
-        scan_summary = scan_source(source, workers=worker_count, registry_path=registry_file)
+        scan_summary = scan_source(
+            source,
+            workers=worker_count,
+            registry_path=registry_file,
+            cancel_event=cancel_event,
+        )
     except ScanError as exc:
         raise UnifiedExtractionError(str(exc)) from exc
     source_root = canonical_source_root(source, require_directory=True)
@@ -193,7 +208,7 @@ def extract_unified(
         scan_ms=scan_summary.elapsed_ms,
     )
 
-    registry = Registry.open(registry_file)
+    registry = Registry.open(registry_file, initialize=False)
     try:
         rows = _rows(registry, source_root)
     finally:
@@ -211,35 +226,50 @@ def extract_unified(
         "registry_path": registry_file,
         "workspace_root": workspace,
         "_scan_summary": scan_summary,
+        "progress_callback": progress_callback,
+        "cancel_event": cancel_event,
     }
+    # PDF rendering, table reconstruction, and OCR all load native models or
+    # large page buffers.  Keep those heavy routes to one process inside a
+    # single product task; structured/cleaning concurrency remains separately
+    # bounded.  This prevents a mixed scanned-PDF + image directory from
+    # starting several native runtimes at once and exhausting Windows process
+    # memory, while preserving the direct benchmark APIs' worker controls.
+    heavy_route_kwargs = {**route_kwargs, "workers": 1}
     if formats & {"csv", "tsv", "xls", "xlsx"}:
+        check_cancel(cancel_event)
         summary.structured_summary, elapsed = _run_route(
             "structured", lambda: extract_structured(source, **route_kwargs)
         )
         summary.route_timings["structured"] = elapsed
     if "pdf" in formats:
+        check_cancel(cancel_event)
         summary.pdf_summary, elapsed = _run_route(
-            "pdf", lambda: extract_pdf(source, **route_kwargs)
+            "pdf", lambda: extract_pdf(source, **heavy_route_kwargs)
         )
         summary.route_timings["pdf"] = elapsed
         summary.native_pdf_pages = summary.pdf_summary.pages
+        check_cancel(cancel_event)
         summary.pdf_table_summary, elapsed = _run_route(
-            "pdf_table", lambda: extract_pdf_tables(source, **route_kwargs)
+            "pdf_table", lambda: extract_pdf_tables(source, **heavy_route_kwargs)
         )
         summary.route_timings["pdf_table"] = elapsed
     if formats & {"pdf", "jpeg", "png"}:
+        check_cancel(cancel_event)
         summary.ocr_summary, elapsed = _run_route(
-            "ocr", lambda: extract_ocr(source, **route_kwargs)
+            "ocr", lambda: extract_ocr(source, **heavy_route_kwargs)
         )
         summary.route_timings["ocr"] = elapsed
         summary.ocr_pages_images = summary.ocr_summary.pages_ocred + summary.ocr_summary.images_considered
     if "txt" in formats:
+        check_cancel(cancel_event)
         summary.text_summary, elapsed = _run_route(
             "text", lambda: extract_text(source, **route_kwargs)
         )
         summary.route_timings["text"] = elapsed
 
-    registry = Registry.open(registry_file)
+    check_cancel(cancel_event)
+    registry = Registry.open(registry_file, initialize=False)
     try:
         current_rows = _rows(registry, source_root)
         processed, failed, deferred, _ = _processing_counts(registry, current_rows)

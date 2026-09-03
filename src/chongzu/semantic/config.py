@@ -1,8 +1,9 @@
 """Provider-neutral, project-local semantic configuration.
 
-Only ``<project>/.env`` is a runtime configuration source.  The legacy JSON
-example remains loadable for compatibility tests and documentation, but it is
-never discovered implicitly by this module.
+The product UI may store a project-local encrypted settings snapshot.  The
+advanced ``<project>/.env`` file remains a fallback when that snapshot does
+not exist.  The legacy JSON example remains loadable for compatibility tests
+and documentation, but it is never discovered implicitly.
 """
 
 from __future__ import annotations
@@ -131,4 +132,8 @@ LLMConfig = SemanticConfig
 
 def load_semantic_config(project_root: Path | None = None) -> SemanticConfig:
     root = (project_root or paths.PROJECT_ROOT).resolve()
-    return SemanticConfig.from_env_file(root / ".env")
+    # Import lazily to keep the provider-neutral config module usable by the
+    # settings store itself without a module cycle.
+    from .settings import load_runtime_ai_settings
+
+    return load_runtime_ai_settings(root).config

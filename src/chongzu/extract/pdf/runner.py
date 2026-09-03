@@ -9,11 +9,14 @@ import hashlib
 import json
 from pathlib import Path
 import time
+from typing import Callable
 from uuid import uuid4
 
 from chongzu import paths
+from chongzu.cancellation import check_cancel
 from chongzu.registry import Registry, canonical_source_root, utc_now
 from chongzu.scan import ScanError, scan_source
+from chongzu.worker_runtime import configure_hidden_worker_executable
 
 from ..models import StructuredSource
 from .artifacts import artifact_absolute
@@ -225,6 +228,8 @@ def extract_pdf(
     registry_path: Path | str | None = None,
     workspace_root: Path | str | None = None,
     _scan_summary=None,
+    progress_callback: Callable[..., None] | None = None,
+    cancel_event=None,
 ) -> PDFExtractionSummary:
     """Scan *source*, then extract current PDF candidates with PyMuPDF."""
 
@@ -235,7 +240,12 @@ def extract_pdf(
     workspace.mkdir(parents=True, exist_ok=True)
     if _scan_summary is None:
         try:
-            scan_summary = scan_source(source, workers=worker_count, registry_path=registry_file)
+            scan_summary = scan_source(
+                source,
+                workers=worker_count,
+                registry_path=registry_file,
+                cancel_event=cancel_event,
+            )
         except ScanError as exc:
             raise PDFExtractionError(str(exc)) from exc
     else:
@@ -245,22 +255,44 @@ def extract_pdf(
         source_root=source_root,
         discovery_scan_ms=scan_summary.elapsed_ms,
     )
-    registry = Registry.open(registry_file)
+    configure_hidden_worker_executable()
+    registry = Registry.open(registry_file, initialize=False)
     try:
         registry.recover_incomplete_extractions(source_root)
         rows = registry.pdf_candidates(source_root)
         summary.files_considered = registry.count_present_files(source_root)
         summary.pdf_files = len(rows)
         summary.total_bytes = sum(int(row["size_bytes"] or 0) for row in rows)
+        completed = 0
+
+        def emit(file_name: str | None, substage: str) -> None:
+            if progress_callback is None:
+                return
+            progress = 0.30 + (0.15 * completed / max(1, len(rows)))
+            try:
+                progress_callback(
+                    "extract",
+                    progress,
+                    current_file=file_name,
+                    completed=completed,
+                    total=len(rows),
+                    current_substage=substage,
+                )
+            except TypeError:
+                progress_callback("extract", progress)
         sources = iter(_source_from_row(row, workspace) for row in rows)
 
         if worker_count == 1:
             for pdf_source in sources:
+                check_cancel(cancel_event)
+                emit(pdf_source.relative_path, "读取 PDF 文本")
                 identity = pdf_extraction_identity(pdf_source)
                 reusable = None if force else registry.reusable_pdf_extraction(identity)
                 if reusable is not None and _artifacts_exist(reusable, workspace):
                     summary.reused += 1
                     summary.add_profile(reusable.get("profile") or {})
+                    completed += 1
+                    emit(pdf_source.relative_path, "复用已有 PDF 文本")
                     continue
                 run_id = f"xrun_{uuid4().hex}"
                 started_at = utc_now()
@@ -283,25 +315,33 @@ def extract_pdf(
                     started_at=started_at,
                     force=force,
                 )
+                completed += 1
+                emit(pdf_source.relative_path, "PDF 文本完成")
         else:
             pending: dict[
                 Future[PdfExtractionResult],
                 tuple[StructuredSource, datetime, bool, str, str],
             ] = {}
             exhausted = False
-            with ProcessPoolExecutor(max_workers=worker_count) as executor:
+            executor = ProcessPoolExecutor(max_workers=worker_count)
+            try:
                 while pending or not exhausted:
+                    check_cancel(cancel_event)
                     while not exhausted and len(pending) < worker_count * 2:
+                        check_cancel(cancel_event)
                         try:
                             pdf_source = next(sources)
                         except StopIteration:
                             exhausted = True
                             break
+                        emit(pdf_source.relative_path, "读取 PDF 文本")
                         identity = pdf_extraction_identity(pdf_source)
                         reusable = None if force else registry.reusable_pdf_extraction(identity)
                         if reusable is not None and _artifacts_exist(reusable, workspace):
                             summary.reused += 1
                             summary.add_profile(reusable.get("profile") or {})
+                            completed += 1
+                            emit(pdf_source.relative_path, "复用已有 PDF 文本")
                             continue
                         run_id = f"xrun_{uuid4().hex}"
                         started_at = utc_now()
@@ -320,7 +360,7 @@ def extract_pdf(
                         pending[future] = (pdf_source, started_at, force, run_id, identity)
                     if not pending:
                         continue
-                    done, _ = wait(tuple(pending), return_when=FIRST_COMPLETED)
+                    done, _ = wait(tuple(pending), timeout=0.1, return_when=FIRST_COMPLETED)
                     for future in done:
                         pdf_source, started_at, was_forced, run_id, identity = pending.pop(future)
                         try:
@@ -341,6 +381,15 @@ def extract_pdf(
                             started_at=started_at,
                             force=was_forced,
                         )
+                        completed += 1
+                        emit(pdf_source.relative_path, "PDF 文本完成")
+            except BaseException:
+                for future in pending:
+                    future.cancel()
+                executor.shutdown(wait=False, cancel_futures=True)
+                raise
+            else:
+                executor.shutdown(wait=True)
     finally:
         registry.close()
     summary.wall_time_ms = (time.perf_counter_ns() - wall_started) / 1_000_000

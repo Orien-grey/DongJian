@@ -26,9 +26,7 @@ def _coverage(boxes: Iterable[BoundingBox], width: float, height: float) -> floa
     return min(1.0, sum(_area(box) for box in boxes) / page_area)
 
 
-def _aligned_text_columns(blocks: Sequence[ExtractedTextBlock]) -> bool:
-    if len(blocks) < 4:
-        return False
+def _aligned_text_rows(blocks: Sequence[ExtractedTextBlock]) -> list[list[ExtractedTextBlock]]:
     rows: list[list[ExtractedTextBlock]] = []
     for block in sorted(blocks, key=lambda item: (item.bbox.y0, item.bbox.x0)):
         for row in rows:
@@ -37,8 +35,27 @@ def _aligned_text_columns(blocks: Sequence[ExtractedTextBlock]) -> bool:
                 break
         else:
             rows.append([block])
-    aligned_rows = [row for row in rows if len(row) >= 3]
-    return any(len({round(block.bbox.x0, 1) for block in row}) >= 3 for row in aligned_rows)
+    return [sorted(row, key=lambda item: item.bbox.x0) for row in rows if len(row) >= 3]
+
+
+def _aligned_text_columns(blocks: Sequence[ExtractedTextBlock]) -> bool:
+    """Detect repeated cell-like columns, not merely a newspaper text row."""
+
+    aligned_rows = _aligned_text_rows(blocks)
+    if len(aligned_rows) < 2:
+        return False
+    # A table normally repeats at least three x positions over multiple rows.
+    # Requiring that repetition avoids routing an ordinary page with many
+    # short labels to the expensive reconstruction path.
+    reference = [block.bbox.x0 for block in aligned_rows[0]]
+    repeated = 0
+    for x0 in reference:
+        if sum(
+            any(abs(block.bbox.x0 - x0) <= 12.0 for block in row)
+            for row in aligned_rows[1:]
+        ) >= 1:
+            repeated += 1
+    return repeated >= 3
 
 
 def page_table_hint(
@@ -47,14 +64,15 @@ def page_table_hint(
     grid_line_count: int,
 ) -> tuple[bool, tuple[str, ...]]:
     reasons: list[str] = []
-    if _aligned_text_columns(blocks):
-        reasons.append("aligned_text_columns")
     short_blocks = [block for block in blocks if block.effective_char_count <= 40]
-    if len(short_blocks) >= 8 and len(short_blocks) / max(len(blocks), 1) >= 0.7:
+    aligned_columns = _aligned_text_columns(blocks)
+    if aligned_columns:
+        reasons.append("aligned_text_columns")
+    if aligned_columns and len(short_blocks) >= 8 and len(short_blocks) / max(len(blocks), 1) >= 0.7:
         reasons.append("many_short_text_blocks")
     if grid_line_count >= 4:
         reasons.append("page_drawings_grid_like")
-    return bool(reasons), tuple(dict.fromkeys(reasons))
+    return bool(aligned_columns or grid_line_count >= 4), tuple(dict.fromkeys(reasons))
 
 
 @dataclass(frozen=True)

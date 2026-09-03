@@ -376,7 +376,7 @@ class SqlQueryService:
                 raise SqlValidationError("duplicate_asset_id", "assetIds must not contain duplicates")
             normalized_ids.append(asset_id)
         placeholders = ",".join("?" for _ in normalized_ids)
-        registry = Registry.open(self.registry_path)
+        registry = Registry.open_reader(self.registry_path)
         try:
             cursor = registry.connection.execute(
                 f"""
@@ -578,7 +578,7 @@ def run_sql_benchmark(service: SqlQueryService) -> SqlBenchmark:
     """Run one bounded local query without changing extraction/catalog state."""
 
     started = time.perf_counter_ns()
-    registry = Registry.open(service.registry_path)
+    registry = Registry.open_reader(service.registry_path)
     try:
         row = registry.connection.execute(
             "SELECT asset_id FROM catalog_assets WHERE asset_type='table' ORDER BY source_file, asset_id LIMIT 1"

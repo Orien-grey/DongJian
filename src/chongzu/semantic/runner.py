@@ -321,7 +321,7 @@ def enrich_catalog(
     else:
         config = load_semantic_config()
         provider = provider_for_name(provider_name, config, allow_real_provider=allow_real_provider)
-    registry = Registry.open(registry_path)
+    registry = Registry.open(registry_path, initialize=False)
     try:
         runner = SemanticRunner(
             registry,

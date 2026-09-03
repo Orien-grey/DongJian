@@ -1,5 +1,6 @@
 import type {
   AssetDetail,
+  AISettingsResponse,
   CatalogResponse,
   HealthResponse,
   Overview,
@@ -15,18 +16,20 @@ import type {
 } from "./types";
 
 interface ApiErrorBody {
-  error?: { code?: string; message?: string; requestId?: string };
+  error?: { code?: string; message?: string; retryable?: boolean; requestId?: string };
 }
 
 export class ApiClientError extends Error {
   readonly code: string;
   readonly requestId?: string;
+  readonly retryable: boolean;
 
-  constructor(code: string, message: string, requestId?: string) {
+  constructor(code: string, message: string, requestId?: string, retryable = false) {
     super(message);
     this.name = "ApiClientError";
     this.code = code;
     this.requestId = requestId;
+    this.retryable = retryable;
   }
 }
 
@@ -42,6 +45,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       error?.code ?? "http_error",
       error?.message ?? `请求失败（${response.status}）`,
       error?.requestId,
+      error?.retryable ?? false,
     );
   }
   return payload as T;
@@ -49,6 +53,17 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   health: () => request<HealthResponse>("/api/v1/health"),
+  aiSettings: () => request<AISettingsResponse>("/api/v1/settings/ai"),
+  saveAiSettings: (value: { baseUrl: string; apiKey?: string; model: string; timeout: number }) =>
+    request<AISettingsResponse & { saved: boolean }>("/api/v1/settings/ai", {
+      method: "PUT",
+      body: JSON.stringify(value),
+    }),
+  testAiConnection: () =>
+    request<AISettingsResponse & { status: string; requestId: string }>("/api/v1/settings/ai/test", {
+      method: "POST",
+      body: JSON.stringify({}),
+    }),
   overview: () => request<Overview>("/api/v1/overview"),
   catalog: (params: URLSearchParams) => request<CatalogResponse>(`/api/v1/catalog?${params.toString()}`),
   search: (params: URLSearchParams) => request<SearchResponse>(`/api/v1/search?${params.toString()}`),

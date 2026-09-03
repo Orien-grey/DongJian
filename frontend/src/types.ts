@@ -1,7 +1,7 @@
-export type Page = "overview" | "catalog" | "search" | "query" | "quality" | "tasks" | "detail";
+export type Page = "overview" | "catalog" | "search" | "query" | "quality" | "tasks" | "settings" | "detail";
 export type AssetType = "table" | "text";
 export type QualityStatus = "ready" | "needs_review" | "unusable";
-export type TaskStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled";
+export type TaskStatus = "queued" | "running" | "cancelling" | "succeeded" | "failed" | "cancelled" | "interrupted";
 
 export interface Overview {
   files: number;
@@ -20,18 +20,45 @@ export interface Overview {
   semanticPending: number;
   semanticEnriched: number;
   formats: Record<string, number>;
+  timings?: CatalogTimings;
+}
+
+export interface CatalogTimings {
+  registry_open_ms: number;
+  query_ms: number;
+  materialize_ms: number;
+  serialize_ms: number;
 }
 
 export interface HealthResponse {
   app: { name: string; version: string; apiVersion: string };
   portableRuntime: { status: string; projectRoot: string };
   registry: { status: string; path: string };
+  server: { pid: number | null; instanceId: string | null };
   llm: {
     status: "CONFIGURED" | "NOT_CONFIGURED" | string;
     configured: boolean;
+    enabled: boolean;
+    source: "ui" | "env" | "offline" | string;
+    apiKeyConfigured: boolean;
     optional: boolean;
     networkCalls: string;
   };
+}
+
+export interface AISettings {
+  baseUrl: string;
+  model: string;
+  timeout: number;
+  apiKeyConfigured: boolean;
+  source: "ui" | "env" | "offline" | string;
+  status: string;
+  configured: boolean;
+  enabled: boolean;
+}
+
+export interface AISettingsResponse {
+  settings: AISettings;
 }
 
 export interface SemanticField {
@@ -111,6 +138,7 @@ export interface Pagination {
 export interface CatalogResponse {
   items: AssetSummary[];
   pagination: Pagination;
+  timings?: CatalogTimings;
 }
 
 export interface SearchResult {
@@ -197,6 +225,8 @@ export interface QualityIssue {
   fallback_display_name?: string | null;
   source_file?: string | null;
   source_format?: string | null;
+  sheet_name?: string | null;
+  page_number?: number | null;
 }
 
 export interface QualityResponse {
@@ -269,11 +299,29 @@ export interface Task {
   status: TaskStatus;
   progress: number;
   currentStage: string;
+  currentFile: string | null;
+  completed: number;
+  total: number;
+  currentSubstage: string | null;
+  elapsedSeconds: number;
   counts: Record<string, number>;
   startedAt: string | null;
   finishedAt: string | null;
   errorSummary: string | null;
+  error: TaskError | null;
   summary: Record<string, unknown> | null;
+}
+
+export interface TaskError {
+  code: string;
+  stage: string;
+  message: string;
+  retryable: boolean;
+  affectedFile: string | null;
+  runId: string | null;
+  requestId: string | null;
+  scope: "file" | "directory";
+  technicalDetail?: string;
 }
 
 export interface TasksResponse {

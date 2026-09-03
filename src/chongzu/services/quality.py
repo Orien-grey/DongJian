@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from chongzu import paths
+from chongzu.locking import registry_write_mutex
 from chongzu.registry import Registry
 
 
@@ -29,7 +30,7 @@ class QualityService:
             raise ValueError("invalid quality issue status")
         if severity is not None and severity not in {"info", "warning", "error", "critical"}:
             raise ValueError("invalid quality issue severity")
-        registry = Registry.open(self.registry_path)
+        registry = Registry.open_reader(self.registry_path)
         try:
             total = registry.count_quality_issues(status=status, severity=severity, asset_id=asset_id)
             items = registry.list_quality_issues(
@@ -54,8 +55,9 @@ class QualityService:
     def update_status(self, issue_id: str, status: str) -> dict[str, Any] | None:
         if status not in ALLOWED_STATUSES:
             raise ValueError("quality issue status must be open, accepted, ignored, or resolved")
-        registry = Registry.open(self.registry_path)
-        try:
-            return registry.update_quality_issue_status(issue_id, status)
-        finally:
-            registry.close()
+        with registry_write_mutex(self.registry_path):
+            registry = Registry.open(self.registry_path, initialize=False)
+            try:
+                return registry.update_quality_issue_status(issue_id, status)
+            finally:
+                registry.close()

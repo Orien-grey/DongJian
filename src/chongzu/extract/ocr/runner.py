@@ -9,10 +9,11 @@ import hashlib
 import json
 from pathlib import Path
 import time
-from typing import Any
+from typing import Any, Callable
 from uuid import uuid4
 
 from chongzu import paths
+from chongzu.cancellation import CancellationRequested, check_cancel
 from chongzu.assets import (
     BoundingBox,
     ChunkProvenance,
@@ -29,6 +30,7 @@ from chongzu.assets import (
 )
 from chongzu.registry import Registry, canonical_source_root, utc_now as registry_now
 from chongzu.scan import scan_source
+from chongzu.worker_runtime import configure_hidden_worker_executable
 
 from ..models import StructuredSource
 from ..pdf.artifacts import write_text_asset
@@ -642,6 +644,8 @@ def extract_ocr(
     workspace_root: Path | str | None = None,
     _scan_summary: Any | None = None,
     selected_relative_paths: set[str] | None = None,
+    progress_callback: Callable[..., None] | None = None,
+    cancel_event=None,
 ) -> OCRExtractionSummary:
     """Run offline OCR for images and only scanned PDF pages in *source*.
 
@@ -658,28 +662,43 @@ def extract_ocr(
     workspace.mkdir(parents=True, exist_ok=True)
     if _scan_summary is None:
         try:
-            scan_summary = scan_source(source, workers=worker_count, registry_path=registry_file)
+            scan_summary = scan_source(
+                source,
+                workers=worker_count,
+                registry_path=registry_file,
+                cancel_event=cancel_event,
+            )
+        except CancellationRequested:
+            raise
         except Exception as exc:
             raise OCRExtractionError(str(exc)) from exc
     else:
         scan_summary = _scan_summary
     source_root = canonical_source_root(source, require_directory=True)
     summary = OCRExtractionSummary(source_root=source_root, discovery_scan_ms=scan_summary.elapsed_ms)
-    registry = Registry.open(registry_file)
+    configure_hidden_worker_executable()
+    probe_registry = Registry.open_reader(registry_file)
     try:
         # Profiles are the sole PDF routing facts.  Establish them through the
         # existing Phase 4A route, which reuses unchanged native results.
-        if any(row.get("business_format") == "pdf" for row in registry.ocr_candidates(source_root)):
-            from ..pdf.runner import extract_pdf
+        has_pdf = any(row.get("business_format") == "pdf" for row in probe_registry.ocr_candidates(source_root))
+    finally:
+        probe_registry.close()
+    if has_pdf:
+        from ..pdf.runner import extract_pdf
 
-            extract_pdf(
-                source,
-                workers=worker_count,
-                force=False,
-                registry_path=registry_file,
-                workspace_root=workspace,
-                _scan_summary=scan_summary,
-            )
+        extract_pdf(
+            source,
+            workers=worker_count,
+            force=False,
+            registry_path=registry_file,
+            workspace_root=workspace,
+            _scan_summary=scan_summary,
+            progress_callback=progress_callback,
+            cancel_event=cancel_event,
+        )
+    registry = Registry.open(registry_file, initialize=False)
+    try:
         registry.recover_incomplete_extractions(source_root)
         rows = registry.ocr_candidates(source_root)
         if selected_relative_paths is not None:
@@ -707,9 +726,29 @@ def extract_ocr(
                 continue
             pending.append((source_item, targets, route_reason))
         summary.files_attempted = len(pending)
+        completed = 0
+
+        def emit(file_name: str | None, substage: str) -> None:
+            if progress_callback is None:
+                return
+            progress = 0.60 + (0.12 * completed / max(1, len(rows)))
+            try:
+                progress_callback(
+                    "extract",
+                    progress,
+                    current_file=file_name,
+                    completed=completed,
+                    total=len(rows),
+                    current_substage=substage,
+                )
+            except TypeError:
+                progress_callback("extract", progress)
 
         def submit(executor: ProcessPoolExecutor, item: tuple[StructuredSource, list[OCRTarget], str]):
+            nonlocal completed
+            check_cancel(cancel_event)
             source_item, targets, route_reason = item
+            emit(source_item.relative_path, "准备 OCR")
             identity = ocr_extraction_identity(source_item, targets)
             reusable = None if force else registry.reusable_ocr_extraction(identity)
             if reusable is not None and _artifacts_exist(reusable, workspace):
@@ -718,6 +757,8 @@ def extract_ocr(
                 summary.pages_ocred += sum(1 for target in targets if target.kind == "pdf_page")
                 summary.text_assets_produced += int(reusable.get("text_asset_count") or len(reusable.get("text_assets") or []))
                 summary.table_assets_produced += int(reusable.get("table_count") or 0)
+                completed += 1
+                emit(source_item.relative_path, "复用已有 OCR 结果")
                 return None
             run_id = f"xrun_{uuid4().hex}"
             started_at = registry_now()
@@ -732,46 +773,48 @@ def extract_ocr(
                 route_reason=route_reason,
             )
             summary.targets += len(targets)
-            if executor is None:
-                return _extract_one(source_item, run_id, identity, targets, route_reason), started_at, run_id, identity
             return executor.submit(_extract_one, source_item, run_id, identity, targets, route_reason), started_at, run_id, identity
 
-        if worker_count == 1:
+        executor = ProcessPoolExecutor(max_workers=worker_count)
+        pending_futures: dict[
+            Future[OCRExtractionResult],
+            tuple[datetime, StructuredSource, str, list[OCRTarget], str, str],
+        ] = {}
+        try:
             for item in pending:
-                submitted = submit(None, item)  # type: ignore[arg-type]
+                submitted = submit(executor, item)
                 if submitted is None:
                     continue
-                result, started_at, _run_id, _identity = submitted
-                _record(registry, summary, result, started_at, force)
+                future, started_at, run_id, identity = submitted
+                pending_futures[future] = (started_at, item[0], item[2], item[1], run_id, identity)
+            while pending_futures:
+                check_cancel(cancel_event)
+                done, _ = wait(tuple(pending_futures), timeout=0.1, return_when=FIRST_COMPLETED)
+                for future in done:
+                    started_at, source_item, route_reason, targets, run_id, identity = pending_futures.pop(future)
+                    try:
+                        result = future.result()
+                    except Exception as exc:
+                        result = OCRExtractionResult(
+                            source=source_item,
+                            extraction_run_id=run_id,
+                            extraction_identity=identity,
+                            route_reason=route_reason,
+                            ocr_targets=[target.as_dict() for target in targets],
+                            status="failed",
+                            error_category="worker_error",
+                            error_message=str(exc),
+                        )
+                    _record(registry, summary, result, started_at, force)
+                    completed += 1
+                    emit(source_item.relative_path, "OCR 完成")
+        except BaseException:
+            for future in pending_futures:
+                future.cancel()
+            executor.shutdown(wait=False, cancel_futures=True)
+            raise
         else:
-            with ProcessPoolExecutor(max_workers=worker_count) as executor:
-                pending_futures: dict[
-                    Future[OCRExtractionResult],
-                    tuple[datetime, StructuredSource, str, list[OCRTarget], str, str],
-                ] = {}
-                for item in pending:
-                    submitted = submit(executor, item)
-                    if submitted is not None:
-                        future, started_at, run_id, identity = submitted
-                        pending_futures[future] = (started_at, item[0], item[2], item[1], run_id, identity)
-                while pending_futures:
-                    done, _ = wait(tuple(pending_futures), return_when=FIRST_COMPLETED)
-                    for future in done:
-                        started_at, source_item, route_reason, targets, run_id, identity = pending_futures.pop(future)
-                        try:
-                            result = future.result()
-                        except Exception as exc:
-                            result = OCRExtractionResult(
-                                source=source_item,
-                                extraction_run_id=run_id,
-                                extraction_identity=identity,
-                                route_reason=route_reason,
-                                ocr_targets=[target.as_dict() for target in targets],
-                                status="failed",
-                                error_category="worker_error",
-                                error_message=str(exc),
-                            )
-                        _record(registry, summary, result, started_at, force)
+            executor.shutdown(wait=True)
     finally:
         registry.close()
     summary.wall_time_ms = (time.perf_counter_ns() - wall_started) / 1_000_000

@@ -5,13 +5,13 @@ from __future__ import annotations
 from datetime import date, datetime
 import json
 from pathlib import Path
+import time
 from typing import Any, Mapping
 
 import polars as pl
 
 from chongzu import paths
 from chongzu.extract.artifacts import artifact_absolute
-from chongzu.extract.unified import _processing_counts
 from chongzu.registry import Registry
 
 
@@ -64,7 +64,7 @@ class CatalogService:
         self.workspace_root = Path(workspace_root or paths.WORKSPACE_ROOT).resolve()
 
     def _open(self) -> Registry:
-        return Registry.open(self.registry_path)
+        return Registry.open_reader(self.registry_path)
 
     @staticmethod
     def _catalog_item(row: Mapping[str, Any]) -> dict[str, Any]:
@@ -105,43 +105,49 @@ class CatalogService:
         )
 
     def overview(self) -> dict[str, Any]:
+        opened = time.perf_counter_ns()
         registry = self._open()
+        registry_open_ms = (time.perf_counter_ns() - opened) / 1_000_000
         try:
+            queried = time.perf_counter_ns()
             summary = registry.catalog_summary()
-            files = registry.list_files(state="present", limit=100_000)
-            supported = sum(1 for item in files if item.get("support_status") == "supported")
-            unsupported = len(files) - supported
-            _processed, failed, deferred, _ = _processing_counts(registry, files)
+            _processed, failed, deferred, _ = registry.processing_counts()
             format_cursor = registry.connection.execute(
                 "SELECT source_format, COUNT(*) FROM catalog_assets GROUP BY source_format ORDER BY source_format"
             )
             formats = {str(fmt or "unknown"): int(count) for fmt, count in format_cursor.fetchall()}
-            semantic_enriched = registry.connection.execute(
-                "SELECT COUNT(*) FROM catalog_assets WHERE semantic_status='enriched'"
-            ).fetchone()
-            open_issues = registry.connection.execute(
-                "SELECT COUNT(*) FROM quality_issues WHERE status='open'"
-            ).fetchone()
-            return _json_value(
-                {
-                    "files": int(summary.get("files", len(files))),
-                    "supported": supported,
-                    "unsupported": unsupported,
-                    "failed": int(failed),
-                    "deferred": int(deferred),
-                    "tableAssets": int(summary.get("table_assets", 0)),
-                    "textAssets": int(summary.get("text_assets", 0)),
-                    "textChunks": int(summary.get("text_chunks", 0)),
-                    "ready": int(summary.get("ready", 0)),
-                    "needsReview": int(summary.get("needs_review", 0)),
-                    "unusable": int(summary.get("unusable", 0)),
-                    "qualityIssues": int(summary.get("quality_issues", 0)),
-                    "openQualityIssues": int(open_issues[0] or 0),
-                    "semanticPending": int(summary.get("semantic_pending", 0)),
-                    "semanticEnriched": int(semantic_enriched[0] or 0),
-                    "formats": formats,
-                }
-            )
+            query_ms = (time.perf_counter_ns() - queried) / 1_000_000
+            materialized = {
+                "files": int(summary.get("files", 0)),
+                "supported": int(summary.get("supported_files", 0)),
+                "unsupported": int(summary.get("unsupported_files", 0)),
+                "failed": int(failed),
+                "deferred": int(deferred),
+                "tableAssets": int(summary.get("table_assets", 0)),
+                "textAssets": int(summary.get("text_assets", 0)),
+                "textChunks": int(summary.get("text_chunks", 0)),
+                "ready": int(summary.get("ready", 0)),
+                "needsReview": int(summary.get("needs_review", 0)),
+                "unusable": int(summary.get("unusable", 0)),
+                "qualityIssues": int(summary.get("quality_issues", 0)),
+                "openQualityIssues": int(summary.get("open_quality_issues", 0)),
+                "semanticPending": int(summary.get("semantic_pending", 0)),
+                "semanticEnriched": int(summary.get("semantic_enriched", 0)),
+                "formats": formats,
+            }
+            materialize_started = time.perf_counter_ns()
+            result = _json_value(materialized)
+            materialize_ms = (time.perf_counter_ns() - materialize_started) / 1_000_000
+            serialized_started = time.perf_counter_ns()
+            json.dumps(result, ensure_ascii=False, separators=(",", ":"))
+            serialize_ms = (time.perf_counter_ns() - serialized_started) / 1_000_000
+            result["timings"] = {
+                "registry_open_ms": round(registry_open_ms, 3),
+                "query_ms": round(query_ms, 3),
+                "materialize_ms": round(materialize_ms, 3),
+                "serialize_ms": round(serialize_ms, 3),
+            }
+            return result
         finally:
             registry.close()
 
@@ -163,14 +169,11 @@ class CatalogService:
             raise ValueError("type must be table or text")
         if quality_status not in {None, "ready", "needs_review", "unusable"}:
             raise ValueError("quality must be ready, needs_review, or unusable")
+        opened = time.perf_counter_ns()
         registry = self._open()
+        registry_open_ms = (time.perf_counter_ns() - opened) / 1_000_000
         try:
-            total = registry.count_catalog_assets(
-                asset_type=asset_type,
-                quality_status=quality_status,
-                source_format=source_format,
-                query=query,
-            )
+            queried = time.perf_counter_ns()
             rows = registry.list_catalog_assets(
                 asset_type=asset_type,
                 quality_status=quality_status,
@@ -178,9 +181,28 @@ class CatalogService:
                 query=query,
                 limit=limit,
                 offset=offset,
+                include_total=True,
             )
-            return {
-                "items": [self._catalog_item(row) for row in rows],
+            if rows:
+                total = int(rows[0].pop("_catalog_total", 0) or 0)
+                for row in rows[1:]:
+                    row.pop("_catalog_total", None)
+            else:
+                total = registry.count_catalog_assets(
+                    asset_type=asset_type,
+                    quality_status=quality_status,
+                    source_format=source_format,
+                    query=query,
+                )
+            quality_counts = registry.visible_quality_issue_counts(rows)
+            for row in rows:
+                row["quality_issue_count"] = quality_counts.get(str(row.get("asset_id") or ""), 0)
+            query_ms = (time.perf_counter_ns() - queried) / 1_000_000
+            materialize_started = time.perf_counter_ns()
+            items = [self._catalog_item(row) for row in rows]
+            materialize_ms = (time.perf_counter_ns() - materialize_started) / 1_000_000
+            result = {
+                "items": items,
                 "pagination": {
                     "limit": limit,
                     "offset": offset,
@@ -188,6 +210,16 @@ class CatalogService:
                     "hasNext": offset + len(rows) < total,
                 },
             }
+            serialized_started = time.perf_counter_ns()
+            json.dumps(result, ensure_ascii=False, separators=(",", ":"))
+            serialize_ms = (time.perf_counter_ns() - serialized_started) / 1_000_000
+            result["timings"] = {
+                "registry_open_ms": round(registry_open_ms, 3),
+                "query_ms": round(query_ms, 3),
+                "materialize_ms": round(materialize_ms, 3),
+                "serialize_ms": round(serialize_ms, 3),
+            }
+            return result
         finally:
             registry.close()
 

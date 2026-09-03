@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiClientError } from "./api";
 import type {
+  AISettings,
   AssetDetail,
   AssetSummary,
   HealthResponse,
@@ -21,11 +22,15 @@ const STAGE_LABELS: Record<string, string> = {
   queued: "排队中",
   scan: "扫描",
   extract: "提取",
+  registry_init: "准备数据目录",
   clean: "清洗",
   profile: "画像",
   catalog: "目录",
   completed: "完成",
   failed: "失败",
+  cancelling: "正在停止",
+  cancelled: "已取消",
+  interrupted: "已中断",
 };
 
 const EMPTY_OVERVIEW: Overview = {
@@ -52,12 +57,14 @@ function number(value: number | null | undefined): string {
 }
 
 function errorText(error: unknown): string {
-  if (error instanceof ApiClientError) return error.message;
-  return error instanceof Error ? error.message : "本地服务暂时无法完成请求";
+  if (error instanceof ApiClientError) {
+    return error.requestId ? `${error.message}（请求 ID：${error.requestId}）` : error.message;
+  }
+  return "请求未完成，请稍后重试。";
 }
 
 function qualityLabel(status: QualityStatus): string {
-  return { ready: "Ready", needs_review: "Needs review", unusable: "Unusable" }[status] ?? status;
+  return { ready: "可直接使用", needs_review: "需要审核", unusable: "不可用" }[status] ?? status;
 }
 
 function typeLabel(type: "table" | "text"): string {
@@ -66,7 +73,75 @@ function typeLabel(type: "table" | "text"): string {
 
 function dimensions(asset: AssetSummary): string {
   if (asset.assetType === "table") return `${number(asset.rows)} × ${number(asset.columns)}`;
-  return `${number(asset.chars)} 字符 · ${number(asset.chunks)} chunks`;
+  return `${number(asset.chars)} 字符 · ${number(asset.chunks)} 段文本`;
+}
+
+function suggestedActionLabel(action: string): string {
+  const normalized = action.toLowerCase();
+  if (normalized.includes("ocr")) return "请先核对 OCR 结果与原始页面。";
+  if (normalized.includes("header") || normalized.includes("source boundary")) return "请打开资产核对来源边界或表头。";
+  if (normalized.includes("semantic")) return "请先确认原始与规范化内容，再进行 AI 整理。";
+  if (normalized.includes("raw") || normalized.includes("normalized")) return "请打开原始与规范化结果核对后再继续。";
+  return "请打开资产核对原始内容后再决定。";
+}
+
+function matchKindLabel(kind: string): string {
+  return {
+    text_exact: "正文精确匹配",
+    text_substring: "正文包含匹配",
+    text_token: "正文关键词匹配",
+    text_phrase: "正文短语匹配",
+    fallback_name_contains: "文件名匹配",
+    source_file_contains: "来源文件匹配",
+    semantic_display_name_contains: "资产名称匹配",
+    semantic_metadata_contains: "资产信息匹配",
+  }[kind] ?? "本地匹配";
+}
+
+function sourceKindLabel(kind: string): string {
+  return { page: "PDF 页面", image: "图片", sheet: "工作表", file: "文件" }[kind] ?? kind;
+}
+
+function layerLabel(layer: string): string {
+  return layer === "normalized" ? "规范化内容" : layer === "raw" ? "原始内容" : layer;
+}
+
+function taskStatusLabel(status: Task["status"]): string {
+  return {
+    queued: "排队中",
+    running: "处理中",
+    cancelling: "正在停止",
+    succeeded: "处理完成",
+    failed: "处理失败",
+    cancelled: "已取消",
+    interrupted: "已中断",
+  }[status];
+}
+
+function issueTypeLabel(issueType: string): string {
+  return {
+    low_content: "内容过少",
+    empty_content: "没有提取到内容",
+    empty_text: "没有提取到文本",
+    low_ocr_confidence: "OCR 可信度较低",
+    incomplete_text_provenance: "文本来源信息不完整",
+    cleaning_failed: "清洗失败",
+  }[issueType] ?? issueType;
+}
+
+function issueDescription(issue: QualityIssue): string {
+  const evidence = issue.evidence && typeof issue.evidence === "object" ? issue.evidence as Record<string, unknown> : {};
+  const chars = Number(evidence.char_count ?? evidence.charCount ?? 0);
+  if (issue.issue_type === "low_content") return `系统只从该资产提取到 ${number(chars)} 个字符，可能是空白页、图片页或文本层不完整。`;
+  if (issue.issue_type === "empty_text") return "系统没有从该资产提取到可用文本，可能是空白页或图片内容。";
+  if (issue.issue_type === "low_ocr_confidence") return "OCR 结果的文字可信度较低，建议打开资产核对原始页面。";
+  if (issue.issue_type === "cleaning_failed") return "确定性清洗阶段未完成，规范化数据可能不可用；原始提取结果仍会保留。";
+  if (issue.issue_type === "incomplete_text_provenance") return "文本已提取，但来源坐标或运行信息不完整，建议核对资产来源。";
+  return issue.description;
+}
+
+function severityLabel(severity: QualityIssue["severity"]): string {
+  return { info: "提示", warning: "注意", error: "错误", critical: "严重" }[severity];
 }
 
 function formatDate(value: string | null): string {
@@ -78,6 +153,11 @@ function App() {
   const [page, setPage] = useState<Page>("overview");
   const [overview, setOverview] = useState<Overview>(EMPTY_OVERVIEW);
   const [health, setHealth] = useState<HealthResponse | null>(null);
+  const [aiSettings, setAiSettings] = useState<AISettings | null>(null);
+  const [aiForm, setAiForm] = useState({ baseUrl: "", apiKey: "", model: "", timeout: "60" });
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiMessage, setAiMessage] = useState("");
+  const [aiMessageKind, setAiMessageKind] = useState<"" | "success" | "error">("");
   const [assets, setAssets] = useState<AssetSummary[]>([]);
   const [catalogTotal, setCatalogTotal] = useState(0);
   const [catalogOffset, setCatalogOffset] = useState(0);
@@ -119,6 +199,8 @@ function App() {
   const [semanticNotice, setSemanticNotice] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const knownTaskStatuses = useRef<Record<string, Task["status"]>>({});
+  const pendingIssueUpdates = useRef<Set<string>>(new Set());
 
   const refreshOverview = useCallback(async () => {
     try {
@@ -131,6 +213,22 @@ function App() {
   const refreshHealth = useCallback(async () => {
     try {
       setHealth(await api.health());
+    } catch (cause) {
+      setError(errorText(cause));
+    }
+  }, []);
+
+  const refreshAISettings = useCallback(async () => {
+    try {
+      const result = await api.aiSettings();
+      setAiSettings(result.settings);
+      setAiForm((current) => ({
+        ...current,
+        baseUrl: result.settings.baseUrl,
+        model: result.settings.model,
+        timeout: String(result.settings.timeout),
+        apiKey: "",
+      }));
     } catch (cause) {
       setError(errorText(cause));
     }
@@ -165,11 +263,28 @@ function App() {
 
   const refreshTasks = useCallback(async () => {
     try {
-      setTasks((await api.tasks()).items);
+      const next = (await api.tasks()).items;
+      const previous = knownTaskStatuses.current;
+      const terminalTransition = next.some((task) => {
+        const before = previous[task.taskId];
+        return before != null
+          && ["queued", "running", "cancelling"].includes(before)
+          && ["succeeded", "failed", "cancelled", "interrupted"].includes(task.status);
+      });
+      knownTaskStatuses.current = Object.fromEntries(next.map((task) => [task.taskId, task.status]));
+      setTasks(next);
+      if (terminalTransition) {
+        await Promise.all([refreshOverview(), refreshCatalog(), refreshIssues()]);
+        if (selectedId) {
+          void api.asset(selectedId).then(setSelected).catch((cause) => setError(errorText(cause)));
+        }
+      }
+      return next;
     } catch (cause) {
       setError(errorText(cause));
+      return [];
     }
-  }, []);
+  }, [refreshCatalog, refreshIssues, refreshOverview, selectedId]);
 
   const refreshSearch = useCallback(async (offset = 0, value = searchQuery) => {
     if (!value.trim()) return;
@@ -233,7 +348,7 @@ function App() {
   }, [detailTab, selected]);
 
   useEffect(() => {
-    const activeTasks = tasks.filter((task) => task.status === "queued" || task.status === "running");
+    const activeTasks = tasks.filter((task) => ["queued", "running", "cancelling"].includes(task.status));
     if (!activeTasks.length) return;
     const timer = window.setInterval(() => {
       void refreshTasks();
@@ -245,6 +360,10 @@ function App() {
   useEffect(() => {
     if (page === "query") void refreshQueryAssets();
   }, [page, refreshQueryAssets]);
+
+  useEffect(() => {
+    if (page === "settings") void refreshAISettings();
+  }, [page, refreshAISettings]);
 
   useEffect(() => {
     if (page !== "search" || !searchSubmitted || !searchQuery.trim()) return;
@@ -312,6 +431,9 @@ function App() {
       setShowProcess(false);
       setTaskSource("");
       setPage("tasks");
+      // Register the task before the first poll so a very fast task still
+      // produces the queued/running -> terminal refresh transition.
+      knownTaskStatuses.current[result.taskId] = result.task.status;
       setTasks((current) => [result.task, ...current.filter((item) => item.taskId !== result.taskId)]);
       void refreshOverview();
     } catch (cause) {
@@ -320,20 +442,32 @@ function App() {
   };
 
   const updateIssue = async (issue: QualityIssue, status: QualityIssue["status"]) => {
+    if (pendingIssueUpdates.current.has(issue.issue_id)) return;
+    pendingIssueUpdates.current.add(issue.issue_id);
+    const previousIssues = issues;
+    if (status !== "open") {
+      setIssues((current) => current.filter((item) => item.issue_id !== issue.issue_id));
+    }
     try {
       await api.updateQuality(issue.issue_id, status);
-      await Promise.all([refreshIssues(), refreshOverview()]);
+      // The row and open count are already updated optimistically.  Keep the
+      // successful click responsive while the aggregate refreshes in the
+      // background; a refresh failure must not roll back a committed status.
+      void refreshOverview();
+      void refreshIssues();
       if (selectedId) {
-        const detail = await api.asset(selectedId);
-        setSelected(detail);
+        void api.asset(selectedId).then(setSelected).catch((cause) => setError(errorText(cause)));
       }
     } catch (cause) {
+      setIssues(previousIssues);
       setError(errorText(cause));
+    } finally {
+      pendingIssueUpdates.current.delete(issue.issue_id);
     }
   };
 
   const requestSemanticEnrichment = () => {
-    if (!selected || !health?.llm.configured || semanticEnriching) return;
+    if (!selected || !health?.llm.enabled || semanticEnriching) return;
     setSemanticNotice("");
     setShowSemanticConfirm(true);
   };
@@ -360,6 +494,39 @@ function App() {
     next();
   };
 
+  const saveAISettings = async (testAfterSave = false) => {
+    setAiBusy(true);
+    setAiMessage("");
+    setAiMessageKind("");
+    try {
+      const payload: { baseUrl: string; apiKey?: string; model: string; timeout: number } = {
+        baseUrl: aiForm.baseUrl,
+        model: aiForm.model,
+        timeout: Number(aiForm.timeout),
+      };
+      if (aiForm.apiKey.trim()) payload.apiKey = aiForm.apiKey;
+      const saved = await api.saveAiSettings(payload);
+      setAiSettings(saved.settings);
+      setAiForm((current) => ({ ...current, baseUrl: saved.settings.baseUrl, model: saved.settings.model, timeout: String(saved.settings.timeout), apiKey: "" }));
+      await refreshHealth();
+      setAiMessage("配置已保存；模型仍需测试后才会启用。");
+      setAiMessageKind("success");
+      if (testAfterSave) {
+        const tested = await api.testAiConnection();
+        setAiSettings(tested.settings);
+        await refreshHealth();
+        setAiMessage("连接测试成功，AI 已启用。");
+        setAiMessageKind("success");
+      }
+    } catch (cause) {
+      await refreshAISettings();
+      setAiMessage(errorText(cause));
+      setAiMessageKind("error");
+    } finally {
+      setAiBusy(false);
+    }
+  };
+
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -375,6 +542,7 @@ function App() {
           <NavButton active={page === "query"} onClick={() => setPage("query")}>数据查询</NavButton>
           <NavButton active={page === "quality"} onClick={() => setPage("quality")}>质量检查{overview.openQualityIssues ? <span className="nav-count">{overview.openQualityIssues}</span> : null}</NavButton>
           <NavButton active={page === "tasks"} onClick={() => setPage("tasks")}>处理任务</NavButton>
+          <NavButton active={page === "settings"} onClick={() => setPage("settings")}>设置</NavButton>
         </nav>
         <div className="topbar-status"><span className="status-dot" />本地离线模式</div>
       </header>
@@ -387,7 +555,8 @@ function App() {
         {page === "query" ? <QueryPage assets={queryAssets} selectedIds={querySelectedIds} schema={querySchema} sql={querySql} result={queryResult} loading={queryLoading} error={queryError} onToggle={toggleQueryAsset} onSql={setQuerySql} onRun={runSql} onOpen={openAsset} /> : null}
         {page === "quality" ? <QualityPage issues={issues} onUpdate={updateIssue} onOpen={openAsset} /> : null}
         {page === "tasks" ? <TasksPage tasks={tasks} onProcess={() => setShowProcess(true)} onOpenCatalog={() => setPage("catalog")} /> : null}
-        {page === "detail" && selected ? <DetailPage detail={selected} tab={detailTab} onTab={setDetailTab} tableLayer={tableLayer} onTableLayer={setTableLayer} tableOffset={tableOffset} onTableOffset={setTableOffset} tablePreview={tablePreview} textPreview={textPreview} semanticConfigured={health?.llm.configured === true} semanticEnriching={semanticEnriching} semanticNotice={semanticNotice} onSemanticEnrich={requestSemanticEnrichment} onBack={() => setPage("catalog")} onUpdateIssue={updateIssue} /> : null}
+        {page === "settings" ? <SettingsPage settings={aiSettings} form={aiForm} busy={aiBusy} message={aiMessage} messageKind={aiMessageKind} onForm={setAiForm} onSave={() => void saveAISettings(false)} onTest={() => void saveAISettings(true)} /> : null}
+        {page === "detail" && selected ? <DetailPage detail={selected} tab={detailTab} onTab={setDetailTab} tableLayer={tableLayer} onTableLayer={setTableLayer} tableOffset={tableOffset} onTableOffset={setTableOffset} tablePreview={tablePreview} textPreview={textPreview} semanticConfigured={health?.llm.enabled === true} semanticEnriching={semanticEnriching} semanticNotice={semanticNotice} onSemanticEnrich={requestSemanticEnrichment} onBack={() => setPage("catalog")} onUpdateIssue={updateIssue} /> : null}
         {page === "detail" && !selected ? <EmptyState title="正在加载资产" body="正在读取本地目录与画像信息。" /> : null}
       </main>
 
@@ -401,6 +570,46 @@ function NavButton({ active, onClick, children }: { active: boolean; onClick: ()
   return <button className={`nav-button ${active ? "active" : ""}`} onClick={onClick}>{children}</button>;
 }
 
+function aiStatusLabel(settings: AISettings | null): string {
+  if (!settings) return "正在读取配置";
+  return {
+    NOT_CONFIGURED: "未配置，完全离线",
+    INCOMPLETE: "配置未完成，保持离线",
+    UNVERIFIED: "配置已保存，等待连接测试",
+    CONNECTION_FAILED: "连接失败，保持离线",
+    INVALID_CONFIGURATION: "配置无效，保持离线",
+    ENABLED: "已连接，AI 已启用",
+    CONFIGURED: "使用 .env 高级配置",
+  }[settings.status] ?? settings.status;
+}
+
+function SettingsPage({ settings, form, busy, message, messageKind, onForm, onSave, onTest }: {
+  settings: AISettings | null;
+  form: { baseUrl: string; apiKey: string; model: string; timeout: string };
+  busy: boolean;
+  message: string;
+  messageKind: "" | "success" | "error";
+  onForm: (value: { baseUrl: string; apiKey: string; model: string; timeout: string }) => void;
+  onSave: () => void;
+  onTest: () => void;
+}) {
+  const configuredSource = settings?.source === "env" ? "当前来自 .env 高级 fallback；保存此页后将优先使用 UI 配置。" : "配置保存在当前项目 workspace/state，复制或迁移项目时随项目移动。";
+  return <section className="page-section"><div className="page-heading"><div><div className="eyebrow">SETTINGS</div><h1>设置</h1><p className="heading-note">AI 模型是可选能力；文件扫描、提取、清洗和查询始终可以离线运行。</p></div></div>
+    <section className="panel settings-panel"><PanelTitle title="AI 模型" /><div className="settings-status">状态：<strong>{aiStatusLabel(settings)}</strong>{settings?.apiKeyConfigured ? " · API Key 已保存" : " · 未保存 API Key"}</div>
+      <p className="settings-note">{configuredSource}</p>
+      <div className="settings-form">
+        <label className="settings-field"><span className="field-label">Base URL</span><input value={form.baseUrl} onChange={(event) => onForm({ ...form, baseUrl: event.target.value })} placeholder="https://example.com/v1" autoComplete="url" /><small>OpenAI-compatible 服务地址；不会自动访问公共服务。</small></label>
+        <label className="settings-field"><span className="field-label">API Key</span><input type="password" value={form.apiKey} onChange={(event) => onForm({ ...form, apiKey: event.target.value })} placeholder={settings?.apiKeyConfigured ? "留空保持已保存密钥" : "输入 API Key"} autoComplete="new-password" /><small>仅在本次保存时提交；项目文件只保存 Windows DPAPI 加密结果，界面不会回显密钥。</small></label>
+        <label className="settings-field"><span className="field-label">Model</span><input value={form.model} onChange={(event) => onForm({ ...form, model: event.target.value })} placeholder="qwen3.6-35b-a3b" /></label>
+        <label className="settings-field"><span className="field-label">Timeout（秒）</span><input type="number" min="1" max="600" value={form.timeout} onChange={(event) => onForm({ ...form, timeout: event.target.value })} /></label>
+        <div className="settings-actions"><button className="primary-button" disabled={busy} onClick={onTest}>{busy ? "处理中..." : "测试连接"}</button><button className="secondary-button" disabled={busy} onClick={onSave}>保存</button></div>
+        {message ? <div className={`settings-status ${messageKind}`} role="status">{message}</div> : null}
+        <p className="settings-note">保存完整配置不会立即调用模型；只有连接测试成功后，AI 整理入口才会启用。测试请求只发送固定 synthetic 检查内容，不发送用户资产。</p>
+      </div>
+    </section>
+  </section>;
+}
+
 function OverviewPage({ overview, health, tasks, onProcess, onNavigate, onOpenAsset }: { overview: Overview; health: HealthResponse | null; tasks: Task[]; onProcess: () => void; onNavigate: (page: Page) => void; onOpenAsset: (id: string) => void }) {
   const totalAssets = overview.tableAssets + overview.textAssets;
   const formatItems = Object.entries(overview.formats);
@@ -408,11 +617,11 @@ function OverviewPage({ overview, health, tasks, onProcess, onNavigate, onOpenAs
     <div className="page-heading"><div><div className="eyebrow">PROJECT OVERVIEW</div><h1>项目资料</h1><p className="heading-note">本地目录处理状态与数据资产概览</p></div><button className="primary-button" onClick={onProcess}>处理新目录 <span>＋</span></button></div>
     <div className="summary-line"><strong>{number(overview.files)}</strong> 个文件 <span>·</span> <strong>{number(overview.tableAssets)}</strong> 个表格资产 <span>·</span> <strong>{number(overview.textAssets)}</strong> 个文本资产</div>
     <div className="overview-grid">
-      <section className="panel status-panel"><PanelTitle title="处理状态" action={<button className="text-button" onClick={() => onNavigate("tasks")}>查看任务 →</button>} /><div className="status-grid"><Metric label="Ready" value={overview.ready} tone="good" /><Metric label="Needs review" value={overview.needsReview} tone="review" /><Metric label="失败 / Unusable" value={overview.failed + overview.unusable} tone="bad" /><Metric label="Unsupported" value={overview.unsupported} tone="muted" /></div></section>
+      <section className="panel status-panel"><PanelTitle title="处理状态" action={<button className="text-button" onClick={() => onNavigate("tasks")}>查看任务 →</button>} /><div className="status-grid"><Metric label="可直接使用" value={overview.ready} tone="good" /><Metric label="需要审核" value={overview.needsReview} tone="review" /><Metric label="失败 / 不可用" value={overview.failed + overview.unusable} tone="bad" /><Metric label="不支持" value={overview.unsupported} tone="muted" /></div></section>
       <section className="panel composition-panel"><PanelTitle title="资产组成" /><div className="composition-bar"><span className="bar-table" style={{ width: `${totalAssets ? (overview.tableAssets / totalAssets) * 100 : 0}%` }} /><span className="bar-text" style={{ width: `${totalAssets ? (overview.textAssets / totalAssets) * 100 : 0}%` }} /></div><div className="legend"><span><i className="legend-dot bar-table" />表格 {number(overview.tableAssets)}</span><span><i className="legend-dot bar-text" />文本 {number(overview.textAssets)}</span></div><div className="format-list">{formatItems.length ? formatItems.slice(0, 6).map(([format, count]) => <span key={format}><b>{format.toUpperCase()}</b>{number(count)}</span>) : <span className="muted">尚未处理资料</span>}</div></section>
     </div>
     <section className="panel recent-panel"><PanelTitle title="最近任务" action={<button className="text-button" onClick={() => onNavigate("tasks")}>全部任务 →</button>} />{tasks.length ? <div className="task-table">{tasks.slice(0, 5).map((task) => <TaskRow key={task.taskId} task={task} />)}</div> : <EmptyState title="尚未处理资料" body="输入一个本地科研资料目录，开始建立数据目录。" compact />}</section>
-    <div className="info-strip"><span className="info-icon">i</span><span>AI 语义分析：<strong>{health?.llm.configured ? "provider 已配置" : "尚未配置模型"}</strong>。默认处理完全离线；语义整理仅由显式命令触发。</span></div>
+    <div className="info-strip"><span className="info-icon">i</span><span>AI 语义分析：<strong>{health?.llm.enabled ? "已连接并启用" : health?.llm.configured ? "已配置但尚未验证" : "尚未配置模型"}</strong>。默认处理完全离线；语义整理仅由显式命令触发。</span></div>
   </section>;
 }
 
@@ -424,7 +633,7 @@ function PanelTitle({ title, action }: { title: string; action?: React.ReactNode
 
 function CatalogPage({ assets, total, offset, loading, type, quality, format, query, formats, onType, onQuality, onFormat, onQuery, onOffset, onOpen, onProcess }: { assets: AssetSummary[]; total: number; offset: number; loading: boolean; type: "" | "table" | "text"; quality: "" | QualityStatus; format: string; query: string; formats: Record<string, number>; onType: (value: "" | "table" | "text") => void; onQuality: (value: "" | QualityStatus) => void; onFormat: (value: string) => void; onQuery: (value: string) => void; onOffset: (value: number) => void; onOpen: (id: string) => void; onProcess: () => void }) {
   return <section className="page-section"><div className="page-heading"><div><div className="eyebrow">DATA CATALOG</div><h1>数据目录</h1><p className="heading-note">每个表格与文本资产独立保留来源、清洗和质量边界</p></div><button className="primary-button" onClick={onProcess}>处理新目录 <span>＋</span></button></div>
-    <div className="filter-panel"><div className="segmented"><button className={!type ? "selected" : ""} onClick={() => onType("")}>全部</button><button className={type === "table" ? "selected" : ""} onClick={() => onType("table")}>表格</button><button className={type === "text" ? "selected" : ""} onClick={() => onType("text")}>文本</button></div><select value={quality} onChange={(event) => onQuality(event.target.value as "" | QualityStatus)}><option value="">全部质量</option><option value="ready">Ready</option><option value="needs_review">Needs review</option><option value="unusable">Unusable</option></select><select value={format} onChange={(event) => onFormat(event.target.value)}><option value="">全部格式</option>{Object.keys(formats).sort().map((item) => <option key={item} value={item}>{item.toUpperCase()}</option>)}</select><label className="search-box"><span>⌕</span><input value={query} onChange={(event) => onQuery(event.target.value)} placeholder="搜索资产名或来源文件" /></label></div>
+    <div className="filter-panel"><div className="segmented"><button className={!type ? "selected" : ""} onClick={() => onType("")}>全部</button><button className={type === "table" ? "selected" : ""} onClick={() => onType("table")}>表格</button><button className={type === "text" ? "selected" : ""} onClick={() => onType("text")}>文本</button></div><select value={quality} onChange={(event) => onQuality(event.target.value as "" | QualityStatus)}><option value="">全部质量</option><option value="ready">可直接使用</option><option value="needs_review">需要审核</option><option value="unusable">不可用</option></select><select value={format} onChange={(event) => onFormat(event.target.value)}><option value="">全部格式</option>{Object.keys(formats).sort().map((item) => <option key={item} value={item}>{item.toUpperCase()}</option>)}</select><label className="search-box"><span>⌕</span><input value={query} onChange={(event) => onQuery(event.target.value)} placeholder="搜索资产名或来源文件" /></label></div>
     <div className="list-meta"><span>{loading ? "读取中…" : `${number(total)} 个资产`}</span><span>只搜索来源名称与文件名</span></div>{assets.length ? <div className="asset-list">{assets.map((asset) => <AssetListItem asset={asset} key={asset.assetId} onOpen={onOpen} />)}</div> : <EmptyState title="暂无数据资产" body="处理一个本地资料目录后，表格与文本资产会出现在这里。" />}
     {total > 25 ? <Pagination offset={offset} limit={25} total={total} onOffset={onOffset} /> : null}</section>;
 }
@@ -434,20 +643,22 @@ function AssetListItem({ asset, onOpen }: { asset: AssetSummary; onOpen: (id: st
 }
 
 function QualityPage({ issues, onUpdate, onOpen }: { issues: QualityIssue[]; onUpdate: (issue: QualityIssue, status: QualityIssue["status"]) => void; onOpen: (id: string) => void }) {
-  return <section className="page-section"><div className="page-heading"><div><div className="eyebrow">QUALITY REVIEW</div><h1>质量检查</h1><p className="heading-note">只处理审阅状态，不会修改 raw 或 normalized 数据</p></div><div className="open-count">{number(issues.length)} 个待处理</div></div>{issues.length ? <div className="quality-list">{issues.map((issue) => <IssueCard key={issue.issue_id} issue={issue} onUpdate={onUpdate} onOpen={onOpen} />)}</div> : <EmptyState title="暂无待处理问题" body="当前没有 open 状态的质量问题。" />}</section>;
+  return <section className="page-section"><div className="page-heading"><div><div className="eyebrow">QUALITY REVIEW</div><h1>质量检查</h1><p className="heading-note">这里只改变审核状态，不会修改原始或规范化数据</p><p className="quality-status-help">确认问题：认可系统判断；标记已处理：表示已在外部完成处理；暂时忽略：当前先不处理。三种操作都不会修改原始或规范化数据。</p></div><div className="open-count">{number(issues.length)} 个待审核</div></div>{issues.length ? <div className="quality-list">{issues.map((issue) => <IssueCard key={issue.issue_id} issue={issue} onUpdate={onUpdate} onOpen={onOpen} />)}</div> : <EmptyState title="暂无待处理问题" body="当前没有待审核的质量问题。" />}</section>;
 }
 
 function IssueCard({ issue, onUpdate, onOpen }: { issue: QualityIssue; onUpdate: (issue: QualityIssue, status: QualityIssue["status"]) => void; onOpen: (id: string) => void }) {
-  return <article className="issue-card"><div className={`severity-mark ${issue.severity}`} /> <div className="issue-content"><div className="issue-top"><span className={`severity-label ${issue.severity}`}>{issue.severity}</span><button className="issue-asset" onClick={() => onOpen(issue.asset_id)}>{issue.effective_display_name || issue.fallback_display_name || issue.asset_id}</button><span className="issue-time">{formatDate(issue.created_at)}</span></div><h3>{issue.issue_type}</h3><p>{issue.description}</p><div className="evidence">证据：{compactValue(issue.evidence)}</div><div className="suggestion">建议：{issue.suggested_action}</div><div className="issue-actions"><button onClick={() => onUpdate(issue, "accepted")}>接受</button><button onClick={() => onUpdate(issue, "resolved")}>标记已解决</button><button className="quiet" onClick={() => onUpdate(issue, "ignored")}>忽略</button></div></div></article>;
+  const source = issue.source_file || issue.effective_display_name || issue.fallback_display_name || issue.asset_id;
+  const location = issue.page_number ? ` · 第 ${issue.page_number} 页` : issue.sheet_name ? ` · ${issue.sheet_name}` : "";
+  return <article className="issue-card"><div className={`severity-mark ${issue.severity}`} /> <div className="issue-content"><div className="issue-top"><span className={`severity-label ${issue.severity}`}>{severityLabel(issue.severity)}</span><button className="issue-asset" onClick={() => onOpen(issue.asset_id)}>{issue.effective_display_name || issue.fallback_display_name || issue.asset_id}</button><span className="issue-time">{formatDate(issue.created_at)}</span></div><h3>{issueTypeLabel(issue.issue_type)}</h3><p>{issueDescription(issue)}</p><div className="issue-source">来源：{source}{issue.source_format ? ` · ${issue.source_format.toUpperCase()}` : ""}{location}</div><details className="evidence"><summary>查看系统证据</summary><pre>{compactValue(issue.evidence)}</pre></details><div className="suggestion">处理建议：{suggestedActionLabel(issue.suggested_action)}</div><p className="issue-help">这些操作只改变审核状态，不会修改原始或规范化数据。</p><div className="issue-actions"><button onClick={() => onUpdate(issue, "accepted")}>确认问题</button><button onClick={() => onUpdate(issue, "resolved")}>标记已处理</button><button className="quiet" onClick={() => onUpdate(issue, "ignored")}>暂时忽略</button><button className="text-button" onClick={() => onOpen(issue.asset_id)}>查看资产</button></div></div></article>;
 }
 
 function TasksPage({ tasks, onProcess, onOpenCatalog }: { tasks: Task[]; onProcess: () => void; onOpenCatalog: () => void }) {
   return <section className="page-section"><div className="page-heading"><div><div className="eyebrow">PROCESSING TASKS</div><h1>处理任务</h1><p className="heading-note">后台任务每秒更新一次；核心流水线继续保持逐文件隔离</p></div><button className="primary-button" onClick={onProcess}>处理新目录 <span>＋</span></button></div>{tasks.length ? <div className="task-list">{tasks.map((task) => <TaskCard key={task.taskId} task={task} onOpenCatalog={onOpenCatalog} />)}</div> : <EmptyState title="尚无处理任务" body="从一个本地目录开始，建立第一个数据目录。" />}</section>;
 }
 
-function TaskRow({ task }: { task: Task }) { return <div className="task-row"><span className={`task-status-dot ${task.status}`} /><div className="task-row-source">{task.source}</div><div className="task-row-stage">{STAGE_LABELS[task.currentStage] || task.currentStage}</div><div className="task-row-progress"><span style={{ width: `${task.progress * 100}%` }} /></div><div className="task-row-status">{task.status === "succeeded" ? "完成" : task.status === "failed" ? "失败" : `${Math.round(task.progress * 100)}%`}</div></div>; }
+function TaskRow({ task }: { task: Task }) { return <div className="task-row"><span className={`task-status-dot ${task.status}`} /><div className="task-row-source">{task.source}</div><div className="task-row-stage">{STAGE_LABELS[task.currentStage] || task.currentStage}</div><div className="task-row-progress"><span style={{ width: `${task.progress * 100}%` }} /></div><div className="task-row-status">{taskStatusLabel(task.status)}{task.status === "running" ? ` ${Math.round(task.progress * 100)}%` : ""}</div></div>; }
 
-function TaskCard({ task, onOpenCatalog }: { task: Task; onOpenCatalog: () => void }) { return <article className="task-card"><div className="task-card-header"><div><span className={`task-status-dot ${task.status}`} /> <strong>{task.status === "succeeded" ? "处理完成" : task.status === "failed" ? "处理失败" : "处理中"}</strong></div><span className="task-time">{formatDate(task.startedAt)}</span></div><div className="task-source">{task.source}</div><div className="progress-track"><span style={{ width: `${task.progress * 100}%` }} /></div><div className="task-card-footer"><span>{STAGE_LABELS[task.currentStage] || task.currentStage} · {Math.round(task.progress * 100)}%</span>{task.status === "succeeded" ? <button className="text-button" onClick={onOpenCatalog}>查看资产 →</button> : null}{task.errorSummary ? <span className="task-error">{task.errorSummary}</span> : null}</div>{task.counts.tableAssets != null ? <div className="task-counts"><span>文件 {number(task.counts.filesDiscovered)}</span><span>表格 {number(task.counts.tableAssets)}</span><span>文本 {number(task.counts.textAssets)}</span><span>质量问题 {number(task.counts.qualityIssues)}</span></div> : null}</article>; }
+function TaskCard({ task, onOpenCatalog }: { task: Task; onOpenCatalog: () => void }) { return <article className="task-card"><div className="task-card-header"><div><span className={`task-status-dot ${task.status}`} /> <strong>{taskStatusLabel(task.status)}</strong></div><span className="task-time">{formatDate(task.startedAt)}</span></div><div className="task-source">{task.source}</div><div className="progress-track"><span style={{ width: `${task.progress * 100}%` }} /></div><div className="task-card-footer"><span>{STAGE_LABELS[task.currentStage] || task.currentStage} · {Math.round(task.progress * 100)}%</span>{task.currentFile ? <span className="task-current-file">当前：{task.currentFile}</span> : null}{task.completed || task.total ? <span>{number(task.completed)} / {number(task.total)}</span> : null}<span>已用时 {number(task.elapsedSeconds)} 秒</span>{task.status === "succeeded" ? <button className="text-button" onClick={onOpenCatalog}>查看资产 →</button> : null}</div>{task.currentSubstage ? <div className="task-substage">{task.currentSubstage}</div> : null}{task.error ? <div className="task-error-panel"><strong>{task.error.message}</strong><span>{STAGE_LABELS[task.error.stage] || task.error.stage}{task.error.affectedFile ? ` · ${task.error.affectedFile}` : ""}</span><span>{task.error.retryable ? "可以重新处理" : "请查看技术详情"}</span><details><summary>查看技术详情</summary><div>错误代码：{task.error.code}</div>{task.error.requestId ? <div>请求 ID：{task.error.requestId}</div> : null}{task.error.technicalDetail ? <pre>{task.error.technicalDetail}</pre> : null}</details></div> : task.errorSummary ? <div className="task-error-panel">{task.errorSummary}</div> : null}{task.counts.tableAssets != null ? <div className="task-counts"><span>文件 {number(task.counts.filesDiscovered)}</span><span>表格 {number(task.counts.tableAssets)}</span><span>文本 {number(task.counts.textAssets)}</span><span>质量问题 {number(task.counts.qualityIssues)}</span></div> : null}</article>; }
 
 type SearchPageProps = {
   input: string;
@@ -474,16 +685,16 @@ type SearchPageProps = {
 };
 
 function SearchPage({ input, query, results, total, offset, loading, submitted, hasAssets, type, quality, format, match, formats, onInput, onSubmit, onType, onQuality, onFormat, onMatch, onOffset, onOpen }: SearchPageProps) {
-  return <section className="page-section"><div className="page-heading"><div><div className="eyebrow">LOCAL RETRIEVAL</div><h1>数据检索</h1><p className="heading-note">本地 lexical 检索：文件、表格元数据与 TextChunk；不使用模型改写或 rerank</p></div></div>
+  return <section className="page-section"><div className="page-heading"><div><div className="eyebrow">LOCAL RETRIEVAL</div><h1>数据检索</h1><p className="heading-note">本地确定性检索：文件、表格元数据和文本段落；不使用模型改写或二次排序</p></div></div>
     <form className="search-command" onSubmit={(event) => { event.preventDefault(); onSubmit(); }}><span className="search-command-icon">⌕</span><input aria-label="搜索资料" value={input} onChange={(event) => onInput(event.target.value)} placeholder="搜索资料、表格、正文、列名……" /><button className="primary-button" type="submit">搜索</button></form>
-    <div className="filter-panel search-filters"><div className="segmented"><button className={type === "all" ? "selected" : ""} onClick={() => onType("all")} type="button">全部</button><button className={type === "table" ? "selected" : ""} onClick={() => onType("table")} type="button">表格</button><button className={type === "text" ? "selected" : ""} onClick={() => onType("text")} type="button">文本</button></div><select value={quality} onChange={(event) => onQuality(event.target.value as "" | QualityStatus)}><option value="">全部质量</option><option value="ready">Ready</option><option value="needs_review">Needs review</option><option value="unusable">Unusable</option></select><select value={format} onChange={(event) => onFormat(event.target.value)}><option value="">全部格式</option>{Object.keys(formats).sort().map((item) => <option key={item} value={item}>{item.toUpperCase()}</option>)}</select><select value={match} onChange={(event) => onMatch(event.target.value as "all" | "phrase")}><option value="all">按词匹配</option><option value="phrase">完整短语</option></select></div>
-    {loading ? <div className="loading-box search-loading">正在检索本地目录……</div> : !submitted ? <EmptyState title="尚未输入搜索内容" body="输入关键词后，ChongZu 会在本地目录与 TextChunk 中检索。" /> : !query ? <EmptyState title="尚未输入搜索内容" body="搜索框为空；不会执行全库扫描。" /> : !hasAssets ? <EmptyState title="当前尚未处理任何资料" body="先处理一个本地资料目录，建立 Catalog 后再进行检索。" /> : !results.length ? <EmptyState title="没有找到匹配结果" body={`没有找到与“${query}”匹配的资料、列名或正文片段。`} /> : <><div className="list-meta"><span>{number(total)} 个结果</span><span>结果按本地确定性分数排序；每个资产最多显示 3 条</span></div><div className="search-results">{results.map((result) => <SearchResultItem key={result.resultId} result={result} onOpen={onOpen} />)}</div>{total > 30 ? <Pagination offset={offset} limit={30} total={total} onOffset={onOffset} /> : null}</>}
+    <div className="filter-panel search-filters"><div className="segmented"><button className={type === "all" ? "selected" : ""} onClick={() => onType("all")} type="button">全部</button><button className={type === "table" ? "selected" : ""} onClick={() => onType("table")} type="button">表格</button><button className={type === "text" ? "selected" : ""} onClick={() => onType("text")} type="button">文本</button></div><select value={quality} onChange={(event) => onQuality(event.target.value as "" | QualityStatus)}><option value="">全部质量</option><option value="ready">可直接使用</option><option value="needs_review">需要审核</option><option value="unusable">不可用</option></select><select value={format} onChange={(event) => onFormat(event.target.value)}><option value="">全部格式</option>{Object.keys(formats).sort().map((item) => <option key={item} value={item}>{item.toUpperCase()}</option>)}</select><select value={match} onChange={(event) => onMatch(event.target.value as "all" | "phrase")}><option value="all">按词匹配</option><option value="phrase">完整短语</option></select></div>
+    {loading ? <div className="loading-box search-loading">正在检索本地目录……</div> : !submitted ? <EmptyState title="尚未输入搜索内容" body="输入关键词后，ChongZu 会在本地目录与文本段落中检索。" /> : !query ? <EmptyState title="尚未输入搜索内容" body="搜索框为空；不会执行全库扫描。" /> : !hasAssets ? <EmptyState title="当前尚未处理任何资料" body="先处理一个本地资料目录，建立数据目录后再进行检索。" /> : !results.length ? <EmptyState title="没有找到匹配结果" body={`没有找到与“${query}”匹配的资料、列名或正文片段。`} /> : <><div className="list-meta"><span>{number(total)} 个结果</span><span>结果按本地确定性分数排序；每个资产最多显示 3 条</span></div><div className="search-results">{results.map((result) => <SearchResultItem key={result.resultId} result={result} onOpen={onOpen} />)}</div>{total > 30 ? <Pagination offset={offset} limit={30} total={total} onOffset={onOffset} /> : null}</>}
   </section>;
 }
 
 function SearchResultItem({ result, onOpen }: { result: SearchResult; onOpen: (result: SearchResult) => void }) {
-  const location = [result.pageNumber != null ? `Page ${result.pageNumber}` : "", result.sheetName ? `Sheet ${result.sheetName}` : ""].filter(Boolean).join(" / ");
-  return <button className="search-result" onClick={() => onOpen(result)}><div className={`asset-type-mark ${result.assetType}`}>{result.assetType === "table" ? "表" : "文"}</div><div className="search-result-main"><div className="search-result-title">{result.displayName}</div><div className="search-result-source">{result.sourceFile}{location ? ` · ${location}` : ""} · {result.sourceFormat?.toUpperCase() || "UNKNOWN"}</div><div className="search-snippet"><HighlightedSnippet result={result} /></div></div><div className="search-result-meta"><span className="search-match-kind">{result.matchKind}</span><span className={`quality-pill ${result.qualityStatus}`}>{qualityLabel(result.qualityStatus)}</span><span className="search-score">{result.score.toFixed(1)}</span></div><span className="chevron">›</span></button>;
+  const location = [result.pageNumber != null ? `第 ${result.pageNumber} 页` : "", result.sheetName ? `工作表 ${result.sheetName}` : ""].filter(Boolean).join(" / ");
+  return <button className="search-result" onClick={() => onOpen(result)}><div className={`asset-type-mark ${result.assetType}`}>{result.assetType === "table" ? "表" : "文"}</div><div className="search-result-main"><div className="search-result-title">{result.displayName}</div><div className="search-result-source">{result.sourceFile}{location ? ` · ${location}` : ""} · {result.sourceFormat?.toUpperCase() || "UNKNOWN"}</div><div className="search-snippet"><HighlightedSnippet result={result} /></div></div><div className="search-result-meta"><span className="search-match-kind">{matchKindLabel(result.matchKind)}</span><span className={`quality-pill ${result.qualityStatus}`}>{qualityLabel(result.qualityStatus)}</span><span className="search-score">{result.score.toFixed(1)}</span></div><span className="chevron">›</span></button>;
 }
 
 function HighlightedSnippet({ result }: { result: SearchResult }) {
@@ -532,15 +743,15 @@ function DetailPage({ detail, tab, onTab, tableLayer, onTableLayer, tableOffset,
   return <section className="page-section detail-section"><button className="back-button" onClick={onBack}>← 数据目录</button><div className="detail-heading"><div className={`asset-type-mark large ${detail.assetType}`}>{detail.assetType === "table" ? "表" : "文"}</div><div><div className="eyebrow">{typeLabel(detail.assetType)}资产</div><h1>{detail.displayName}</h1><div className="detail-source">{detail.source.relativePath} <span>·</span> {detail.source.format?.toUpperCase()}</div></div><div className={`quality-pill ${detail.qualityStatus}`}>{qualityLabel(detail.qualityStatus)}</div></div><div className="detail-tabs">{([["data", "数据"], ["profile", "画像"], ["quality", `质量${detail.qualityIssues.length ? ` · ${detail.qualityIssues.length}` : ""}`], ["source", "来源"], ["semantic", "AI语义"]] as const).map(([key, label]) => <button key={key} className={tab === key ? "active" : ""} onClick={() => onTab(key)}>{label}</button>)}</div>{tab === "data" ? detail.assetType === "table" ? <TableData detail={detail} layer={tableLayer} onLayer={onTableLayer} offset={tableOffset} onOffset={onTableOffset} preview={tablePreview} /> : <TextData detail={detail} preview={textPreview} /> : null}{tab === "profile" ? <ProfileView detail={detail} /> : null}{tab === "quality" ? <DetailQuality detail={detail} onUpdate={onUpdateIssue} /> : null}{tab === "source" ? <SourceView detail={detail} /> : null}{tab === "semantic" ? <SemanticView detail={detail} configured={semanticConfigured} enriching={semanticEnriching} notice={semanticNotice} onEnrich={onSemanticEnrich} /> : null}</section>;
 }
 
-function TableData({ detail, layer, onLayer, offset, onOffset, preview }: { detail: AssetDetail; layer: "raw" | "normalized"; onLayer: (value: "raw" | "normalized") => void; offset: number; onOffset: (value: number) => void; preview: TablePreview | null }) { return <div className="detail-panel"><div className="data-toolbar"><div><h2>表格预览</h2><p>默认查看 normalized；raw artifact 保持不变</p></div><div className="segmented"><button className={layer === "normalized" ? "selected" : ""} onClick={() => { onLayer("normalized"); onOffset(0); }}>Normalized</button><button className={layer === "raw" ? "selected" : ""} onClick={() => { onLayer("raw"); onOffset(0); }}>Raw</button></div></div>{preview ? <><div className="table-wrap"><table><thead><tr><th className="row-number">#</th>{preview.columns.map((column) => <th key={column}>{column}</th>)}</tr></thead><tbody>{preview.rows.map((row, index) => <tr key={`${offset}-${index}`}><td className="row-number">{offset + index + 1}</td>{preview.columns.map((column) => <td key={column} title={displayValue(row[column])}>{displayValue(row[column])}</td>)}</tr>)}</tbody></table></div><Pagination offset={offset} limit={20} total={preview.pagination.total ?? detail.dimensions.rows ?? 0} onOffset={onOffset} /></> : <div className="loading-box">读取表格预览…</div>}</div>; }
+function TableData({ detail, layer, onLayer, offset, onOffset, preview }: { detail: AssetDetail; layer: "raw" | "normalized"; onLayer: (value: "raw" | "normalized") => void; offset: number; onOffset: (value: number) => void; preview: TablePreview | null }) { return <div className="detail-panel"><div className="data-toolbar"><div><h2>表格预览</h2><p>默认查看规范化结果；原始结果保持不变</p></div><div className="segmented"><button className={layer === "normalized" ? "selected" : ""} onClick={() => { onLayer("normalized"); onOffset(0); }}>规范化</button><button className={layer === "raw" ? "selected" : ""} onClick={() => { onLayer("raw"); onOffset(0); }}>原始</button></div></div>{preview ? <><div className="table-wrap"><table><thead><tr><th className="row-number">#</th>{preview.columns.map((column) => <th key={column}>{column}</th>)}</tr></thead><tbody>{preview.rows.map((row, index) => <tr key={`${offset}-${index}`}><td className="row-number">{offset + index + 1}</td>{preview.columns.map((column) => <td key={column} title={displayValue(row[column])}>{displayValue(row[column])}</td>)}</tr>)}</tbody></table></div><Pagination offset={offset} limit={20} total={preview.pagination.total ?? detail.dimensions.rows ?? 0} onOffset={onOffset} /></> : <div className="loading-box">读取表格预览…</div>}</div>; }
 
-function TextData({ detail, preview }: { detail: AssetDetail; preview: TextPreview | null }) { return <div className="detail-panel"><div className="data-toolbar"><div><h2>文本预览</h2><p>{detail.provenance.sourceKind} · {number(detail.dimensions.chunks)} chunks · {number(detail.dimensions.chars)} 字符</p></div><span className="source-badge">{detail.provenance.extractor.toLowerCase().includes("ocr") ? "OCR" : "Native"}</span></div>{preview ? <><div className="text-preview" aria-label="normalized text preview">{preview.text || "（空文本）"}</div><div className="preview-foot">显示 {number(preview.offset)}–{number(preview.offset + preview.text.length)} / {number(preview.chars)} 字符 · {preview.layer}</div></> : <div className="loading-box">读取文本预览…</div>}</div>; }
+function TextData({ detail, preview }: { detail: AssetDetail; preview: TextPreview | null }) { return <div className="detail-panel"><div className="data-toolbar"><div><h2>文本预览</h2><p>{sourceKindLabel(detail.provenance.sourceKind)} · {number(detail.dimensions.chunks)} 段文本 · {number(detail.dimensions.chars)} 字符</p></div><span className="source-badge">{detail.provenance.extractor.toLowerCase().includes("ocr") ? "OCR" : "文本层"}</span></div>{preview ? <><div className="text-preview" aria-label="normalized text preview">{preview.text || "（空文本）"}</div><div className="preview-foot">显示 {number(preview.offset)}–{number(preview.offset + preview.text.length)} / {number(preview.chars)} 字符 · {layerLabel(preview.layer)}</div></> : <div className="loading-box">读取文本预览…</div>}</div>; }
 
-function ProfileView({ detail }: { detail: AssetDetail }) { const profile = detail.profile; if (!profile) return <EmptyState title="暂无画像" body="该资产尚未完成 deterministic profiling。" />; const columns = Array.isArray(profile.columns) ? profile.columns as Array<Record<string, unknown>> : []; return <div className="detail-panel"><div className="data-toolbar"><div><h2>确定性画像</h2><p>profile 只描述数据，不改变 raw / normalized artifact</p></div></div><div className="profile-summary"><span>行 {number(Number(profile.row_count ?? profile.char_count ?? 0))}</span><span>列 {number(Number(profile.column_count ?? 0))}</span><span>空值 {number(Number(profile.null_count ?? 0))}</span><span>版本 {String(profile.profile_version ?? "—")}</span></div>{columns.length ? <div className="profile-columns">{columns.map((column) => <div className="profile-column" key={String(column.name)}><div><strong>{String(column.name)}</strong><span>{String(column.inferred_physical_type ?? "string")}</span></div><div className="profile-column-stats"><span>null {number(Number(column.null_count ?? 0))} · distinct {number(Number(column.distinct_count ?? 0))}</span><span>sample: {compactValue(column.sample_values)}</span></div></div>)}</div> : <pre className="json-preview">{JSON.stringify(profile, null, 2)}</pre>}</div>; }
+function ProfileView({ detail }: { detail: AssetDetail }) { const profile = detail.profile; if (!profile) return <EmptyState title="暂无画像" body="该资产尚未完成确定性数据画像。" />; const columns = Array.isArray(profile.columns) ? profile.columns as Array<Record<string, unknown>> : []; return <div className="detail-panel"><div className="data-toolbar"><div><h2>确定性画像</h2><p>画像只描述数据，不改变原始或规范化结果。</p></div></div><div className="profile-summary"><span>行 {number(Number(profile.row_count ?? profile.char_count ?? 0))}</span><span>列 {number(Number(profile.column_count ?? 0))}</span><span>空值 {number(Number(profile.null_count ?? 0))}</span><span>版本 {String(profile.profile_version ?? "—")}</span></div>{columns.length ? <div className="profile-columns">{columns.map((column) => <div className="profile-column" key={String(column.name)}><div><strong>{String(column.name)}</strong><span>{String(column.inferred_physical_type ?? "string")}</span></div><div className="profile-column-stats"><span>空值 {number(Number(column.null_count ?? 0))} · 不同值 {number(Number(column.distinct_count ?? 0))}</span><span>示例：{compactValue(column.sample_values)}</span></div></div>)}</div> : <pre className="json-preview">{JSON.stringify(profile, null, 2)}</pre>}</div>; }
 
 function DetailQuality({ detail, onUpdate }: { detail: AssetDetail; onUpdate: (issue: QualityIssue, status: QualityIssue["status"]) => void }) { return <div className="detail-panel">{detail.qualityIssues.length ? <div className="quality-list compact">{detail.qualityIssues.map((issue) => <IssueCard key={issue.issue_id} issue={issue} onUpdate={onUpdate} onOpen={() => undefined} />)}</div> : <EmptyState title="暂无质量问题" body="这个资产目前没有记录的质量问题。" />}</div>; }
 
-function SourceView({ detail }: { detail: AssetDetail }) { return <div className="detail-panel"><div className="source-grid"><SourceField label="来源文件" value={detail.source.relativePath} /><SourceField label="格式" value={detail.source.format?.toUpperCase()} /><SourceField label="SHA-256" value={detail.source.sha256} wide /><SourceField label="file_id" value={detail.source.fileId} wide /><SourceField label="extractor" value={`${detail.provenance.extractor} · ${detail.provenance.extractorVersion}`} /><SourceField label="extraction run" value={detail.provenance.extractionRunId} /><SourceField label="sheet / page" value={[detail.provenance.sheetName, detail.provenance.pageNumber ? `Page ${detail.provenance.pageNumber}` : null].filter(Boolean).join(" / ") || "—"} /><SourceField label="source range" value={compactValue(detail.provenance.sourceRange)} wide /><SourceField label="raw artifact" value={detail.artifacts.raw} wide /><SourceField label="normalized artifact" value={detail.artifacts.normalized} wide /><SourceField label="profile" value={detail.artifacts.profile} wide /></div></div>; }
+function SourceView({ detail }: { detail: AssetDetail }) { return <div className="detail-panel"><div className="source-grid"><SourceField label="来源文件" value={detail.source.relativePath} /><SourceField label="格式" value={detail.source.format?.toUpperCase()} /><SourceField label="SHA-256" value={detail.source.sha256} wide /><SourceField label="file_id" value={detail.source.fileId} wide /><SourceField label="提取器" value={`${detail.provenance.extractor} · ${detail.provenance.extractorVersion}`} /><SourceField label="提取运行 ID" value={detail.provenance.extractionRunId} /><SourceField label="工作表 / 页面" value={[detail.provenance.sheetName, detail.provenance.pageNumber ? `第 ${detail.provenance.pageNumber} 页` : null].filter(Boolean).join(" / ") || "—"} /><SourceField label="来源范围" value={compactValue(detail.provenance.sourceRange)} wide /><SourceField label="原始结果" value={detail.artifacts.raw} wide /><SourceField label="规范化结果" value={detail.artifacts.normalized} wide /><SourceField label="数据画像" value={detail.artifacts.profile} wide /></div></div>; }
 
 function SourceField({ label, value, wide }: { label: string; value: unknown; wide?: boolean }) { return <div className={`source-field ${wide ? "wide" : ""}`}><span>{label}</span><code>{String(value ?? "—")}</code></div>; }
 
@@ -548,15 +759,15 @@ function SemanticView({ detail, configured, enriching, notice, onEnrich }: { det
   const semantic = detail.semantic;
   const action = configured ? <button className="primary-button semantic-action" disabled={enriching} onClick={onEnrich}>{enriching ? "整理中..." : semantic && detail.semanticStatus === "enriched" ? "再次 AI 整理" : "AI 整理"}</button> : null;
   if (!semantic || detail.semanticStatus !== "enriched") {
-    return <div className="detail-panel semantic-empty"><div className="semantic-lock">AI</div><h2>{configured ? "尚未进行 AI 整理" : "尚未配置 AI 模型"}</h2><p>{configured ? "当前资产还没有 SemanticMetadata。" : "配置 provider 后，才能手动发起单 Asset AI 整理。"}</p>{action}<span>Semantic status: pending</span></div>;
+    return <div className="detail-panel semantic-empty"><div className="semantic-lock">AI</div><h2>{configured ? "尚未进行 AI 整理" : "尚未配置 AI 模型"}</h2><p>{configured ? "当前资产还没有 AI 整理结果。" : "请先在设置中完成并测试 AI 模型，才能手动发起单个资产的 AI 整理。"}</p>{action}<span>当前状态：待整理</span></div>;
   }
   const fields = Array.isArray(semantic.semanticFields) ? semantic.semanticFields : [];
   return <div className="detail-panel semantic-panel">
-    <div className="semantic-header"><div><div className="eyebrow">SEMANTIC METADATA</div><h2>{semantic.display_name}</h2></div><div className="semantic-header-actions">{action}<span className="semantic-confidence">confidence {semantic.confidence.toFixed(2)}</span></div></div>
+    <div className="semantic-header"><div><div className="eyebrow">AI 整理结果</div><h2>{semantic.display_name}</h2></div><div className="semantic-header-actions">{action}<span className="semantic-confidence">可信度 {semantic.confidence.toFixed(2)}</span></div></div>
     {notice ? <div className="semantic-notice" role="status">{notice}</div> : null}
-    <div className="semantic-facts"><div><span>category</span><strong>{semantic.category}</strong></div><div><span>model</span><strong>{semantic.model}</strong></div><div><span>prompt</span><strong>{semantic.prompt_version}</strong></div><div><span>run</span><strong>{semantic.semantic_run_id}</strong></div></div>
-    <div className="semantic-copy"><h3>description</h3><p>{semantic.description}</p><h3>summary</h3><p>{semantic.summary}</p><h3>keywords</h3><div className="keyword-list">{semantic.keywords.map((keyword) => <span key={keyword}>{keyword}</span>)}</div></div>
-    {detail.assetType === "table" ? <><h3 className="semantic-subheading">semantic fields</h3>{fields.length ? <div className="table-wrap"><table><thead><tr><th>source column</th><th>semantic name</th><th>description</th><th>type</th><th>unit</th><th>confidence</th></tr></thead><tbody>{fields.map((field) => <tr key={`${field.source_column}-${field.semantic_name}`}><td>{field.source_column}</td><td>{field.semantic_name}</td><td>{field.description}</td><td>{field.semantic_type}</td><td>{field.unit ?? "—"}</td><td>{field.confidence.toFixed(2)}</td></tr>)}</tbody></table></div> : <p className="muted">No semantic fields were returned.</p>}</> : null}
+    <div className="semantic-facts"><div><span>分类</span><strong>{semantic.category}</strong></div><div><span>模型</span><strong>{semantic.model}</strong></div><div><span>提示版本</span><strong>{semantic.prompt_version}</strong></div><div><span>运行 ID</span><strong>{semantic.semantic_run_id}</strong></div></div>
+    <div className="semantic-copy"><h3>描述</h3><p>{semantic.description}</p><h3>摘要</h3><p>{semantic.summary}</p><h3>关键词</h3><div className="keyword-list">{semantic.keywords.map((keyword) => <span key={keyword}>{keyword}</span>)}</div></div>
+    {detail.assetType === "table" ? <><h3 className="semantic-subheading">字段说明</h3>{fields.length ? <div className="table-wrap"><table><thead><tr><th>来源列</th><th>语义名称</th><th>说明</th><th>类型</th><th>单位</th><th>可信度</th></tr></thead><tbody>{fields.map((field) => <tr key={`${field.source_column}-${field.semantic_name}`}><td>{field.source_column}</td><td>{field.semantic_name}</td><td>{field.description}</td><td>{field.semantic_type}</td><td>{field.unit ?? "—"}</td><td>{field.confidence.toFixed(2)}</td></tr>)}</tbody></table></div> : <p className="muted">AI 未返回字段说明。</p>}</> : null}
   </div>;
 }
 

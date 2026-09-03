@@ -7,18 +7,60 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import time
 from typing import Any, Iterable
 from uuid import NAMESPACE_URL, uuid5
 
 import duckdb
 
 from . import paths
+from .locking import FileLock, registry_connection_open_mutex
 from .processing_policy import ProcessingPlan, RegistryFileInfo, plan_processing
 from .types import ExistingFile, FileOutcome, ScanSummary
 
 
 class RegistryError(RuntimeError):
     """Raised when the registry cannot be initialized or updated safely."""
+
+
+REGISTRY_BUSY_MARKERS = (
+    "write-write conflict",
+    "transaction conflict",
+    "database is locked",
+    "different configuration than existing connections",
+    "can't open a connection to same database file",
+    "cannot open file",
+    "another process",
+    "another program is using",
+    "registry is busy",
+)
+REGISTRY_CONNECTION_RETRY_SECONDS = 5.0
+REGISTRY_CONNECTION_RETRY_INTERVAL_SECONDS = 0.05
+
+
+def is_registry_busy_error(error: BaseException | str) -> bool:
+    """Classify transient DuckDB connection/transaction contention safely."""
+
+    detail = str(error).casefold()
+    exception_name = type(error).__name__.casefold() if not isinstance(error, str) else ""
+    return exception_name in {
+        "transactionexception",
+        "concurrentmodificationexception",
+    } or any(marker in detail for marker in REGISTRY_BUSY_MARKERS)
+
+
+def _connect_registry(path: Path, *, read_only: bool) -> duckdb.DuckDBPyConnection:
+    """Open one consistently configured connection across short Windows IO contention."""
+
+    deadline = time.monotonic() + REGISTRY_CONNECTION_RETRY_SECONDS
+    while True:
+        try:
+            with registry_connection_open_mutex(path):
+                return duckdb.connect(str(path), read_only=read_only)
+        except Exception as exc:
+            if not is_registry_busy_error(exc) or time.monotonic() >= deadline:
+                raise
+            time.sleep(REGISTRY_CONNECTION_RETRY_INTERVAL_SECONDS)
 
 
 def utc_now() -> datetime:
@@ -425,7 +467,8 @@ issue_counts AS (
            COUNT(*) FILTER (WHERE q.status IN ('open', 'accepted')) AS issue_count
     FROM quality_issues q
     LEFT JOIN latest_cleaning c ON c.cleaning_run_id = q.cleaning_run_id
-    WHERE q.cleaning_run_id IS NULL OR c.cleaning_run_id IS NOT NULL
+    WHERE q.issue_type <> 'possible_table_candidate'
+      AND (q.cleaning_run_id IS NULL OR c.cleaning_run_id IS NOT NULL)
     GROUP BY q.asset_id
 ),
 semantic_current AS (
@@ -585,6 +628,28 @@ SELECT * FROM text_catalog
 
 
 SCHEMA_STATEMENTS = CORE_SCHEMA_STATEMENTS + CATALOG_SCHEMA_STATEMENTS + CLEANING_SCHEMA_STATEMENTS + (CATALOG_VIEW_STATEMENT,)
+
+
+# DuckDB secondary indexes can be left inconsistent if Windows terminates a
+# process in the middle of a write transaction.  These are the only indexes
+# touched by the startup run-state recovery below.  If recovery encounters
+# that driver-level fatal error, the connection is reopened and the affected
+# table indexes are rebuilt before retrying the state update.  This is a
+# repair of index metadata only; rows and derived artifacts are not removed.
+_RECOVERY_INDEX_STATEMENTS: dict[str, tuple[tuple[str, str], ...]] = {
+    "extraction_runs": (
+        ("idx_extraction_runs_file", "CREATE INDEX idx_extraction_runs_file ON extraction_runs(file_id, content_sha256)"),
+        ("idx_extraction_identity", "CREATE INDEX idx_extraction_identity ON extraction_runs(extraction_identity, status)"),
+    ),
+    "cleaning_runs": (
+        ("idx_cleaning_runs_asset", "CREATE INDEX idx_cleaning_runs_asset ON cleaning_runs(asset_id, content_sha256, finished_at)"),
+        ("idx_cleaning_identity", "CREATE INDEX idx_cleaning_identity ON cleaning_runs(cleaning_identity, status)"),
+    ),
+    "semantic_runs": (
+        ("idx_semantic_runs_identity", "CREATE INDEX idx_semantic_runs_identity ON semantic_runs(semantic_identity, status)"),
+        ("idx_semantic_runs_asset", "CREATE INDEX idx_semantic_runs_asset ON semantic_runs(asset_id, asset_type, started_at)"),
+    ),
+}
 
 
 def _processing_plan(
@@ -760,20 +825,26 @@ def _migrate_v4_to_v5(connection: duckdb.DuckDBPyConnection) -> None:
 
 
 def initialize_schema(connection: duckdb.DuckDBPyConnection) -> None:
-    connection.execute(
-        """
-        CREATE TABLE IF NOT EXISTS registry_meta (
-            meta_key VARCHAR PRIMARY KEY,
-            meta_value VARCHAR NOT NULL,
-            updated_at TIMESTAMP NOT NULL
-        )
-        """
-    )
-    row = connection.execute(
-        "SELECT meta_value FROM registry_meta WHERE meta_key = ?",
-        [paths.REGISTRY_SCHEMA_NAME],
-    ).fetchone()
+    # The current-schema path is deliberately read-only. DuckDB treats
+    # CREATE OR REPLACE VIEW as a catalog write, so it cannot be used as a
+    # harmless health check while readers and a processing writer are active.
+    try:
+        row = connection.execute(
+            "SELECT meta_value FROM registry_meta WHERE meta_key = ?",
+            [paths.REGISTRY_SCHEMA_NAME],
+        ).fetchone()
+    except duckdb.CatalogException:
+        row = None
     if row is None:
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS registry_meta (
+                meta_key VARCHAR PRIMARY KEY,
+                meta_value VARCHAR NOT NULL,
+                updated_at TIMESTAMP NOT NULL
+            )
+            """
+        )
         for statement in SCHEMA_STATEMENTS:
             connection.execute(statement)
         connection.execute(
@@ -790,24 +861,12 @@ def initialize_schema(connection: duckdb.DuckDBPyConnection) -> None:
     if version == 2 and paths.REGISTRY_SCHEMA_VERSION >= 3:
         _migrate_v2_to_v3(connection)
         version = 3
-    if version == 3 and paths.REGISTRY_SCHEMA_VERSION == 3:
-        # The v2->v3 DDL is idempotent. Rechecking v3 also makes an interrupted
-        # ALTER sequence restartable before any coordinator uses the catalog.
-        _migrate_v2_to_v3(connection)
     if version == 3 and paths.REGISTRY_SCHEMA_VERSION >= 4:
         _migrate_v3_to_v4(connection)
         version = 4
-    if version == 4 and paths.REGISTRY_SCHEMA_VERSION == 4:
-        # Re-run additive DDL after an interrupted migration before any
-        # coordinator relies on the catalog view or profile tables.
-        _migrate_v3_to_v4(connection)
     if version == 4 and paths.REGISTRY_SCHEMA_VERSION >= 5:
         _migrate_v4_to_v5(connection)
         version = 5
-    if version == 5 and paths.REGISTRY_SCHEMA_VERSION == 5:
-        # Re-run additive DDL after an interrupted Phase 7 migration before
-        # any semantic coordinator relies on the history tables or view.
-        _migrate_v4_to_v5(connection)
     if version < paths.REGISTRY_SCHEMA_VERSION:
         raise RegistryError(f"Registry schema migration from {version} to {paths.REGISTRY_SCHEMA_VERSION} is not implemented")
 
@@ -820,15 +879,65 @@ class Registry:
         self.path = path
 
     @classmethod
-    def open(cls, path: Path | str | None = None) -> "Registry":
+    def open(
+        cls,
+        path: Path | str | None = None,
+        *,
+        initialize: bool = True,
+        read_only: bool = False,
+    ) -> "Registry":
+        """Open a Registry connection.
+
+        The default keeps the CLI/test contract that a missing registry is
+        created on first open. Normal server operations pass
+        ``initialize=False``. Operational readers also pass
+        ``initialize=False`` and use the same read-write-capable DuckDB
+        configuration as writers; the application service boundary, rather
+        than DuckDB's connection mode, prevents reader-side mutations.
+        """
+
+        if read_only and initialize:
+            raise ValueError("read-only registry connections cannot initialize schema")
         registry_path = Path(path or paths.REGISTRY_PATH).resolve()
-        registry_path.parent.mkdir(parents=True, exist_ok=True)
+        if not read_only:
+            registry_path.parent.mkdir(parents=True, exist_ok=True)
+        elif not registry_path.is_file():
+            raise RegistryError(f"registry does not exist: {registry_path}")
+        connection: duckdb.DuckDBPyConnection | None = None
         try:
-            connection = duckdb.connect(str(registry_path))
-            initialize_schema(connection)
+            connection = _connect_registry(registry_path, read_only=read_only)
+            if initialize:
+                schema_lock = FileLock(registry_path.with_name(registry_path.name + ".schema.lock"))
+                schema_lock.acquire(timeout=30.0)
+                try:
+                    initialize_schema(connection)
+                finally:
+                    schema_lock.release()
         except Exception as exc:  # noqa: BLE001 - convert DB driver errors at the boundary
+            if connection is not None:
+                connection.close()
             raise RegistryError(f"Unable to initialize registry {registry_path}: {exc}") from exc
+        if connection is None:  # pragma: no cover - defensive for a driver failure
+            raise RegistryError(f"Unable to open registry {registry_path}")
         return cls(connection, registry_path)
+
+    @classmethod
+    def open_reader(cls, path: Path | str | None = None) -> "Registry":
+        """Open an operational reader without schema initialization or DDL.
+
+        Keep this connection configuration identical to ``Registry.open`` so
+        one server process never mixes DuckDB read-only and read-write
+        connections for the same database file.
+        """
+
+        return cls.open(path, initialize=False, read_only=False)
+
+    @classmethod
+    def ensure_initialized(cls, path: Path | str | None = None) -> None:
+        """Create or explicitly migrate a registry, then close it."""
+
+        registry = cls.open(path, initialize=True)
+        registry.close()
 
     def close(self) -> None:
         self.connection.close()
@@ -859,19 +968,24 @@ class Registry:
         between files. This operation is intentionally scoped to one source.
         """
 
-        row = self.connection.execute(
-            "SELECT COUNT(*) FROM scan_runs WHERE source_root=? AND status='running'",
-            [source_root],
-        ).fetchone()
-        count = int(row[0] or 0)
-        self.connection.execute(
-            """
-            UPDATE scan_runs SET status='interrupted', finished_at=?
-            WHERE source_root=? AND status='running'
-            """,
-            [utc_now(), source_root],
-        )
-        return count
+        now = utc_now()
+
+        def recover() -> int:
+            row = self.connection.execute(
+                "SELECT COUNT(*) FROM scan_runs WHERE source_root=? AND status='running'",
+                [source_root],
+            ).fetchone()
+            count = int(row[0] or 0)
+            self.connection.execute(
+                """
+                UPDATE scan_runs SET status='interrupted', finished_at=?
+                WHERE source_root=? AND status='running'
+                """,
+                [now, source_root],
+            )
+            return count
+
+        return self._run_recovery_with_index_repair("scan_runs", recover)
 
     def load_files(self, source_root: str) -> dict[str, ExistingFile]:
         rows = self.connection.execute(
@@ -976,16 +1090,97 @@ class Registry:
         return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
     def recover_incomplete_extractions(self, source_root: str) -> int:
+        now = utc_now()
+
+        def recover() -> int:
+            row = self.connection.execute(
+                "SELECT COUNT(*) FROM extraction_runs WHERE source_root=? AND status='running'",
+                [source_root],
+            ).fetchone()
+            count = int(row[0] or 0)
+            self.connection.execute(
+                "UPDATE extraction_runs SET status='interrupted', finished_at=? WHERE source_root=? AND status='running'",
+                [now, source_root],
+            )
+            return count
+
+        return self._run_recovery_with_index_repair("extraction_runs", recover)
+
+    def _reopen_after_fatal_write(self) -> None:
+        """Reopen DuckDB after a driver-invalidating fatal write error."""
+
+        try:
+            self.connection.close()
+        finally:
+            self.connection = _connect_registry(self.path, read_only=False)
+
+    def _repair_recovery_indexes(self, table: str) -> None:
+        """Rebuild secondary indexes needed by stale-run recovery."""
+
+        definitions = _RECOVERY_INDEX_STATEMENTS.get(table, ())
+        if not definitions:
+            return
+        schema_lock = FileLock(self.path.with_name(self.path.name + ".schema.lock"))
+        schema_lock.acquire(timeout=30.0)
+        try:
+            for index_name, _statement in definitions:
+                self.connection.execute(f"DROP INDEX IF EXISTS {index_name}")
+            for _index_name, statement in definitions:
+                self.connection.execute(statement)
+        finally:
+            schema_lock.release()
+
+    def _run_recovery_with_index_repair(self, table: str, operation) -> Any:
+        """Run one recovery write, repairing a driver-invalidated index once."""
+
+        try:
+            return operation()
+        except duckdb.FatalException:
+            # DuckDB invalidates the connection after this class of fatal
+            # index error.  Always reconnect before any repair or retry.
+            self._reopen_after_fatal_write()
+            self._repair_recovery_indexes(table)
+            return operation()
+
+    def _recover_incomplete_table(self, table: str, status_column: str, now: datetime) -> int:
         row = self.connection.execute(
-            "SELECT COUNT(*) FROM extraction_runs WHERE source_root=? AND status='running'",
-            [source_root],
+            f"SELECT COUNT(*) FROM {table} WHERE {status_column}='running'"
         ).fetchone()
         count = int(row[0] or 0)
-        self.connection.execute(
-            "UPDATE extraction_runs SET status='interrupted', finished_at=? WHERE source_root=? AND status='running'",
-            [utc_now(), source_root],
-        )
+        if count:
+            self.connection.execute(
+                f"UPDATE {table} SET status='interrupted', finished_at=? WHERE {status_column}='running'",
+                [now],
+            )
         return count
+
+    def recover_all_incomplete_runs(self) -> dict[str, int]:
+        """Recover runs left open by a previous dead server instance.
+
+        This is called once after the new server owns the project lock and
+        before it accepts processing requests. Existing artifacts are never
+        removed or rewritten; only durable run-state markers are finalized.
+        """
+
+        now = utc_now()
+        recovered: dict[str, int] = {}
+        for table, status_column in (
+            ("scan_runs", "status"),
+            ("extraction_runs", "status"),
+            ("cleaning_runs", "status"),
+            ("semantic_runs", "status"),
+        ):
+            try:
+                count = self._run_recovery_with_index_repair(
+                    table,
+                    lambda: self._recover_incomplete_table(table, status_column, now),
+                )
+                recovered[table] = count
+            except duckdb.CatalogException:
+                # Older registries may not have a later phase table. Their
+                # existing recovery paths remain compatible with this sweep.
+                recovered[table] = 0
+        return recovered
 
     def reusable_extraction(self, extraction_identity: str) -> dict[str, Any] | None:
         cursor = self.connection.execute(
@@ -1282,16 +1477,21 @@ class Registry:
         return result
 
     def recover_incomplete_cleaning(self, source_root: str) -> int:
-        row = self.connection.execute(
-            "SELECT COUNT(*) FROM cleaning_runs WHERE source_root=? AND status='running'",
-            [source_root],
-        ).fetchone()
-        count = int(row[0] or 0)
-        self.connection.execute(
-            "UPDATE cleaning_runs SET status='interrupted', finished_at=? WHERE source_root=? AND status='running'",
-            [utc_now(), source_root],
-        )
-        return count
+        now = utc_now()
+
+        def recover() -> int:
+            row = self.connection.execute(
+                "SELECT COUNT(*) FROM cleaning_runs WHERE source_root=? AND status='running'",
+                [source_root],
+            ).fetchone()
+            count = int(row[0] or 0)
+            self.connection.execute(
+                "UPDATE cleaning_runs SET status='interrupted', finished_at=? WHERE source_root=? AND status='running'",
+                [now, source_root],
+            )
+            return count
+
+        return self._run_recovery_with_index_repair("cleaning_runs", recover)
 
     def cleaning_candidates(self, source_root: str) -> list[dict[str, Any]]:
         """Return current extracted assets without exposing source files to writers."""
@@ -2846,68 +3046,132 @@ class Registry:
         columns = [item[0] for item in cursor.description]
         return dict(zip(columns, row))
 
-    def catalog_summary(self, source_root: str | None = None) -> dict[str, int]:
-        run_where = "WHERE source_root=?" if source_root is not None else ""
+    def processing_counts(self, source_root: str | None = None) -> tuple[int, int, int, int]:
+        """Return file-oriented processed, failed, deferred and terminal counts.
+
+        The old implementation issued one latest-route query per file.  This
+        pivot keeps the same routing semantics in one read-only statement so
+        an Overview request does not scale linearly with the number of files.
+        """
+
+        source_clause = " AND source_root=?" if source_root is not None else ""
         params = [source_root] if source_root is not None else []
-        run_rows = self.connection.execute(
-            f"SELECT status, COUNT(*) FROM extraction_runs {run_where} GROUP BY status",
+        row = self.connection.execute(
+            f"""
+            WITH present AS (
+                SELECT file_id, sha256, business_format, support_status
+                FROM files
+                WHERE current_presence_state='present'{source_clause}
+            ), ranked AS (
+                SELECT e.file_id, e.content_sha256, e.attempted_route, e.status,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY e.file_id, e.content_sha256, e.attempted_route
+                           ORDER BY e.finished_at DESC NULLS LAST,
+                                    e.started_at DESC, e.extraction_run_id DESC
+                       ) AS row_number
+                FROM extraction_runs e
+                JOIN present p ON p.file_id=e.file_id AND p.sha256=e.content_sha256
+            ), latest AS (
+                SELECT file_id, content_sha256, attempted_route, status
+                FROM ranked
+                WHERE row_number=1
+            ), pivoted AS (
+                SELECT p.file_id, p.support_status, p.business_format, p.sha256,
+                       MAX(CASE WHEN l.attempted_route='structured_native' THEN l.status END) AS structured_status,
+                       MAX(CASE WHEN l.attempted_route='pdf_native_text' THEN l.status END) AS pdf_native_status,
+                       MAX(CASE WHEN l.attempted_route='ocr_rapidocr' THEN l.status END) AS ocr_status,
+                       MAX(CASE WHEN l.attempted_route='text_plain' THEN l.status END) AS text_status
+                FROM present p
+                LEFT JOIN latest l ON l.file_id=p.file_id AND l.content_sha256=p.sha256
+                GROUP BY p.file_id, p.support_status, p.business_format, p.sha256
+            ), classified AS (
+                SELECT CASE
+                    WHEN support_status <> 'supported' THEN 'unsupported'
+                    WHEN sha256 IS NULL THEN 'failed'
+                    WHEN business_format IN ('csv','tsv','xls','xlsx') THEN structured_status
+                    WHEN business_format='pdf' THEN CASE
+                        WHEN pdf_native_status='failed' OR ocr_status='failed' THEN 'failed'
+                        WHEN pdf_native_status IN ('successful','partial') OR ocr_status IN ('successful','partial') THEN 'successful'
+                        ELSE COALESCE(pdf_native_status, ocr_status)
+                    END
+                    WHEN business_format IN ('jpeg','png') THEN ocr_status
+                    WHEN business_format='txt' THEN text_status
+                    ELSE NULL
+                END AS status
+                FROM pivoted
+            )
+            SELECT
+                COALESCE(SUM(CASE WHEN status IN ('successful','partial') THEN 1 ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN status NOT IN ('successful','partial','failed','unsupported') OR status IS NULL THEN 1 ELSE 0 END), 0)
+            FROM classified
+            """,
             params,
-        ).fetchall()
-        catalog_where = "WHERE source_root=?" if source_root is not None else ""
-        catalog_params = [source_root] if source_root is not None else []
-        file_count = self.connection.execute(
-            "SELECT COUNT(*) FROM files WHERE current_presence_state='present'" + (" AND source_root=?" if source_root is not None else ""),
-            catalog_params,
         ).fetchone()
-        assets = self.connection.execute(
-            f"SELECT COUNT(*), COALESCE(SUM(\"rows\"), 0) FROM catalog_assets {catalog_where} AND asset_type='table'" if source_root is not None else "SELECT COUNT(*), COALESCE(SUM(\"rows\"), 0) FROM catalog_assets WHERE asset_type='table'",
-            catalog_params,
-        ).fetchone()
-        text_assets = self.connection.execute(
-            f"SELECT COUNT(*) FROM catalog_assets {catalog_where} AND asset_type='text'" if source_root is not None else "SELECT COUNT(*) FROM catalog_assets WHERE asset_type='text'",
-            catalog_params,
-        ).fetchone()
-        text_chunks = self.connection.execute(
-            f"SELECT COALESCE(SUM(chunks), 0) FROM catalog_assets {catalog_where} AND asset_type='text'" if source_root is not None else "SELECT COALESCE(SUM(chunks), 0) FROM catalog_assets WHERE asset_type='text'",
-            catalog_params,
-        ).fetchone()
-        issue_count = self.connection.execute(
-            f"SELECT COALESCE(SUM(quality_issue_count), 0) FROM catalog_assets {catalog_where}" if source_root is not None else "SELECT COALESCE(SUM(quality_issue_count), 0) FROM catalog_assets",
-            catalog_params,
-        ).fetchone()
-        status_rows = self.connection.execute(
-            f"SELECT quality_status, COUNT(*) FROM catalog_assets {catalog_where} GROUP BY quality_status" if source_root is not None else "SELECT quality_status, COUNT(*) FROM catalog_assets GROUP BY quality_status",
-            catalog_params,
-        ).fetchall()
-        semantic_pending = self.connection.execute(
-            f"SELECT COUNT(*) FROM catalog_assets {catalog_where} AND semantic_status='pending'" if source_root is not None else "SELECT COUNT(*) FROM catalog_assets WHERE semantic_status='pending'",
-            catalog_params,
-        ).fetchone()
-        cleaning_rows = self.connection.execute(
-            f"SELECT cleaning_status, COUNT(*) FROM catalog_assets {catalog_where} GROUP BY cleaning_status" if source_root is not None else "SELECT cleaning_status, COUNT(*) FROM catalog_assets GROUP BY cleaning_status",
-            catalog_params,
+        processed = int(row[0] or 0)
+        failed = int(row[1] or 0)
+        deferred = int(row[2] or 0)
+        return processed, failed, deferred, processed + failed
+
+    def catalog_summary(self, source_root: str | None = None) -> dict[str, int]:
+        """Return catalog/file/run counters with one aggregate catalog read."""
+
+        catalog_clause = "WHERE source_root=?" if source_root is not None else ""
+        file_clause = " AND source_root=?" if source_root is not None else ""
+        params = ([source_root] if source_root is not None else []) * 2
+        aggregate_cursor = self.connection.execute(
+            f"""
+            WITH catalog AS (
+                SELECT * FROM catalog_assets {catalog_clause}
+            ), asset_stats AS (
+                SELECT
+                    COUNT(*) FILTER (WHERE asset_type='table') AS table_assets,
+                    COALESCE(SUM(CASE WHEN asset_type='table' THEN "rows" ELSE 0 END), 0) AS table_rows,
+                    COUNT(*) FILTER (WHERE asset_type='text') AS text_assets,
+                    COALESCE(SUM(CASE WHEN asset_type='text' THEN chunks ELSE 0 END), 0) AS text_chunks,
+                    COUNT(*) FILTER (WHERE quality_status='ready') AS ready,
+                    COUNT(*) FILTER (WHERE quality_status='needs_review') AS needs_review,
+                    COUNT(*) FILTER (WHERE quality_status='unusable') AS unusable,
+                    COUNT(*) FILTER (WHERE semantic_status='pending') AS semantic_pending,
+                    COUNT(*) FILTER (WHERE semantic_status='enriched') AS semantic_enriched,
+                    COUNT(*) FILTER (WHERE cleaning_status='successful') AS cleaning_successful,
+                    COUNT(*) FILTER (WHERE cleaning_status='failed') AS cleaning_failed,
+                    COUNT(*) FILTER (WHERE cleaning_status='not_run') AS cleaning_not_run
+                FROM catalog
+            ), file_stats AS (
+                SELECT
+                    COUNT(*) AS files,
+                    COUNT(*) FILTER (WHERE support_status='supported') AS supported_files,
+                    COUNT(*) FILTER (WHERE support_status<>'supported' OR support_status IS NULL) AS unsupported_files
+                FROM files
+                WHERE current_presence_state='present'{file_clause}
+            ), issue_stats AS (
+                SELECT
+                    COUNT(*) FILTER (WHERE q.status IN ('open','accepted')) AS quality_issues,
+                    COUNT(*) FILTER (WHERE q.status='open') AS open_quality_issues
+                FROM quality_issues q
+                WHERE q.issue_type <> 'possible_table_candidate'
+                  AND EXISTS (
+                      SELECT 1 FROM catalog c
+                      WHERE c.asset_id=q.asset_id
+                        AND (q.cleaning_run_id IS NULL OR q.cleaning_run_id=c.cleaning_run_id)
+                  )
+            )
+            SELECT * FROM file_stats, asset_stats, issue_stats
+            """,
+            params,
+        )
+        aggregate = aggregate_cursor.fetchone()
+        columns = [item[0] for item in aggregate_cursor.description] if aggregate else []
+        values = dict(zip(columns, aggregate)) if aggregate else {}
+        run_clause = "WHERE source_root=?" if source_root is not None else ""
+        run_rows = self.connection.execute(
+            f"SELECT status, COUNT(*) FROM extraction_runs {run_clause} GROUP BY status",
+            [source_root] if source_root is not None else [],
         ).fetchall()
         result = {f"extraction_{status}": int(count) for status, count in run_rows}
-        quality_counts = {str(status): int(count) for status, count in status_rows}
-        cleaning_counts = {str(status): int(count) for status, count in cleaning_rows}
-        result.update(
-            {
-                "files": int(file_count[0] or 0),
-                "table_assets": int(assets[0] or 0),
-                "table_rows": int(assets[1] or 0),
-                "text_assets": int(text_assets[0] or 0),
-                "text_chunks": int(text_chunks[0] or 0),
-                "quality_issues": int(issue_count[0] or 0),
-                "catalog_assets": int(assets[0] or 0) + int(text_assets[0] or 0),
-                "ready": quality_counts.get("ready", 0),
-                "needs_review": quality_counts.get("needs_review", 0),
-                "unusable": quality_counts.get("unusable", 0),
-                "semantic_pending": int(semantic_pending[0] or 0),
-                "cleaning_successful": cleaning_counts.get("successful", 0),
-                "cleaning_failed": cleaning_counts.get("failed", 0),
-                "cleaning_not_run": cleaning_counts.get("not_run", 0),
-            }
-        )
+        result.update({key: int(value or 0) for key, value in values.items()})
+        result["catalog_assets"] = result.get("table_assets", 0) + result.get("text_assets", 0)
         return result
 
     def list_catalog_assets(
@@ -2920,6 +3184,7 @@ class Registry:
         query: str | None = None,
         limit: int = 100,
         offset: int = 0,
+        include_total: bool = False,
     ) -> list[dict[str, Any]]:
         if limit < 1 or limit > 100_000:
             raise ValueError("limit must be between 1 and 100000")
@@ -2942,8 +3207,9 @@ class Registry:
             )
             needle = f"%{query.strip()}%"
             params.extend((needle, needle, needle))
+        projection = "c.*, COUNT(*) OVER() AS _catalog_total" if include_total else "c.*"
         cursor = self.connection.execute(
-            f"SELECT * FROM catalog_assets WHERE {' AND '.join(clauses)} ORDER BY source_file, asset_type, asset_id LIMIT ? OFFSET ?",
+            f"SELECT {projection} FROM catalog_assets c WHERE {' AND '.join(clauses)} ORDER BY source_file, asset_type, asset_id LIMIT ? OFFSET ?",
             [*params, int(limit), int(offset)],
         )
         columns = [item[0] for item in cursor.description]
@@ -2996,7 +3262,7 @@ class Registry:
             raise ValueError("limit must be between 1 and 100000")
         if offset < 0:
             raise ValueError("offset must be non-negative")
-        clauses = ["1=1"]
+        clauses = ["1=1", "q.issue_type <> 'possible_table_candidate'"]
         params: list[Any] = []
         for column, value in (("q.status", status), ("q.severity", severity), ("q.asset_id", asset_id)):
             if value is not None:
@@ -3039,7 +3305,7 @@ class Registry:
         severity: str | None = None,
         asset_id: str | None = None,
     ) -> int:
-        clauses = ["1=1"]
+        clauses = ["1=1", "issue_type <> 'possible_table_candidate'"]
         params: list[Any] = []
         for column, value in (("status", status), ("severity", severity), ("asset_id", asset_id)):
             if value is not None:
@@ -3050,6 +3316,42 @@ class Registry:
             params,
         ).fetchone()
         return int(row[0] or 0)
+
+    def visible_quality_issue_counts(self, assets: Iterable[dict[str, Any]]) -> dict[str, int]:
+        """Count user-visible open/accepted issues for a catalog page.
+
+        ``catalog_assets`` is a versioned view, so an existing workspace may
+        still have the previous view definition until an explicit migration.
+        Keep this small, DDL-free correction at the service boundary so both
+        fresh and existing registries hide routing hints consistently.
+        """
+
+        selected = [
+            (str(row.get("asset_id") or ""), row.get("cleaning_run_id"))
+            for row in assets
+            if row.get("asset_id")
+        ]
+        if not selected:
+            return {}
+        values = ", ".join("(?, ?)" for _ in selected)
+        params: list[Any] = []
+        for asset_id, cleaning_run_id in selected:
+            params.extend((asset_id, cleaning_run_id))
+        cursor = self.connection.execute(
+            f"""
+            WITH selected(asset_id, cleaning_run_id) AS (VALUES {values})
+            SELECT selected.asset_id, COUNT(q.issue_id) AS issue_count
+            FROM selected
+            LEFT JOIN quality_issues q
+              ON q.asset_id=selected.asset_id
+             AND q.issue_type <> 'possible_table_candidate'
+             AND q.status IN ('open', 'accepted')
+             AND (q.cleaning_run_id IS NULL OR q.cleaning_run_id=selected.cleaning_run_id)
+            GROUP BY selected.asset_id
+            """,
+            params,
+        )
+        return {str(asset_id): int(count or 0) for asset_id, count in cursor.fetchall()}
 
     def update_quality_issue_status(self, issue_id: str, status: str) -> dict[str, Any] | None:
         if status not in {"open", "accepted", "ignored", "resolved"}:
@@ -3096,7 +3398,8 @@ class Registry:
                    issue_type, description, evidence_json, detected_by,
                    suggested_action, status, created_at
             FROM quality_issues
-            WHERE asset_id=? AND status IN ('open', 'accepted')
+            WHERE asset_id=? AND issue_type <> 'possible_table_candidate'
+              AND status IN ('open', 'accepted')
               AND (cleaning_run_id IS NULL OR cleaning_run_id=?)
             ORDER BY created_at, issue_id
             """,
@@ -3117,6 +3420,7 @@ class Registry:
             issue.pop("evidence_json", None)
             issues.append(issue)
         result["quality_issues"] = issues
+        result["quality_issue_count"] = len(issues)
         profile_path = result.get("profile_artifact_path")
         if profile_path:
             profile_row = self.connection.execute(
@@ -3162,11 +3466,16 @@ class Registry:
         if asset_id is not None:
             clauses.append("asset_id=?")
             params.append(asset_id)
-        cursor = self.connection.execute(
-            f"UPDATE semantic_runs SET status='failed', finished_at=?, error_code='interrupted', error_message='semantic run interrupted before completion' WHERE {' AND '.join(clauses)} RETURNING semantic_run_id",
-            [utc_now(), *params],
-        )
-        return len(cursor.fetchall())
+        now = utc_now()
+
+        def recover() -> int:
+            cursor = self.connection.execute(
+                f"UPDATE semantic_runs SET status='failed', finished_at=?, error_code='interrupted', error_message='semantic run interrupted before completion' WHERE {' AND '.join(clauses)} RETURNING semantic_run_id",
+                [now, *params],
+            )
+            return len(cursor.fetchall())
+
+        return self._run_recovery_with_index_repair("semantic_runs", recover)
 
     def start_semantic_run(
         self,

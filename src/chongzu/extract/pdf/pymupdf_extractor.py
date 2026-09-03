@@ -18,6 +18,7 @@ except ImportError:  # Keep ``chongzu doctor`` usable before provisioning.
 
 from chongzu import paths
 from chongzu.assets import (
+    BoundingBox,
     ChunkProvenance,
     QualityIssue,
     QualityIssueSeverity,
@@ -160,6 +161,23 @@ def _metadata_value(value: Any) -> Any:
     return str(value)
 
 
+def _ordered_page_blocks(blocks: list[Any]) -> list[Any]:
+    """Return blocks in a stable top-to-bottom, left-to-right reading order."""
+
+    return sorted(blocks, key=lambda block: (round(block.bbox.y0, 2), round(block.bbox.x0, 2), block.block_index))
+
+
+def _page_bbox(blocks: list[Any]) -> BoundingBox | None:
+    if not blocks:
+        return None
+    return BoundingBox(
+        min(block.bbox.x0 for block in blocks),
+        min(block.bbox.y0 for block in blocks),
+        max(block.bbox.x1 for block in blocks),
+        max(block.bbox.y1 for block in blocks),
+    )
+
+
 def extract_pdf_file(
     source: StructuredSource,
     extraction_run_id: str,
@@ -218,104 +236,119 @@ def extract_pdf_file(
                     time.perf_counter_ns() - profiling_started
                 ) / 1_000_000
 
-                for block in blocks:
-                    normalized = block.normalized_text
-                    source_locator = (
-                        f"page:{page_number}:block:{block.block_index}:"
-                        f"config:{paths.PDF_CONFIG_VERSION}"
+                ordered_blocks = _ordered_page_blocks(blocks)
+                if not ordered_blocks:
+                    continue
+                normalized_blocks = [block.normalized_text for block in ordered_blocks]
+                raw_text = "\n\n".join(block.raw_text for block in ordered_blocks)
+                normalized = "\n\n".join(normalized_blocks)
+                block_metadata: list[dict[str, Any]] = []
+                normalized_offset = 0
+                for block, block_normalized in zip(ordered_blocks, normalized_blocks):
+                    block_metadata.append(
+                        {
+                            "block_index": block.block_index,
+                            "bbox": block.bbox.__dict__,
+                            "raw_text": block.raw_text,
+                            "normalized_text": block_normalized,
+                            "normalized_char_start": normalized_offset,
+                            "normalized_char_end": normalized_offset + len(block_normalized),
+                        }
                     )
-                    text_asset_id = make_text_asset_id(
+                    normalized_offset += len(block_normalized) + 2
+                source_locator = f"page:{page_number}:config:{paths.PDF_CONFIG_VERSION}"
+                text_asset_id = make_text_asset_id(
+                    file_id=source.file_id,
+                    content_sha256=source.content_sha256,
+                    extractor=result.extractor,
+                    extractor_version=result.extractor_version,
+                    source_kind=SourceKind.PAGE,
+                    source_locator=source_locator,
+                    asset_index=page_number - 1,
+                )
+                artifact_started = time.perf_counter_ns()
+                target_metadata = {
+                    "contract_version": paths.PDF_CONFIG_VERSION,
+                    "file_id": source.file_id,
+                    "content_sha256": source.content_sha256,
+                    "source_relative_path": source.relative_path,
+                    "extraction_run_id": extraction_run_id,
+                    "extractor": result.extractor,
+                    "extractor_version": result.extractor_version,
+                    "source_kind": SourceKind.PAGE.value,
+                    "page_number": page_number,
+                    "page_width": page_profile.width,
+                    "page_height": page_profile.height,
+                    "page_rotation": page_profile.rotation,
+                    "page_image_count": page_profile.image_count,
+                    "page_text_block_count": page_profile.text_block_count,
+                    "page_reason_codes": list(page_profile.reason_codes),
+                    "block_count": len(ordered_blocks),
+                    "blocks": block_metadata,
+                    "chunk_config_version": paths.TEXT_CHUNK_CONFIG_VERSION,
+                    "offset_basis": "normalized_text",
+                }
+                paths_written = write_text_asset(
+                    workspace_root=source.workspace_root,
+                    text_asset_id=text_asset_id,
+                    raw_text=raw_text,
+                    normalized_text=normalized,
+                    metadata=target_metadata,
+                )
+                result.timings.artifact_write_ms += (
+                    time.perf_counter_ns() - artifact_started
+                ) / 1_000_000
+                asset = TextAsset(
+                    text_asset_id=text_asset_id,
+                    file_id=source.file_id,
+                    content_sha256=source.content_sha256,
+                    extraction_run_id=extraction_run_id,
+                    extractor=result.extractor,
+                    extractor_version=result.extractor_version,
+                    source_kind=SourceKind.PAGE,
+                    page_number=page_number,
+                    section=f"page-{page_number}",
+                    bbox=_page_bbox(ordered_blocks),
+                    text=normalized,
+                    language=None,
+                    created_at=utc_now(),
+                    source_relative_path=source.relative_path,
+                    raw_artifact_path=paths_written["raw"],
+                    normalized_artifact_path=paths_written["normalized"],
+                    metadata_artifact_path=paths_written["metadata"],
+                )
+                result.text_assets.append(asset)
+                page_asset_ids.setdefault(page_number, []).append(text_asset_id)
+                for chunk in chunk_text(normalized):
+                    provenance = ChunkProvenance(
                         file_id=source.file_id,
                         content_sha256=source.content_sha256,
-                        extractor=result.extractor,
-                        extractor_version=result.extractor_version,
-                        source_kind=SourceKind.PAGE,
-                        source_locator=source_locator,
-                        asset_index=block.block_index,
-                    )
-                    artifact_started = time.perf_counter_ns()
-                    target_metadata = {
-                        "contract_version": paths.PDF_CONFIG_VERSION,
-                        "file_id": source.file_id,
-                        "content_sha256": source.content_sha256,
-                        "source_relative_path": source.relative_path,
-                        "extraction_run_id": extraction_run_id,
-                        "extractor": result.extractor,
-                        "extractor_version": result.extractor_version,
-                        "source_kind": SourceKind.PAGE.value,
-                        "page_number": page_number,
-                        "page_width": page_profile.width,
-                        "page_height": page_profile.height,
-                        "page_rotation": page_profile.rotation,
-                        "page_image_count": page_profile.image_count,
-                        "page_text_block_count": page_profile.text_block_count,
-                        "page_reason_codes": list(page_profile.reason_codes),
-                        "block_index": block.block_index,
-                        "bbox": block.bbox.__dict__,
-                        "chunk_config_version": paths.TEXT_CHUNK_CONFIG_VERSION,
-                        "offset_basis": "normalized_text",
-                    }
-                    paths_written = write_text_asset(
-                        workspace_root=source.workspace_root,
                         text_asset_id=text_asset_id,
-                        raw_text=block.raw_text,
-                        normalized_text=normalized,
-                        metadata=target_metadata,
-                    )
-                    result.timings.artifact_write_ms += (
-                        time.perf_counter_ns() - artifact_started
-                    ) / 1_000_000
-                    asset = TextAsset(
-                        text_asset_id=text_asset_id,
-                        file_id=source.file_id,
-                        content_sha256=source.content_sha256,
                         extraction_run_id=extraction_run_id,
                         extractor=result.extractor,
                         extractor_version=result.extractor_version,
                         source_kind=SourceKind.PAGE,
                         page_number=page_number,
-                        section=f"page-{page_number}-block-{block.block_index}",
-                        bbox=block.bbox,
-                        text=normalized,
-                        language=None,
-                        created_at=utc_now(),
-                        source_relative_path=source.relative_path,
-                        raw_artifact_path=paths_written["raw"],
-                        normalized_artifact_path=paths_written["normalized"],
-                        metadata_artifact_path=paths_written["metadata"],
+                        section=asset.section,
                     )
-                    result.text_assets.append(asset)
-                    page_asset_ids.setdefault(page_number, []).append(text_asset_id)
-                    for chunk in chunk_text(normalized):
-                        provenance = ChunkProvenance(
-                            file_id=source.file_id,
-                            content_sha256=source.content_sha256,
-                            text_asset_id=text_asset_id,
-                            extraction_run_id=extraction_run_id,
-                            extractor=result.extractor,
-                            extractor_version=result.extractor_version,
-                            source_kind=SourceKind.PAGE,
-                            page_number=page_number,
-                            section=asset.section,
-                        )
-                        result.text_chunks.append(
-                            TextChunk(
-                                chunk_id=make_chunk_id(
-                                    text_asset_id=text_asset_id,
-                                    chunk_index=chunk.chunk_index,
-                                    char_start=chunk.char_start,
-                                    char_end=chunk.char_end,
-                                    chunk_config_version=paths.TEXT_CHUNK_CONFIG_VERSION,
-                                ),
+                    result.text_chunks.append(
+                        TextChunk(
+                            chunk_id=make_chunk_id(
                                 text_asset_id=text_asset_id,
-                                file_id=source.file_id,
                                 chunk_index=chunk.chunk_index,
-                                text=chunk.text,
                                 char_start=chunk.char_start,
                                 char_end=chunk.char_end,
-                                provenance=provenance,
-                            )
+                                chunk_config_version=paths.TEXT_CHUNK_CONFIG_VERSION,
+                            ),
+                            text_asset_id=text_asset_id,
+                            file_id=source.file_id,
+                            chunk_index=chunk.chunk_index,
+                            text=chunk.text,
+                            char_start=chunk.char_start,
+                            char_end=chunk.char_end,
+                            provenance=provenance,
                         )
+                    )
             profile = build_pdf_profile(
                 pages=page_profiles,
                 metadata=metadata,

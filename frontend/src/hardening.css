@@ -1,0 +1,30 @@
+.task-status-dot.cancelling { background: #c28a4e; }
+.task-status-dot.cancelled, .task-status-dot.interrupted { background: #8d9aa0; }
+.task-card-footer { flex-wrap: wrap; }
+.task-current-file, .task-substage { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.task-current-file { color: #586c74; max-width: 48%; }
+.task-substage { color: #9aa5aa; max-width: 42%; }
+.task-error-panel { margin-top: 12px; padding: 11px 13px; color: #8d554e; background: #fff6f4; border: 1px solid #f0ddd8; border-radius: 5px; font-size: 12px; line-height: 1.6; }
+.task-error-panel strong { color: #754943; }
+.task-error-panel details { margin-top: 7px; color: #77868c; }
+.task-error-panel summary { cursor: pointer; color: #7d6c68; }
+.task-error-panel pre { overflow: auto; max-height: 160px; margin: 7px 0 0; white-space: pre-wrap; word-break: break-word; font: 11px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; }
+.issue-source { margin-top: 7px; color: #536c72; font-size: 11px; }
+.quality-status-help { margin: 7px 0 0; color: #77868c; font-size: 12px; line-height: 1.6; }
+.issue-actions { flex-wrap: wrap; }
+.evidence summary { cursor: pointer; color: #68848a; }
+.evidence pre { overflow: auto; max-height: 180px; padding: 8px; margin: 6px 0 0; white-space: pre-wrap; word-break: break-word; color: #68777c; background: #f7f9f9; border: 1px solid #e8edef; border-radius: 4px; font: 10px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; }
+.settings-panel { max-width: 720px; }
+.settings-form { display: grid; gap: 15px; }
+.settings-field { display: grid; gap: 7px; }
+.settings-field input { width: 100%; height: 38px; padding: 0 11px; color: #415761; border: 1px solid #cfdadd; border-radius: 5px; outline-color: #5e9ca0; font-size: 13px; }
+.settings-field small { color: #89969c; font-size: 11px; line-height: 1.5; }
+.settings-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; margin-top: 4px; }
+.settings-status { padding: 10px 12px; color: #5c7176; background: #f5f8f8; border: 1px solid #e3ebeb; border-radius: 5px; font-size: 12px; }
+.settings-status.success { color: #3d7468; background: #edf7f3; border-color: #d8ebe3; }
+.settings-status.error { color: #96514b; background: #fff1ef; border-color: #f0d2ce; }
+.settings-note { margin: 0; color: #7c8b90; font-size: 12px; line-height: 1.65; }
+@media (max-width: 720px) {
+  .task-current-file, .task-substage { max-width: 100%; width: 100%; }
+  .settings-actions .primary-button, .settings-actions .secondary-button { width: 100%; }
+}

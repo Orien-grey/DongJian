@@ -7,10 +7,12 @@ import os
 import time
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from pathlib import Path
+from threading import Event
 from typing import Any, Iterable
 from uuid import uuid4
 
 from . import paths
+from .cancellation import CancellationRequested, check_cancel
 from .detection import detect_file
 from .discovery import discover, is_under_issue, issue_prefixes
 from .fingerprint import hash_file, stat_file
@@ -189,6 +191,7 @@ def scan_source(
     workers: int | None = None,
     rehash: bool = False,
     registry_path: Path | str | None = None,
+    cancel_event: Event | None = None,
 ) -> ScanSummary:
     """Scan *source* and update the project-local DuckDB registry.
 
@@ -197,15 +200,20 @@ def scan_source(
     """
 
     worker_count = normalize_workers(workers)
+    check_cancel(cancel_event)
     try:
         source_root, discovered, issues = discover(source)
     except (OSError, ValueError) as exc:
         raise ScanError(str(exc)) from exc
+    check_cancel(cancel_event)
 
     started_at = utc_now()
     perf_started = time.perf_counter_ns()
     run_id = _new_run_id()
-    registry = Registry.open(registry_path)
+    registry_file = Path(registry_path or paths.REGISTRY_PATH).resolve()
+    if not registry_file.is_file():
+        Registry.ensure_initialized(registry_file)
+    registry = Registry.open(registry_file, initialize=False)
     registry_errors: list[dict[str, Any]] = []
     log_path: str | None = None
     try:
@@ -229,10 +237,13 @@ def scan_source(
         hashing_ms = 0.0
         detection_ms = 0.0
         registry_write_ms = 0.0
-        with ThreadPoolExecutor(max_workers=worker_count, thread_name_prefix="chongzu-scan") as executor:
+        executor = ThreadPoolExecutor(max_workers=worker_count, thread_name_prefix="chongzu-scan")
+        try:
             exhausted = False
             while pending or not exhausted:
+                check_cancel(cancel_event)
                 while not exhausted and len(pending) < worker_count * 2:
+                    check_cancel(cancel_event)
                     try:
                         item = next(iterator)
                     except StopIteration:
@@ -241,8 +252,9 @@ def scan_source(
                     pending[executor.submit(_process_one, item, previous.get(item.relative_path), rehash)] = item
                 if not pending:
                     continue
-                done, _ = wait(tuple(pending), return_when=FIRST_COMPLETED)
+                done, _ = wait(tuple(pending), timeout=0.1, return_when=FIRST_COMPLETED)
                 for future in done:
+                    check_cancel(cancel_event)
                     item = pending.pop(future)
                     try:
                         raw_outcome = future.result()
@@ -287,6 +299,13 @@ def scan_source(
                         registry_errors.append({"path": item.relative_path, "error_code": "registry_write_error", "error_message": str(exc)})
                         raise
                     registry_write_ms += (time.perf_counter_ns() - write_started) / 1_000_000
+        except BaseException:
+            for future in pending:
+                future.cancel()
+            executor.shutdown(wait=False, cancel_futures=True)
+            raise
+        else:
+            executor.shutdown(wait=True)
 
         issue_prefix = issue_prefixes(issues)
         discovered_paths = {current.relative_path for current in discovered}
@@ -318,6 +337,30 @@ def scan_source(
             summary.elapsed_ms,
         )
         return summary
+    except CancellationRequested:
+        # A user stop is a normal interrupted run, not a processing failure.
+        # Preserve all durable file observations already written before the
+        # cancellation boundary and finalize the scan state for recovery.
+        try:
+            interrupted = ScanSummary(
+                run_id=run_id,
+                source_root=source_root,
+                started_at=started_at,
+                finished_at=utc_now(),
+                status="interrupted",
+                discovered_count=len(discovered),
+                discovery_error_count=sum(1 for issue in issues if issue.is_error),
+                elapsed_ms=(time.perf_counter_ns() - perf_started) / 1_000_000,
+            )
+            log_path = _write_log(
+                interrupted,
+                issues,
+                [{"error_code": "interrupted", "error_message": "processing was cancelled by the user"}],
+            )
+            registry.finish_run(interrupted, log_path)
+        except Exception:
+            pass
+        raise
     except Exception as exc:
         # Try to leave a durable failed run even if one file/DB operation was
         # unexpectedly broken.  The original exception is then surfaced to CLI.

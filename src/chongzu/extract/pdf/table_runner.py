@@ -9,12 +9,15 @@ import hashlib
 import json
 from pathlib import Path
 import time
+from typing import Callable
 from uuid import uuid4
 
 import polars as pl
 
 from chongzu import paths
+from chongzu.cancellation import CancellationRequested, check_cancel
 from chongzu.registry import Registry, canonical_source_root, utc_now
+from chongzu.worker_runtime import configure_hidden_worker_executable
 
 from ..artifacts import artifact_absolute
 from ..models import StructuredSource
@@ -106,16 +109,31 @@ def _profile_route(profile_record: dict[str, object] | None) -> tuple[str, int, 
         return "unknown", 0, [], "phase4a_profile_invalid_deferred_to_ocr"
     classification = str(profile.get("classification") or "unknown")
     page_count = int(profile.get("page_count") or 0)
-    if classification == "native_text":
-        pages = [int(page) - 1 for page in profile.get("pages_with_text", [])]
-        pages = [page for page in pages if 0 <= page < page_count]
-        if not pages and page_count:
-            pages = list(range(page_count))
-        return classification, page_count, pages, "phase4a_native_text_profile"
-    if classification == "mixed":
-        pages = [int(page) - 1 for page in profile.get("pages_with_text", [])]
-        pages = [page for page in pages if 0 <= page < page_count]
-        return classification, page_count, pages, "phase4a_mixed_native_pages_only"
+    if classification in {"native_text", "mixed"}:
+        # Phase 4A already inspected every page. Only pages carrying explicit
+        # table evidence may reach img2table; native text alone is not a table
+        # signal. This is the precision-first fast path for ordinary PDFs.
+        candidate_pages: list[int] = []
+        page_records = profile.get("pages")
+        if isinstance(page_records, list):
+            for record in page_records:
+                if not isinstance(record, dict) or not record.get("possible_table_candidate"):
+                    continue
+                try:
+                    page_number = int(record.get("page_number"))
+                except (TypeError, ValueError):
+                    continue
+                if 1 <= page_number <= page_count:
+                    candidate_pages.append(page_number - 1)
+        candidate_pages = sorted(set(candidate_pages))
+        if candidate_pages:
+            reason = (
+                "phase4a_native_table_evidence"
+                if classification == "native_text"
+                else "phase4a_mixed_native_table_evidence"
+            )
+            return classification, page_count, candidate_pages, reason
+        return classification, page_count, [], "no_table_evidence"
     if classification == "suspected_scanned":
         return classification, page_count, [], "phase4a_suspected_scanned_deferred_to_ocr"
     # A profile with pages but no reliable classification is safe to probe via
@@ -243,6 +261,34 @@ def _deferred_result(
         )
     )
     return result
+
+
+def _no_table_result(
+    source: StructuredSource,
+    run_id: str,
+    identity: str,
+    classification: str,
+    page_count: int,
+) -> PDFTableExtractionResult:
+    """Persist a normal, successful zero-table result without opening img2table."""
+
+    return PDFTableExtractionResult(
+        source=source,
+        extraction_run_id=run_id,
+        extraction_identity=identity,
+        route_reason="no_table_evidence",
+        profile_classification=classification,
+        pages_attempted=0,
+        status="successful",
+        warnings=[
+            {
+                "candidate_status": "not_candidate",
+                "table_count": 0,
+                "page_count": page_count,
+                "reason": "no_table_evidence",
+            }
+        ],
+    )
 
 
 def _read_reused_tables(reusable: dict[str, object], workspace_root: Path) -> list[DetectedTable]:
@@ -422,6 +468,8 @@ def extract_pdf_tables(
     config: PDFTableConfig | None = None,
     selected_relative_paths: set[str] | None = None,
     _scan_summary=None,
+    progress_callback: Callable[..., None] | None = None,
+    cancel_event=None,
 ) -> PDFTableExtractionSummary:
     """Ensure Phase 4A facts exist, then run the img2table candidate.
 
@@ -445,7 +493,11 @@ def extract_pdf_tables(
             registry_path=registry_file,
             workspace_root=workspace,
             _scan_summary=_scan_summary,
+            progress_callback=progress_callback,
+            cancel_event=cancel_event,
         )
+    except CancellationRequested:
+        raise
     except Exception as exc:
         raise PDFTableExtractionError(str(exc)) from exc
     source_root = canonical_source_root(source, require_directory=True)
@@ -455,7 +507,8 @@ def extract_pdf_tables(
         total_bytes=0,
         runtime_dependency_size_bytes=_runtime_dependency_size(),
     )
-    registry = Registry.open(registry_file)
+    configure_hidden_worker_executable()
+    registry = Registry.open(registry_file, initialize=False)
     try:
         registry.recover_incomplete_extractions(source_root)
         rows = registry.pdf_candidates(source_root)
@@ -463,6 +516,23 @@ def extract_pdf_tables(
             rows = [row for row in rows if str(row["relative_path"]) in selected_relative_paths]
         summary.pdfs_considered = len(rows)
         summary.total_bytes = sum(int(row["size_bytes"] or 0) for row in rows)
+        completed = 0
+
+        def emit(file_name: str | None, substage: str) -> None:
+            if progress_callback is None:
+                return
+            progress = 0.45 + (0.15 * completed / max(1, len(rows)))
+            try:
+                progress_callback(
+                    "extract",
+                    progress,
+                    current_file=file_name,
+                    completed=completed,
+                    total=len(rows),
+                    current_substage=substage,
+                )
+            except TypeError:
+                progress_callback("extract", progress)
         sources = iter(_source_from_row(row, workspace) for row in rows)
         pending: dict[
             Future[PDFTableExtractionResult],
@@ -478,14 +548,18 @@ def extract_pdf_tables(
             ],
         ] = {}
         exhausted = False
-        with ProcessPoolExecutor(max_workers=worker_count) as executor:
+        executor = ProcessPoolExecutor(max_workers=worker_count)
+        try:
             while pending or not exhausted:
+                check_cancel(cancel_event)
                 while not exhausted and len(pending) < worker_count * 2:
+                    check_cancel(cancel_event)
                     try:
                         table_source = next(sources)
                     except StopIteration:
                         exhausted = True
                         break
+                    emit(table_source.relative_path, "检查 PDF 表格证据")
                     profile_record = registry.current_pdf_profile(
                         table_source.file_id, table_source.content_sha256
                     )
@@ -523,6 +597,8 @@ def extract_pdf_tables(
                         if expected is not None:
                             reused_detected = _read_reused_tables(reusable, workspace)
                             summary._add_score(score_tables(expected, reused_detected))
+                        completed += 1
+                        emit(table_source.relative_path, "复用已有表格结果")
                         continue
                     run_id = f"xrun_{uuid4().hex}"
                     started_at = utc_now()
@@ -537,6 +613,25 @@ def extract_pdf_tables(
                         force=force,
                     )
                     summary.registry_write_ms += (time.perf_counter_ns() - registry_started) / 1_000_000
+                    if not page_indexes and route_reason == "no_table_evidence":
+                        result = _no_table_result(
+                            table_source,
+                            run_id,
+                            identity,
+                            classification,
+                            page_count,
+                        )
+                        _record_result(
+                            registry=registry,
+                            summary=summary,
+                            result=result,
+                            started_at=started_at,
+                            force=force,
+                            expected=expected,
+                        )
+                        completed += 1
+                        emit(table_source.relative_path, "未检测到表格")
+                        continue
                     if not page_indexes:
                         # Missing/invalid Phase 4A facts (including a corrupt
                         # PDF that could not be profiled) are isolated as a
@@ -558,6 +653,8 @@ def extract_pdf_tables(
                             force=force,
                             expected=expected,
                         )
+                        completed += 1
+                        emit(table_source.relative_path, "等待 OCR 表格路由")
                         continue
                     future = executor.submit(
                         _extract_one,
@@ -581,7 +678,7 @@ def extract_pdf_tables(
                     )
                 if not pending:
                     continue
-                done, _ = wait(tuple(pending), return_when=FIRST_COMPLETED)
+                done, _ = wait(tuple(pending), timeout=0.1, return_when=FIRST_COMPLETED)
                 for future in done:
                     (
                         table_source,
@@ -615,6 +712,15 @@ def extract_pdf_tables(
                         force=was_forced,
                         expected=expected,
                     )
+                    completed += 1
+                    emit(table_source.relative_path, "表格提取完成")
+        except BaseException:
+            for future in pending:
+                future.cancel()
+            executor.shutdown(wait=False, cancel_futures=True)
+            raise
+        else:
+            executor.shutdown(wait=True)
     finally:
         registry.close()
     summary.wall_time_ms = (time.perf_counter_ns() - wall_started) / 1_000_000

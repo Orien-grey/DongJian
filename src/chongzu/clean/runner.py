@@ -6,11 +6,13 @@ from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 import hashlib
 import json
 from pathlib import Path
+from threading import Event
 import time
 from typing import Any, Callable, Mapping
 from uuid import uuid4
 
 from chongzu import paths
+from chongzu.cancellation import check_cancel
 from chongzu.extract.unified import UnifiedExtractionSummary, extract_unified
 from chongzu.registry import Registry, canonical_source_root, utc_now
 
@@ -22,7 +24,7 @@ from ..extract.artifacts import artifact_absolute
 
 
 MAX_CLEANING_WORKERS = 4
-ProgressCallback = Callable[[str, float], None]
+ProgressCallback = Callable[..., None]
 
 
 class CleaningError(RuntimeError):
@@ -179,6 +181,7 @@ def clean_source(
     workspace_root: Path | str | None = None,
     extraction_summary: UnifiedExtractionSummary | None = None,
     progress_callback: ProgressCallback | None = None,
+    cancel_event: Event | None = None,
 ) -> CleaningSummary:
     """Clean and profile current assets for one source without re-extracting."""
 
@@ -197,8 +200,9 @@ def clean_source(
         summary.reused_extraction = extraction_summary.reused
         summary.extraction_failures = extraction_summary.failed
 
-    registry = Registry.open(registry_file)
+    registry = Registry.open(registry_file, initialize=False)
     try:
+        check_cancel(cancel_event)
         registry.recover_incomplete_cleaning(source_root)
         if extraction_summary is None:
             summary.files_discovered = registry.count_present_files(source_root)
@@ -213,17 +217,38 @@ def clean_source(
         candidates = registry.cleaning_candidates(source_root)
         summary.table_assets = sum(1 for item in candidates if item.get("asset_type") == "table")
         summary.text_assets = sum(1 for item in candidates if item.get("asset_type") == "text")
+        completed = 0
+
+        def emit(asset_name: str | None, substage: str, stage: str = "clean") -> None:
+            if progress_callback is None:
+                return
+            progress = 0.45 + (0.30 * completed / max(1, len(candidates)))
+            try:
+                progress_callback(
+                    stage,
+                    progress,
+                    current_file=asset_name,
+                    completed=completed,
+                    total=len(candidates),
+                    current_substage=substage,
+                )
+            except TypeError:
+                progress_callback(stage, progress)
         pending: dict[Future[CleaningAssetResult], tuple[CleaningAssetResult, Any]] = {}
         candidate_iter = iter(candidates)
         exhausted = False
-        with ThreadPoolExecutor(max_workers=worker_count, thread_name_prefix="chongzu-clean") as executor:
+        executor = ThreadPoolExecutor(max_workers=worker_count, thread_name_prefix="chongzu-clean")
+        try:
             while pending or not exhausted:
+                check_cancel(cancel_event)
                 while not exhausted and len(pending) < worker_count * 2:
+                    check_cancel(cancel_event)
                     try:
                         candidate = next(candidate_iter)
                     except StopIteration:
                         exhausted = True
                         break
+                    emit(str(candidate.get("source_relative_path") or ""), "准备确定性清洗")
                     try:
                         raw_identity = _raw_identity(candidate, workspace)
                     except Exception as exc:
@@ -248,11 +273,15 @@ def clean_source(
                         registry.record_cleaning_result(result, started_at=started_at, finished_at=utc_now(), force=force)
                         summary.cleaning_failures += 1
                         summary.duckdb_write_ms += (time.perf_counter_ns() - started) / 1_000_000
+                        completed += 1
+                        emit(str(candidate.get("source_relative_path") or ""), "清洗失败")
                         continue
                     identity = cleaning_identity(candidate, raw_identity, drop_exact_duplicates=drop_exact_duplicates)
                     reusable = None if force else registry.reusable_cleaning(identity)
                     if reusable is not None and _artifacts_exist(reusable, workspace):
                         summary.reused_cleaning += 1
+                        completed += 1
+                        emit(str(candidate.get("source_relative_path") or ""), "复用已有清洗结果")
                         continue
                     result = _base_result(candidate, raw_identity=raw_identity, identity=identity, run_id=f"crun_{uuid4().hex}")
                     started_at = utc_now()
@@ -269,8 +298,9 @@ def clean_source(
                     pending[future] = (result, started_at)
                 if not pending:
                     continue
-                done, _ = wait(tuple(pending), return_when=FIRST_COMPLETED)
+                done, _ = wait(tuple(pending), timeout=0.1, return_when=FIRST_COMPLETED)
                 for future in done:
+                    check_cancel(cancel_event)
                     prepared, started_at = pending.pop(future)
                     try:
                         result = future.result()
@@ -304,13 +334,22 @@ def clean_source(
                         summary.cleaning_failures += 1
                     else:
                         summary.cleaned += 1
+                    completed += 1
+                    emit(str(prepared.source_relative_path or ""), "确定性清洗完成")
+        except BaseException:
+            for future in pending:
+                future.cancel()
+            executor.shutdown(wait=False, cancel_futures=True)
+            raise
+        else:
+            executor.shutdown(wait=True)
     finally:
         registry.close()
     if progress_callback is not None:
         progress_callback("profile", 0.78)
     summary.cleaning_wall_time_ms = (time.perf_counter_ns() - wall_started) / 1_000_000
     summary.wall_time_ms = summary.cleaning_wall_time_ms
-    registry = Registry.open(registry_file)
+    registry = Registry.open(registry_file, initialize=False)
     try:
         catalog, rows, chars = _summary_catalog(registry, source_root)
     finally:
@@ -338,6 +377,7 @@ def process_source(
     registry_path: Path | str | None = None,
     workspace_root: Path | str | None = None,
     progress_callback: ProgressCallback | None = None,
+    cancel_event: Event | None = None,
 ) -> CleaningSummary:
     """Run scan, independent extraction, deterministic cleaning, and profiling."""
 
@@ -345,18 +385,42 @@ def process_source(
     worker_count = normalize_cleaning_workers(workers)
     registry_file = Path(registry_path or paths.REGISTRY_PATH).resolve()
     workspace = Path(workspace_root or paths.WORKSPACE_ROOT).resolve()
+    if not registry_file.is_file():
+        from chongzu.registry import Registry
+
+        Registry.ensure_initialized(registry_file)
+
+    def emit(stage: str, value: float, **metadata: Any) -> None:
+        if progress_callback is None:
+            return
+        try:
+            progress_callback(stage, value, **metadata)
+        except TypeError:
+            # Preserve the small callback contract used by standalone callers.
+            progress_callback(stage, value)
+
+    check_cancel(cancel_event)
     if progress_callback is not None:
-        progress_callback("scan", 0.02)
+        emit("scan", 0.02, current_substage="扫描文件")
     extraction = extract_unified(
         source,
         workers=min(worker_count, 2),
         force=force,
         registry_path=registry_file,
         workspace_root=workspace,
+        cancel_event=cancel_event,
+        progress_callback=progress_callback,
     )
-    if progress_callback is not None:
-        progress_callback("extract", 0.30)
-        progress_callback("clean", 0.45)
+    check_cancel(cancel_event)
+    emit(
+        "extract",
+        0.30,
+        completed=extraction.processed,
+        total=extraction.files_discovered,
+        current_substage="routes complete",
+        run_id=extraction.run_id,
+    )
+    emit("clean", 0.45, completed=extraction.processed, total=extraction.files_discovered, current_substage="准备确定性清洗")
     summary = clean_source(
         source,
         workers=worker_count,
@@ -366,6 +430,8 @@ def process_source(
         workspace_root=workspace,
         extraction_summary=extraction,
         progress_callback=progress_callback,
+        cancel_event=cancel_event,
     )
+    check_cancel(cancel_event)
     summary.wall_time_ms = (time.perf_counter_ns() - wall_started) / 1_000_000
     return summary

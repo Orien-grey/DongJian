@@ -6,7 +6,7 @@ Parquet implementation details.
 """
 
 from .catalog import CatalogService
-from .process import ProcessTaskManager, SourceValidationError, validate_source_directory
+from .process import ProcessTaskManager, SourceValidationError, TaskAdmissionError, validate_source_directory
 from .quality import QualityService
 from .sql import (
     SqlAssetError,
@@ -34,6 +34,7 @@ __all__ = [
     "SqlTimeoutError",
     "SqlValidationError",
     "SourceValidationError",
+    "TaskAdmissionError",
     "validate_source_directory",
     "verify_sql_sandbox",
     "run_sql_benchmark",

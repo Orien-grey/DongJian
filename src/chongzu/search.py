@@ -537,7 +537,7 @@ class SearchService:
         self.registry_path = Path(registry_path or paths.REGISTRY_PATH).resolve()
 
     def _open(self) -> Registry:
-        return Registry.open(self.registry_path)
+        return Registry.open_reader(self.registry_path)
 
     @staticmethod
     def _rows(registry: Registry, query: SearchQuery) -> list[dict[str, Any]]:
