@@ -145,7 +145,7 @@ def test_frontend_and_release_use_one_project_config_contract() -> None:
     api = (root / "frontend/src/api.ts").read_text(encoding="utf-8")
     release = (root / "scripts/build_release.ps1").read_text(encoding="utf-8")
     assert "visionEnabled" in frontend
-    assert "Not configured: fully offline" in frontend
+    assert "未配置：完全离线" in frontend
     assert "visionEnabled: boolean" in api
     assert "config\\llm.json" in release
     assert "llm.example.json" in release

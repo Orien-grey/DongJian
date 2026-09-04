@@ -140,6 +140,10 @@ class ProcessTaskManager:
         self._lock = threading.RLock()
         self._tasks: dict[str, ProcessTask] = {}
         self._shutdown_requested = False
+        # Reset uses the same admission lock as task submission.  This is a
+        # process-local barrier: once it is raised, no new writer/task can be
+        # admitted while the reset service is changing generated state.
+        self._reset_in_progress = False
         self.registry_path: Path | None = None
         self.workspace_root: Path | None = None
 
@@ -170,7 +174,7 @@ class ProcessTaskManager:
         if normalized_vision_mode == "ai_vision" and vision_provider is None:
             raise TaskAdmissionError("AI Vision provider is not verified")
         with self._lock:
-            if self._shutdown_requested:
+            if self._shutdown_requested or self._reset_in_progress:
                 raise TaskAdmissionError("server is stopping and cannot accept new processing tasks")
             task = ProcessTask(
                 task_id=f"task_{uuid4().hex}",
@@ -201,7 +205,7 @@ class ProcessTaskManager:
         if not isinstance(max_steps, int) or isinstance(max_steps, bool) or max_steps < 1 or max_steps > 6:
             raise TaskAdmissionError("analysis step limit is invalid")
         with self._lock:
-            if self._shutdown_requested:
+            if self._shutdown_requested or self._reset_in_progress:
                 raise TaskAdmissionError("server is stopping and cannot accept new analysis tasks")
             task = ProcessTask(
                 task_id=f"task_{uuid4().hex}",
@@ -234,7 +238,7 @@ class ProcessTaskManager:
         if not callable(runner):
             raise TaskAdmissionError("report runner is unavailable")
         with self._lock:
-            if self._shutdown_requested:
+            if self._shutdown_requested or self._reset_in_progress:
                 raise TaskAdmissionError("server is stopping and cannot accept new report tasks")
             task = ProcessTask(
                 task_id=f"task_{uuid4().hex}",
@@ -709,10 +713,39 @@ class ProcessTaskManager:
         with self._lock:
             return self._tasks.get(task_id)
 
+    def begin_reset(self) -> None:
+        """Raise the task-admission barrier for one workspace reset."""
+
+        with self._lock:
+            if self._reset_in_progress:
+                raise TaskAdmissionError("a workspace reset is already in progress")
+            self._reset_in_progress = True
+
+    def end_reset(self) -> None:
+        """Release the reset barrier after success or a safe failure."""
+
+        with self._lock:
+            self._reset_in_progress = False
+
+    @property
+    def reset_in_progress(self) -> bool:
+        with self._lock:
+            return self._reset_in_progress
+
     def list(self, *, limit: int = 50) -> list[ProcessTask]:
         with self._lock:
             values = sorted(self._tasks.values(), key=lambda item: item.task_id, reverse=True)
             return values[:limit]
+
+    def clear_finished(self) -> int:
+        """Drop terminal in-memory task records after a project reset."""
+
+        terminal = {"succeeded", "failed", "cancelled", "interrupted"}
+        with self._lock:
+            task_ids = [task_id for task_id, task in self._tasks.items() if task.status in terminal]
+            for task_id in task_ids:
+                self._tasks.pop(task_id, None)
+            return len(task_ids)
 
     def cancel(self, task_id: str) -> ProcessTask | None:
         with self._lock:

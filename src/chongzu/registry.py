@@ -1108,6 +1108,24 @@ class Registry:
         columns = [item[0] for item in cursor.description]
         return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
+    def docx_candidates(self, source_root: str) -> list[dict[str, Any]]:
+        """Return present, supported DOCX files for the offline OOXML route."""
+
+        cursor = self.connection.execute(
+            """
+            SELECT file_id, sha256, source_root, relative_path, business_format,
+                   size_bytes, mtime_ns
+            FROM files
+            WHERE source_root=? AND current_presence_state='present'
+              AND support_status='supported' AND text_candidate=TRUE
+              AND business_format='docx' AND sha256 IS NOT NULL
+            ORDER BY relative_path
+            """,
+            [source_root],
+        )
+        columns = [item[0] for item in cursor.description]
+        return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
     def recover_incomplete_extractions(self, source_root: str) -> int:
         now = utc_now()
 
@@ -2054,6 +2072,41 @@ class Registry:
                 "text_plain",
                 "supported_txt_text",
                 json.dumps({extractor: extractor_version}),
+            ],
+        )
+
+    def start_docx_extraction(
+        self,
+        *,
+        extraction_run_id: str,
+        extraction_identity: str,
+        source: Any,
+        started_at: datetime,
+        force: bool,
+    ) -> None:
+        self.connection.execute(
+            """
+            INSERT INTO extraction_runs(
+                extraction_run_id, file_id, content_sha256, extraction_identity,
+                source_root, source_relative_path, started_at, status, force,
+                pipeline_version, configuration_version, attempted_route,
+                route_reason, extractor_versions_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'running', ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                extraction_run_id,
+                source.file_id,
+                source.content_sha256,
+                extraction_identity,
+                source.source_root,
+                source.relative_path,
+                started_at,
+                force,
+                paths.DOCX_PIPELINE_VERSION,
+                paths.DOCX_CONFIG_VERSION,
+                "docx_native",
+                "supported_docx_text_and_table",
+                json.dumps({"docx-stdlib": "stdlib-ooxml-v1"}),
             ],
         )
 
@@ -3437,9 +3490,10 @@ class Registry:
                 SELECT p.file_id, p.support_status, p.business_format, p.sha256,
                        MAX(CASE WHEN l.attempted_route='structured_native' THEN l.status END) AS structured_status,
                        MAX(CASE WHEN l.attempted_route='pdf_native_text' THEN l.status END) AS pdf_native_status,
-                       MAX(CASE WHEN l.attempted_route='ocr_rapidocr' THEN l.status END) AS ocr_status,
-                       MAX(CASE WHEN l.attempted_route='text_plain' THEN l.status END) AS text_status,
-                       MAX(il.status) AS image_status
+                        MAX(CASE WHEN l.attempted_route='ocr_rapidocr' THEN l.status END) AS ocr_status,
+                        MAX(CASE WHEN l.attempted_route='text_plain' THEN l.status END) AS text_status,
+                        MAX(CASE WHEN l.attempted_route='docx_native' THEN l.status END) AS docx_status,
+                        MAX(il.status) AS image_status
                 FROM present p
                 LEFT JOIN latest l ON l.file_id=p.file_id AND l.content_sha256=p.sha256
                 LEFT JOIN image_latest il ON il.file_id=p.file_id AND il.content_sha256=p.sha256
@@ -3456,6 +3510,7 @@ class Registry:
                     END
                     WHEN business_format IN ('jpeg','png') THEN image_status
                     WHEN business_format='txt' THEN text_status
+                    WHEN business_format='docx' THEN docx_status
                     ELSE NULL
                 END AS status
                 FROM pivoted
@@ -3634,7 +3689,7 @@ class Registry:
                    q.asset_id, q.severity, q.issue_type, q.description, q.evidence_json,
                    q.detected_by, q.suggested_action, q.status, q.created_at,
                    c.asset_type, c.effective_display_name, c.fallback_display_name,
-                   c.source_file, c.source_format
+                   c.source_file, c.source_format, c.file_id
             FROM quality_issues q
             LEFT JOIN catalog_assets c ON c.asset_id=q.asset_id
             WHERE {' AND '.join(clauses)}
@@ -4027,3 +4082,187 @@ class Registry:
         )
         columns = [item[0] for item in cursor.description]
         return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+    def record_docx_result(
+        self,
+        result: Any,
+        *,
+        started_at: datetime,
+        finished_at: datetime,
+        force: bool,
+    ) -> None:
+        """Publish DOCX text and tables in one registry transaction."""
+
+        connection = self.connection
+        connection.execute("BEGIN TRANSACTION")
+        try:
+            for table_name in ("table_assets", "text_assets"):
+                if result.status in {"successful", "partial"}:
+                    connection.execute(
+                        f"UPDATE {table_name} SET is_current=FALSE WHERE file_id=? AND extractor=? AND is_current=TRUE",
+                        [result.source.file_id, result.extractor],
+                    )
+                elif result.status == "failed":
+                    connection.execute(
+                        f"UPDATE {table_name} SET is_current=FALSE WHERE file_id=? AND extractor=? AND content_sha256<>? AND is_current=TRUE",
+                        [result.source.file_id, result.extractor, result.source.content_sha256],
+                    )
+            connection.execute(
+                """
+                INSERT OR REPLACE INTO extraction_runs(
+                    extraction_run_id, file_id, content_sha256, extraction_identity,
+                    source_root, source_relative_path, started_at, finished_at, status,
+                    force, pipeline_version, configuration_version, attempted_route,
+                    route_reason, timings_json, warnings_json, extractor_versions_json,
+                    table_count, sheet_count, quality_issue_count, total_rows, total_bytes,
+                    error_category, error_message
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    result.extraction_run_id,
+                    result.source.file_id,
+                    result.source.content_sha256,
+                    result.extraction_identity,
+                    result.source.source_root,
+                    result.source.relative_path,
+                    started_at,
+                    finished_at,
+                    result.status,
+                    force,
+                    paths.DOCX_PIPELINE_VERSION,
+                    paths.DOCX_CONFIG_VERSION,
+                    "docx_native",
+                    "supported_docx_text_and_table",
+                    json.dumps(result.timings.as_dict(), ensure_ascii=False),
+                    json.dumps(result.warnings, ensure_ascii=False, default=str),
+                    json.dumps({result.extractor: result.extractor_version}, ensure_ascii=False),
+                    len(result.assets),
+                    0,
+                    len(result.issues),
+                    result.total_rows,
+                    result.source.size_bytes,
+                    result.error_category,
+                    result.error_message,
+                ],
+            )
+            for asset in result.assets:
+                connection.execute(
+                    """
+                    INSERT OR REPLACE INTO table_assets(
+                        table_id, file_id, content_sha256, extraction_run_id, extractor,
+                        extractor_version, source_kind, source_relative_path, sheet_name,
+                        page_number, bbox_json, source_row_start, source_row_end,
+                        source_column_start, source_column_end, row_count, column_count,
+                        columns_json, raw_artifact_path, normalized_artifact_path,
+                        metadata_artifact_path, extraction_confidence, quality_status,
+                        created_at, is_current
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE)
+                    """,
+                    [
+                        asset.table_id,
+                        asset.file_id,
+                        asset.content_sha256,
+                        asset.extraction_run_id,
+                        asset.extractor,
+                        asset.extractor_version,
+                        asset.source_kind.value,
+                        asset.source_relative_path,
+                        asset.sheet_name,
+                        asset.page_number,
+                        json.dumps(asset.bbox.__dict__) if asset.bbox else None,
+                        asset.source_row_start,
+                        asset.source_row_end,
+                        asset.source_column_start,
+                        asset.source_column_end,
+                        asset.row_count,
+                        asset.column_count,
+                        json.dumps(asset.columns, ensure_ascii=False),
+                        asset.raw_artifact_path,
+                        asset.normalized_artifact_path,
+                        asset.metadata_artifact_path,
+                        asset.extraction_confidence,
+                        asset.quality_status.value,
+                        asset.created_at.replace(tzinfo=None),
+                    ],
+                )
+            for asset in result.text_assets:
+                connection.execute(
+                    """
+                    INSERT OR REPLACE INTO text_assets(
+                        text_asset_id, file_id, content_sha256, extraction_run_id,
+                        extractor, extractor_version, source_kind, page_number, section,
+                        bbox_json, text, language, created_at, source_relative_path,
+                        raw_artifact_path, normalized_artifact_path, metadata_artifact_path,
+                        is_current
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE)
+                    """,
+                    [
+                        asset.text_asset_id,
+                        asset.file_id,
+                        asset.content_sha256,
+                        asset.extraction_run_id,
+                        asset.extractor,
+                        asset.extractor_version,
+                        asset.source_kind.value,
+                        asset.page_number,
+                        asset.section,
+                        json.dumps(asset.bbox.__dict__) if asset.bbox else None,
+                        asset.text,
+                        asset.language,
+                        asset.created_at.replace(tzinfo=None),
+                        asset.source_relative_path,
+                        asset.raw_artifact_path,
+                        asset.normalized_artifact_path,
+                        asset.metadata_artifact_path,
+                    ],
+                )
+            for chunk in result.text_chunks:
+                connection.execute(
+                    """
+                    INSERT OR REPLACE INTO text_chunks(
+                        chunk_id, text_asset_id, file_id, chunk_index, text,
+                        char_start, char_end, provenance_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    [
+                        chunk.chunk_id,
+                        chunk.text_asset_id,
+                        chunk.file_id,
+                        chunk.chunk_index,
+                        chunk.text,
+                        chunk.char_start,
+                        chunk.char_end,
+                        json.dumps(chunk.provenance.__dict__, ensure_ascii=False, default=str),
+                    ],
+                )
+            for issue in result.issues:
+                connection.execute(
+                    """
+                    INSERT INTO quality_issues(
+                        issue_id, extraction_run_id, asset_id, severity, issue_type,
+                        description, evidence_json, detected_by, suggested_action,
+                        status, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(issue_id) DO UPDATE SET
+                        extraction_run_id=excluded.extraction_run_id,
+                        evidence_json=excluded.evidence_json,
+                        description=excluded.description
+                    """,
+                    [
+                        issue.issue_id,
+                        result.extraction_run_id,
+                        issue.asset_id,
+                        issue.severity.value,
+                        issue.issue_type,
+                        issue.description,
+                        json.dumps(issue.evidence, ensure_ascii=False, default=str),
+                        issue.detected_by,
+                        issue.suggested_action,
+                        issue.status.value,
+                        finished_at,
+                    ],
+                )
+            connection.execute("COMMIT")
+        except Exception:
+            connection.execute("ROLLBACK")
+            raise

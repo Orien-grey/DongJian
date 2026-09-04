@@ -6,11 +6,14 @@ HTTP contract and delegates catalog, quality, and process work to services.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
+import html
 import json
 import logging
 from pathlib import Path
+import re
+import socket
 import threading
 import traceback
 from typing import Any, Mapping
@@ -21,14 +24,10 @@ from chongzu import paths
 from chongzu.locking import registry_write_mutex
 from chongzu.registry import Registry, RegistryError, is_registry_busy_error
 from chongzu.search import SearchQuery, SearchService, SearchValidationError
+from chongzu.semantic.config import SemanticConfig
 from chongzu.semantic.models import SemanticRequest, SemanticResponse
 from chongzu.semantic.provider import SemanticProviderError
-from chongzu.semantic.settings import (
-    AISettingsError,
-    AISettingsStore,
-    ProjectAIConfigStore,
-    load_runtime_ai_settings,
-)
+from chongzu.semantic.settings import AISettingsError, ProjectAIConfigStore, load_runtime_ai_settings
 from chongzu.services import (
     AnalysisService,
     AnalysisExecutionError,
@@ -49,6 +48,8 @@ from chongzu.services import (
     new_report_id,
     render_report_html,
     render_report_markdown,
+    WorkspaceResetError,
+    WorkspaceResetService,
 )
 from chongzu.services.analysis import normalize_analysis_request, new_analysis_run_id, MAX_ANALYSIS_HISTORY_LIMIT, MAX_ANALYSIS_STEPS
 from chongzu.semantic.runner import SemanticRunner, provider_for_name
@@ -63,12 +64,27 @@ MAX_REQUEST_BODY_BYTES = 64 * 1024
 
 
 class ApiError(Exception):
-    def __init__(self, code: str, message: str, status: int = 400, *, retryable: bool = False) -> None:
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        status: int = 400,
+        *,
+        retryable: bool = False,
+        diagnostic: str | None = None,
+        category: str | None = None,
+        stage: str | None = None,
+        details: Mapping[str, Any] | None = None,
+    ) -> None:
         super().__init__(message)
         self.code = code
         self.message = message
         self.status = status
         self.retryable = retryable
+        self.diagnostic = diagnostic
+        self.category = category
+        self.stage = stage
+        self.details = dict(details or {})
 
 
 @dataclass(frozen=True)
@@ -93,10 +109,14 @@ def _int_param(params: Mapping[str, list[str]], name: str, default: int, *, maxi
 def _safe_exception_detail(value: object, secret: object = "") -> str:
     """Return bounded technical detail without persisting a provider key."""
 
-    detail = str(value).strip()
+    detail = html.unescape(str(value).strip())
     if isinstance(secret, str) and secret:
         detail = detail.replace(secret, "[REDACTED]")
-    return detail[:4_000]
+    detail = re.sub(r"(?i)(authorization\s*[:=]\s*bearer\s+)[^\s,;]+", r"\1[REDACTED]", detail)
+    detail = re.sub(r"(?i)(api[_-]?key\s*[:=]\s*[\"']?)[^\s,;\"']+", r"\1[REDACTED]", detail)
+    detail = re.sub(r"<[^>]*>", " ", detail)
+    detail = "".join(character if character in "\t\n\r" or ord(character) >= 32 else " " for character in detail)
+    return re.sub(r"\s+", " ", detail).strip()[:512]
 
 
 class BackendApp:
@@ -209,7 +229,93 @@ class BackendApp:
     def _ai_settings(self) -> ApiResponse:
         return ApiResponse(200, {"settings": load_runtime_ai_settings(self.project_root).public()})
 
-    def _save_ai_settings(self, body: bytes) -> ApiResponse:
+    def _reset_workspace(self, body: bytes, *, request_id: str) -> ApiResponse:
+        value = self._body_object(body)
+        confirmation = value.get("confirmation")
+        if not isinstance(confirmation, str) or confirmation.strip() != "清空":
+            raise ApiError("RESET_CONFIRMATION_REQUIRED", "请输入“清空”确认此危险操作。", 400)
+        begin_reset = getattr(self.tasks, "begin_reset", None)
+        end_reset = getattr(self.tasks, "end_reset", None)
+        barrier_acquired = False
+
+        def active_task_ids() -> list[str]:
+            return [
+                task.task_id
+                for task in self.tasks.list(limit=100_000)
+                if task.status in {"queued", "running", "cancelling"}
+            ]
+
+        # A cheap pre-admission check gives the user an immediate active-task
+        # answer.  It is intentionally repeated after begin_reset because a
+        # task may be admitted between this check and the barrier.
+        if active_task_ids():
+            raise ApiError(
+                "ACTIVE_TASKS",
+                "当前仍有处理任务运行，请先取消并等待任务结束。",
+                409,
+                retryable=True,
+                category="RESET",
+                stage="prepare",
+            )
+        try:
+            if callable(begin_reset):
+                try:
+                    begin_reset()
+                except TaskAdmissionError as exc:
+                    raise ApiError(
+                        "RESET_IN_PROGRESS",
+                        "已有清空操作正在进行，请稍后重试。",
+                        409,
+                        retryable=True,
+                        category="RESET",
+                        stage="prepare",
+                    ) from exc
+                barrier_acquired = True
+            # Check after the barrier as well as before entering the reset
+            # service.  New process/analysis/report submissions now fail under
+            # the same manager lock and cannot race this snapshot.
+            active_tasks = active_task_ids()
+            if active_tasks:
+                raise WorkspaceResetError(
+                    "ACTIVE_TASKS",
+                    "当前仍有处理任务运行，请先取消并等待任务结束。",
+                    stage="prepare",
+                    diagnostic=f"active_tasks={len(active_tasks)}",
+                )
+            service = WorkspaceResetService(self.project_root, self.registry_path)
+            # Do not close or recreate logger handlers here.  The running
+            # server child owns the stdout file handle independently of Python
+            # logging; the reset service preserves server.log for that reason.
+            result = service.reset(active_task_ids=active_tasks)
+            clear_finished = getattr(self.tasks, "clear_finished", None)
+            if callable(clear_finished):
+                result.setdefault("removed", {})["tasks"] = {"items": int(clear_finished())}
+        except WorkspaceResetError as exc:
+            diagnostic = _safe_exception_detail(exc.diagnostic or type(exc).__name__)
+            self.logger.warning(
+                "request %s workspace reset failed stage=%s code=%s diagnostic=%s completed=%s",
+                request_id,
+                exc.stage,
+                exc.code,
+                diagnostic,
+                exc.completed_phases,
+            )
+            raise ApiError(
+                exc.code,
+                exc.message,
+                409 if exc.code == "ACTIVE_TASKS" else 500,
+                retryable=exc.code == "ACTIVE_TASKS",
+                diagnostic=diagnostic or None,
+                category="RESET",
+                stage=exc.stage,
+                details={"completedPhases": exc.completed_phases, "removed": exc.removed},
+            ) from exc
+        finally:
+            if barrier_acquired and callable(end_reset):
+                end_reset()
+        return ApiResponse(200, result)
+
+    def _save_ai_settings(self, body: bytes, *, request_id: str) -> ApiResponse:
         value = self._body_object(body)
         with self._settings_lock:
             store = ProjectAIConfigStore(self.project_root)
@@ -223,60 +329,225 @@ class BackendApp:
                     clear_api_key=bool(value.get("clearApiKey", False)),
                 )
             except AISettingsError as exc:
-                raise ApiError("AI_SETTINGS_INVALID", "AI 模型配置不完整或无效，请检查后保存。") from exc
+                diagnostic = _safe_exception_detail(getattr(exc, "technical_detail", None) or type(exc).__name__)
+                self.logger.warning(
+                    "request %s AI settings save failed root=%s path=%s stage=%s code=%s exception=%s",
+                    request_id,
+                    self.project_root,
+                    store.path,
+                    getattr(exc, "stage", "validation"),
+                    getattr(exc, "code", "CONFIG_INVALID"),
+                    diagnostic,
+                )
+                code = getattr(exc, "code", "CONFIG_INVALID")
+                user_messages = {
+                    "CONFIG_DIRECTORY_UNAVAILABLE": "配置目录不可用，无法保存 AI 配置。",
+                    "CONFIG_PERMISSION_DENIED": "没有权限写入 AI 配置，请检查项目目录权限。",
+                    "CONFIG_REPLACE_FAILED": "配置文件替换失败，原有配置仍保留。",
+                    "CONFIG_INVALID": "AI 模型配置不完整或无效，请检查后保存。",
+                    "PROJECT_ROOT_MISMATCH": "项目路径校验失败，无法保存 AI 配置。",
+                    "CONFIG_WRITE_FAILED": "AI 配置写入失败，原有配置仍保留。",
+                }
+                raise ApiError(
+                    code,
+                    user_messages.get(code, "AI 配置保存失败，原有配置仍保留。"),
+                    400 if code == "CONFIG_INVALID" else 500,
+                    diagnostic=diagnostic or None,
+                    category=code,
+                    stage=getattr(exc, "stage", "validation"),
+                ) from exc
+            except OSError as exc:
+                diagnostic = _safe_exception_detail(type(exc).__name__)
+                self.logger.warning(
+                    "request %s AI settings save failed root=%s path=%s stage=write exception=%s",
+                    request_id,
+                    self.project_root,
+                    store.path,
+                    diagnostic,
+                )
+                raise ApiError(
+                    "CONFIG_WRITE_FAILED",
+                    "AI 配置写入失败，原有配置仍保留。",
+                    500,
+                    diagnostic=diagnostic,
+                    category="CONFIG_WRITE_FAILED",
+                    stage="write",
+                ) from exc
         return ApiResponse(200, {"settings": load_runtime_ai_settings(self.project_root).public(), "saved": True})
 
-    def _test_ai_connection(self, request_id: str) -> ApiResponse:
-        with self._settings_lock:
-            store = AISettingsStore(self.project_root)
-            project_store = ProjectAIConfigStore(self.project_root)
-            if not store.exists and not project_store.exists and not (self.project_root / ".env").is_file():
-                raise ApiError("AI_SETTINGS_NOT_SAVED", "请先保存 AI 模型配置。", 409)
-            runtime = load_runtime_ai_settings(self.project_root)
-            if runtime.status in {"INCOMPLETE", "INVALID_CONFIGURATION", "NOT_CONFIGURED"} or not runtime.configured:
+    @staticmethod
+    def _temporary_ai_config(runtime: Any, value: Mapping[str, Any]) -> SemanticConfig:
+        """Overlay a draft on runtime settings without writing any store."""
+
+        def text(name: str, fallback: str) -> str:
+            candidate = value.get(name, fallback)
+            if not isinstance(candidate, str):
                 raise ApiError("AI_SETTINGS_INCOMPLETE", "AI 模型配置未完成，未发起连接测试。", 409)
+            return candidate.strip()
+
+        base_url = text("baseUrl", text("base_url", runtime.config.base_url))
+        model = text("model", runtime.config.model)
+        clear_api_key = bool(value.get("clearApiKey", False))
+        api_key_value = value.get("apiKey", value.get("api_key"))
+        if clear_api_key:
+            api_key = ""
+        elif isinstance(api_key_value, str) and api_key_value.strip():
+            api_key = api_key_value.strip()
+        else:
+            # The browser deliberately never receives the persisted secret.
+            # An empty draft key therefore means "use the existing key".
+            api_key = runtime.config.api_key
+        timeout_value = value.get("timeout", value.get("timeoutSeconds", runtime.config.timeout_seconds))
+        try:
+            timeout = int(timeout_value)
+        except (TypeError, ValueError) as exc:
+            raise ApiError("AI_SETTINGS_INCOMPLETE", "AI 模型配置未完成，未发起连接测试。", 409) from exc
+        if timeout < 1 or timeout > 600:
+            raise ApiError("AI_SETTINGS_INCOMPLETE", "AI 模型配置未完成，未发起连接测试。", 409)
+        vision_enabled = value.get("visionEnabled", value.get("vision_enabled", runtime.config.vision_enabled))
+        if not isinstance(vision_enabled, bool):
+            raise ApiError("AI_SETTINGS_INCOMPLETE", "AI 模型配置未完成，未发起连接测试。", 409)
+        config = SemanticConfig(
+            base_url=base_url,
+            api_key=api_key,
+            model=model,
+            timeout_seconds=timeout,
+            max_retries=0,
+            vision_enabled=vision_enabled,
+            config_version=runtime.config.config_version,
+        )
+        try:
+            config.validate_for_use()
+        except ValueError as exc:
+            raise ApiError("AI_SETTINGS_INCOMPLETE", "AI 模型配置未完成，未发起连接测试。", 409) from exc
+        return config
+
+    def _test_ai_connection(self, body: bytes, request_id: str) -> ApiResponse:
+        value = self._body_object(body) if body else {}
+        with self._settings_lock:
+            runtime = load_runtime_ai_settings(self.project_root)
+            try:
+                config = self._temporary_ai_config(runtime, value)
+            except ApiError:
+                raise
+            except Exception as exc:
+                raise ApiError("AI_SETTINGS_INCOMPLETE", "AI 模型配置未完成，未发起连接测试。", 409) from exc
+            # Connection testing has a deliberately short, single-attempt
+            # policy. It must not inherit semantic/analysis retry budgets.
+            # Respect an explicitly configured short timeout for deterministic
+            # local tests, but cap a connection probe independently from the
+            # normal 120-second semantic/analysis budget.
+            probe_config = replace(config, timeout_seconds=min(max(config.timeout_seconds, 1), 20), max_retries=0)
             provider = self._semantic_provider_override
             if provider is None:
-                provider = provider_for_name("openai-compatible", runtime.config, allow_real_provider=True)
+                provider = provider_for_name("openai-compatible", probe_config, allow_real_provider=True)
             test_request = SemanticRequest(
                 asset_id="chongzu-settings-connection-test",
                 asset_type="text",
-                model=runtime.config.model,
-                prompt_version="settings-connection-v1",
+                model=probe_config.model,
+                prompt_version="settings-connection-v2",
                 config_version=paths.SEMANTIC_CONFIG_VERSION,
                 normalized_artifact_identity="0" * 64,
-                instructions="Return a small JSON object confirming that this connection test succeeded.",
-                reference_data={"test": "ChongZu connection check", "request_id": request_id},
-                output_contract='{"ok":true}',
+                instructions="Reply briefly to confirm that this OpenAI-compatible chat completion endpoint is reachable. Do not require JSON formatting.",
+                reference_data={"test": "ChongZu connection check"},
+                output_contract="connection probe; no project data",
+                structured_output_required=False,
             )
             try:
                 response = provider.generate(test_request)
                 if not isinstance(response, SemanticResponse):
-                    raise TypeError("AI provider returned an invalid response")
-                if not isinstance(response.payload, Mapping) or response.payload.get("ok") is not True:
-                    raise SemanticProviderError(
-                        "AI connection test returned an invalid response",
-                        code="malformed_json",
-                    )
+                    raise SemanticProviderError("AI provider returned an invalid response", code="invalid_response")
             except SemanticProviderError as exc:
-                if store.exists:
-                    store.mark_test_failure()
                 retryable = bool(getattr(exc, "retryable", False))
-                raise ApiError("AI_CONNECTION_FAILED", "AI 连接失败，未启用模型；请检查地址、密钥和模型。", 502, retryable=retryable) from exc
+                provider_code = str(getattr(exc, "code", "provider_error"))
+                code, message, status = self._connection_failure(provider_code)
+                category = self._connection_category(provider_code)
+                diagnostic = _safe_exception_detail(getattr(exc, "diagnostic", str(exc)), config.api_key)
+                raise ApiError(
+                    code,
+                    message,
+                    status,
+                    retryable=retryable,
+                    diagnostic=diagnostic or None,
+                    category=category,
+                ) from exc
+            except (TimeoutError, socket.timeout) as exc:
+                raise ApiError(
+                    "TIMEOUT",
+                    "连接超时，请稍后重试。",
+                    504,
+                    retryable=True,
+                    diagnostic="connection probe timed out",
+                    category="TIMEOUT",
+                ) from exc
             except Exception as exc:
-                if store.exists:
-                    store.mark_test_failure()
-                raise ApiError("AI_CONNECTION_FAILED", "AI 连接失败，未启用模型；请检查地址、密钥和模型。", 502, retryable=True) from exc
-            if store.exists:
-                store.mark_test_success()
+                diagnostic = _safe_exception_detail(exc, config.api_key)
+                raise ApiError(
+                    "CONNECTION_FAILED",
+                    "无法连接到模型服务，请检查地址和本机网络。",
+                    503,
+                    retryable=True,
+                    diagnostic=diagnostic or None,
+                    category="CONNECTION_FAILED",
+                ) from exc
+        structured_output_ok = getattr(response, "structured_output_ok", None)
+        if structured_output_ok is None:
+            structured_output_ok = isinstance(response.payload, Mapping)
         return ApiResponse(
             200,
             {
-                "settings": load_runtime_ai_settings(self.project_root).public(),
+                "settings": runtime.public(),
                 "status": "configured",
+                "connectionStatus": "CONNECTED",
+                "connectionOk": True,
+                "structuredOutputOk": bool(structured_output_ok),
                 "requestId": request_id,
             },
         )
+
+    @staticmethod
+    def _connection_failure(error_code: str) -> tuple[str, str, int]:
+        """Map provider-neutral transport/protocol errors to Settings UX codes."""
+
+        normalized = error_code.casefold()
+        if normalized in {"timeout", "timed_out"}:
+            return "TIMEOUT", "连接超时，请稍后重试。", 504
+        if normalized in {"http_401", "http_403", "auth_failed", "authentication_failed"}:
+            return "AUTH_FAILED", "API Key 无效或未被模型服务接受。", 401
+        if normalized in {"http_400", "bad_request", "invalid_request"}:
+            return "BAD_REQUEST", "模型服务拒绝了连接测试请求，请检查 Base URL、模型或服务参数。", 400
+        if normalized in {"http_429", "rate_limited", "too_many_requests"}:
+            return "RATE_LIMITED", "模型服务暂时限流，请稍后重试。", 429
+        if normalized in {"http_404", "endpoint_not_found", "not_found"}:
+            return "ENDPOINT_NOT_FOUND", "接口地址不存在，请检查 Base URL。", 404
+        if normalized in {"model_not_found", "http_400_model", "model_missing"}:
+            return "MODEL_NOT_FOUND", "模型名称不存在或当前服务未提供该模型。", 404
+        if normalized in {"invalid_response", "malformed_json", "invalid_response_headers", "response_too_large"}:
+            return "INVALID_RESPONSE", "模型服务返回格式不兼容。", 502
+        if normalized.startswith("http_4"):
+            return "CONNECTION_FAILED", "无法完成模型连接，请检查接口地址和配置。", 502
+        if normalized in {"connection_error", "provider_error"} or normalized.startswith("http_5"):
+            return "CONNECTION_FAILED", "无法连接到模型服务，请检查地址和本机网络。", 503
+        return "CONNECTION_FAILED", "无法连接到模型服务，请检查地址和配置。", 503
+
+    @staticmethod
+    def _connection_category(error_code: str) -> str:
+        normalized = error_code.casefold()
+        if normalized in {"timeout", "timed_out"}:
+            return "TIMEOUT"
+        if normalized in {"http_401", "http_403", "auth_failed", "authentication_failed"}:
+            return "AUTH_FAILED"
+        if normalized in {"http_400", "bad_request", "invalid_request"}:
+            return "BAD_REQUEST"
+        if normalized in {"http_429", "rate_limited", "too_many_requests"}:
+            return "RATE_LIMITED"
+        if normalized in {"http_404", "endpoint_not_found", "not_found", "model_not_found", "http_400_model", "model_missing"}:
+            return "ENDPOINT_OR_MODEL_NOT_FOUND"
+        if normalized in {"invalid_response", "malformed_json", "invalid_response_headers", "response_too_large"}:
+            return "INVALID_RESPONSE"
+        if normalized in {"connection_error", "provider_error"} or normalized.startswith("http_5"):
+            return "CONNECTION_FAILED"
+        return "CONNECTION_FAILED"
 
     @staticmethod
     def _semantic_failure(error_code: str) -> tuple[str, str, int]:
@@ -446,9 +717,12 @@ class BackendApp:
             logger=self.logger,
         )
         pending = orchestrator.new_run_record(question, scope=scope, asset_ids=asset_ids, run_id=run_id)
-        self.analysis_runs.write(pending)
 
         def runner(progress: object, cancel_event: object) -> dict[str, object]:
+            # Persist only after the task manager has admitted the runner.  A
+            # reset barrier can therefore reject this request without first
+            # creating an analysis artifact that the reset would race.
+            self.analysis_runs.write(pending)
             return orchestrator.run(
                 question,
                 scope=scope,
@@ -467,10 +741,6 @@ class BackendApp:
                 max_steps=MAX_ANALYSIS_STEPS,
             )
         except TaskAdmissionError as exc:
-            pending["status"] = "failed"
-            pending["finished_at"] = datetime.now(timezone.utc).isoformat()
-            pending["error"] = {"code": "TASKS_STOPPING", "message": "analysis task could not be started", "retryable": True}
-            self.analysis_runs.write(pending)
             raise ApiError("TASKS_STOPPING", "应用正在停止，暂时不能开始 AI 分析。", 503, retryable=True) from exc
         return ApiResponse(
             202,
@@ -562,9 +832,11 @@ class BackendApp:
             if path == "/api/v1/settings/ai" and method == "GET":
                 return self._ai_settings()
             if path == "/api/v1/settings/ai" and method == "PUT":
-                return self._save_ai_settings(body)
+                return self._save_ai_settings(body, request_id=request_id)
             if path == "/api/v1/settings/ai/test" and method == "POST":
-                return self._test_ai_connection(request_id)
+                return self._test_ai_connection(body, request_id)
+            if path == "/api/v1/workspace/reset" and method == "POST":
+                return self._reset_workspace(body, request_id=request_id)
             if path == "/api/v1/health" and method == "GET":
                 return ApiResponse(200, self._health())
             if path == "/api/v1/overview" and method == "GET":
@@ -572,10 +844,26 @@ class BackendApp:
             if path == "/api/v1/catalog" and method == "GET":
                 limit = _int_param(query, "limit", 50, maximum=100)
                 offset = _int_param(query, "offset", 0, maximum=10_000_000)
+                view = query.get("view", [None])[0]
+                # File aggregation is the product default.  Keep the old
+                # asset view available to analysis/query screens and existing
+                # API clients that explicitly filter by table/text.
+                if view == "assets" or (view is None and query.get("type", [None])[0] is not None):
+                    return ApiResponse(
+                        200,
+                        self.catalog.list_assets(
+                            asset_type=query.get("type", [None])[0],
+                            quality_status=query.get("quality", [None])[0],
+                            source_format=query.get("format", [None])[0],
+                            query=query.get("q", [None])[0],
+                            limit=limit,
+                            offset=offset,
+                        ),
+                    )
                 return ApiResponse(
                     200,
-                    self.catalog.list_assets(
-                        asset_type=query.get("type", [None])[0],
+                    self.catalog.list_files(
+                        category=query.get("category", [None])[0],
                         quality_status=query.get("quality", [None])[0],
                         source_format=query.get("format", [None])[0],
                         query=query.get("q", [None])[0],
@@ -721,6 +1009,25 @@ class BackendApp:
                 return ApiResponse(200, {"items": [item.public_dict() for item in self.tasks.list(limit=limit)]})
 
             parts = [unquote(part) for part in path.split("/") if part]
+            if len(parts) == 5 and parts[:3] == ["api", "v1", "files"] and parts[4] == "preview" and method == "GET":
+                page = _int_param(query, "page", 1, maximum=10_000)
+                try:
+                    content, content_type = self.catalog.file_preview(parts[3], page=page)
+                except FileNotFoundError as exc:
+                    raise ApiError("source_preview_unavailable", "source preview is unavailable", 404) from exc
+                except ValueError as exc:
+                    raise ApiError("source_preview_invalid", str(exc), 400) from exc
+                return ApiResponse(200, {}, raw_body=content, content_type=content_type)
+            if len(parts) == 5 and parts[:3] == ["api", "v1", "files"] and parts[4] == "content" and method == "GET":
+                content = self.catalog.file_content(parts[3])
+                if content is None:
+                    raise ApiError("file_not_found", "file was not found", 404)
+                return ApiResponse(200, content)
+            if len(parts) == 4 and parts[:3] == ["api", "v1", "files"] and method == "GET":
+                detail = self.catalog.file_detail(parts[3])
+                if detail is None:
+                    raise ApiError("file_not_found", "file was not found", 404)
+                return ApiResponse(200, detail)
             if len(parts) == 5 and parts[:3] == ["api", "v1", "analysis"] and parts[3] == "runs" and method == "GET":
                 run = self.analysis_runs.read(parts[4])
                 if run is None:

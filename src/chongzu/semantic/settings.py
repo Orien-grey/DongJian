@@ -26,6 +26,19 @@ PROJECT_CONFIG_FIELDS = frozenset({"base_url", "api_key", "model", "timeout_seco
 class AISettingsError(ValueError):
     """A safe, user-facing settings error without secret material."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: str = "CONFIG_INVALID",
+        stage: str = "validation",
+        technical_detail: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+        self.stage = stage
+        self.technical_detail = technical_detail
+
 
 class _DataBlob(ctypes.Structure):
     _fields_ = [("cbData", wintypes.DWORD), ("pbData", ctypes.POINTER(ctypes.c_byte))]
@@ -383,11 +396,51 @@ class ProjectAIConfigStore:
     def exists(self) -> bool:
         return self.path.is_file()
 
+    def _validate_project_path(self) -> None:
+        expected = project_config_path(self.project_root)
+        try:
+            actual = self.path.resolve(strict=False)
+        except OSError as exc:
+            raise AISettingsError(
+                "project AI configuration path cannot be resolved",
+                code="PROJECT_ROOT_MISMATCH",
+                stage="prepare",
+                technical_detail=type(exc).__name__,
+            ) from exc
+        if actual != expected:
+            raise AISettingsError(
+                "project AI configuration path is outside the current project",
+                code="PROJECT_ROOT_MISMATCH",
+                stage="prepare",
+                technical_detail="resolved config path does not match project root",
+            )
+
     def read(self) -> ProjectAIConfig:
+        self._validate_project_path()
         try:
             encoded = self.path.read_text(encoding="utf-8-sig")
-        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
-            raise AISettingsError("project AI configuration cannot be read") from exc
+        except PermissionError as exc:
+            raise AISettingsError(
+                "project AI configuration cannot be read",
+                code="CONFIG_PERMISSION_DENIED",
+                stage="read",
+                technical_detail=type(exc).__name__,
+            ) from exc
+        except UnicodeError as exc:
+            raise AISettingsError(
+                "project AI configuration cannot be read",
+                code="CONFIG_INVALID",
+                stage="read",
+                technical_detail=type(exc).__name__,
+            ) from exc
+        except OSError as exc:
+            code = "CONFIG_DIRECTORY_UNAVAILABLE" if not self.path.parent.exists() else "CONFIG_WRITE_FAILED"
+            raise AISettingsError(
+                "project AI configuration cannot be read",
+                code=code,
+                stage="read",
+                technical_detail=type(exc).__name__,
+            ) from exc
         # A copied portable bundle may contain a zero-byte placeholder while
         # it is being filled in.  Treat that as the documented offline state,
         # just like an object whose contract fields are all blank.
@@ -396,12 +449,17 @@ class ProjectAIConfigStore:
         try:
             raw = json.loads(encoded)
         except json.JSONDecodeError as exc:
-            raise AISettingsError("project AI configuration cannot be read") from exc
+            raise AISettingsError(
+                "project AI configuration cannot be read",
+                code="CONFIG_INVALID",
+                stage="read",
+                technical_detail=type(exc).__name__,
+            ) from exc
         if not isinstance(raw, Mapping):
-            raise AISettingsError("project AI configuration must be a JSON object")
+            raise AISettingsError("project AI configuration must be a JSON object", code="CONFIG_INVALID", stage="validation")
         unknown = set(raw) - PROJECT_CONFIG_FIELDS
         if unknown:
-            raise AISettingsError("project AI configuration contains unsupported fields")
+            raise AISettingsError("project AI configuration contains unsupported fields", code="CONFIG_INVALID", stage="validation")
         try:
             base_url = _text(raw.get("base_url", ""), "base URL")
             api_key = _text(raw.get("api_key", ""), "API key")
@@ -428,26 +486,78 @@ class ProjectAIConfigStore:
         return config
 
     def _write(self, value: ProjectAIConfig) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._validate_project_path()
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+        except PermissionError as exc:
+            raise AISettingsError(
+                "project AI configuration directory is not writable",
+                code="CONFIG_PERMISSION_DENIED",
+                stage="directory",
+                technical_detail=type(exc).__name__,
+            ) from exc
+        except OSError as exc:
+            raise AISettingsError(
+                "project AI configuration directory is unavailable",
+                code="CONFIG_DIRECTORY_UNAVAILABLE",
+                stage="directory",
+                technical_detail=type(exc).__name__,
+            ) from exc
         temporary: Path | None = None
         try:
-            with tempfile.NamedTemporaryFile(
-                mode="w",
-                encoding="utf-8",
-                dir=self.path.parent,
-                prefix=f"{self.path.name}.",
-                suffix=".tmp",
-                delete=False,
-            ) as handle:
-                temporary = Path(handle.name)
-                json.dump(value.as_mapping(), handle, ensure_ascii=False, indent=2)
-                handle.write("\n")
-                handle.flush()
-                os.fsync(handle.fileno())
-            os.replace(temporary, self.path)
+            try:
+                with tempfile.NamedTemporaryFile(
+                    mode="w",
+                    encoding="utf-8",
+                    dir=self.path.parent,
+                    prefix=f"{self.path.name}.",
+                    suffix=".tmp",
+                    delete=False,
+                ) as handle:
+                    temporary = Path(handle.name)
+                    json.dump(value.as_mapping(), handle, ensure_ascii=False, indent=2)
+                    handle.write("\n")
+                    handle.flush()
+                    os.fsync(handle.fileno())
+            except PermissionError as exc:
+                raise AISettingsError(
+                    "project AI configuration cannot be written",
+                    code="CONFIG_PERMISSION_DENIED",
+                    stage="write",
+                    technical_detail=type(exc).__name__,
+                ) from exc
+            except (OSError, UnicodeError, TypeError) as exc:
+                raise AISettingsError(
+                    "project AI configuration cannot be written",
+                    code="CONFIG_WRITE_FAILED",
+                    stage="write",
+                    technical_detail=type(exc).__name__,
+                ) from exc
+            try:
+                os.replace(temporary, self.path)
+            except PermissionError as exc:
+                raise AISettingsError(
+                    "project AI configuration cannot replace the existing file",
+                    code="CONFIG_PERMISSION_DENIED",
+                    stage="replace",
+                    technical_detail=type(exc).__name__,
+                ) from exc
+            except OSError as exc:
+                raise AISettingsError(
+                    "project AI configuration cannot replace the existing file",
+                    code="CONFIG_REPLACE_FAILED",
+                    stage="replace",
+                    technical_detail=type(exc).__name__,
+                ) from exc
         finally:
             if temporary is not None:
-                temporary.unlink(missing_ok=True)
+                try:
+                    temporary.unlink(missing_ok=True)
+                except OSError:
+                    # Cleanup must not hide the write/replace failure.  The
+                    # temp file is bounded to the project config directory and
+                    # can be removed on the next successful save.
+                    pass
 
     def save(
         self,

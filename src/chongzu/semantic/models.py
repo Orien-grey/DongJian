@@ -105,6 +105,9 @@ class SemanticRequest:
     # serialized into ``payload`` and therefore does not weaken the exposure
     # limit.
     validation_columns: tuple[str, ...] = ()
+    # Connection probes only need a successful OpenAI-compatible chat
+    # envelope.  Normal semantic requests keep the strict JSON default.
+    structured_output_required: bool = True
 
     def __post_init__(self) -> None:
         for name in (
@@ -165,6 +168,7 @@ class SemanticResponse:
     raw_size_bytes: int | None = None
     request_id: str | None = None
     usage: Mapping[str, int | float] | None = None
+    structured_output_ok: bool | None = None
 
 
 @dataclass(frozen=True)

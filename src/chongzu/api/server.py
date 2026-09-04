@@ -93,17 +93,29 @@ class ChongZuHTTPServer(ThreadingHTTPServer):
                     error.status,
                     bool(getattr(error, "retryable", False)),
                 )
-                self._send_json(
-                    error.status,
-                    {
-                        "error": {
-                            "code": error.code,
-                            "message": error.message,
-                            "retryable": bool(getattr(error, "retryable", False)),
-                            "requestId": request_id,
-                        }
-                    },
-                )
+                payload: dict[str, Any] = {
+                    "code": error.code,
+                    "message": error.message,
+                    "retryable": bool(getattr(error, "retryable", False)),
+                    "requestId": request_id,
+                }
+                diagnostic = getattr(error, "diagnostic", None)
+                category = getattr(error, "category", None)
+                if diagnostic:
+                    payload["diagnostic"] = str(diagnostic)[:512]
+                if category:
+                    payload["category"] = str(category)[:80]
+                stage = getattr(error, "stage", None)
+                if stage:
+                    payload["stage"] = str(stage)[:80]
+                details = getattr(error, "details", None)
+                if isinstance(details, dict) and details:
+                    # Backend services only place bounded, non-secret reset
+                    # diagnostics here.  Keep the response contract narrow so
+                    # an accidental exception object or arbitrary value can
+                    # never be serialized to the browser.
+                    payload["details"] = details
+                self._send_json(error.status, {"error": payload})
 
             def _request_body(self) -> bytes:
                 raw_length = self.headers.get("Content-Length", "0")
@@ -179,6 +191,17 @@ class ChongZuHTTPServer(ThreadingHTTPServer):
                     self._send_error(exc)
 
             def do_PATCH(self) -> None:  # noqa: N802
+                self._ensure_request_id()
+                try:
+                    self._dispatch(self._request_body())
+                except ApiError as exc:
+                    self._send_error(exc)
+
+            def do_PUT(self) -> None:  # noqa: N802
+                # BackendApp exposes additive PUT routes (currently the
+                # project-local AI settings save).  Keep body handling exactly
+                # aligned with POST/PATCH so the HTTP adapter does not turn a
+                # valid backend route into the stdlib's 501 response.
                 self._ensure_request_id()
                 try:
                     self._dispatch(self._request_body())

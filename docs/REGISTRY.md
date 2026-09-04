@@ -161,12 +161,17 @@ directories without extracting archive members. It recognizes PDF, JPEG, PNG,
 ZIP, OOXML XLSX/DOCX/PPTX, OLE, HTML/XML/text, CSS, Zone.Identifier, and unknown
 binaries. Extension/type mismatches are retained as evidence.
 
-Detection is not business support. The rule policy maps only CSV, TSV, XLS,
-XLSX, PDF, JPG/JPEG, PNG, DOC, DOCX, PPT, PPTX, and TXT into supported work.
+Detection is not business support. The rule policy maps CSV, TSV, XLS, XLSX,
+PDF, JPG/JPEG, PNG, DOCX, and TXT into supported work. DOC, PPTX, and PPT are
+retained as deferred formats for a later extraction stage.
 HTML/CSS/XML/JS, ZIP contents, ambiguous/unknown binaries, and unlisted formats
 are registered as unsupported. Apache Tika/Java is no longer a planned default
 detector or fallback; the Phase 2 lightweight detector remains the Registry
 input until benchmark evidence justifies a narrowly scoped addition.
+
+The product Catalog aggregates child assets under the existing `files.file_id`;
+it does not create a second file identity. Page, sheet, paragraph, and table
+coordinates remain on the underlying asset and chunk provenance.
 
 ## Source safety
 

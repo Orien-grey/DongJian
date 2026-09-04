@@ -119,10 +119,13 @@ def plan_processing(info: RegistryFileInfo) -> ProcessingPlan:
         return _supported(info, BusinessFormat.PNG, table=True, text=True, ocr=True, visual=True)
     if extension == ".xlsx" and detected in {"xlsx", "zip", "unknown"}:
         return _supported(info, BusinessFormat.XLSX, table=True, text=False)
-    if detected == "docx":
+    # Keep an explicit .docx route for corrupt/type-mismatched OOXML too, so
+    # the package parser records an isolated DOCX failure instead of silently
+    # classifying the user file as a generic ZIP/unknown asset.
+    if extension == ".docx" and detected in {"docx", "zip", "unknown", "plain_text"}:
         return _supported(info, BusinessFormat.DOCX, table=True, text=True)
     if detected == "pptx":
-        return _supported(info, BusinessFormat.PPTX, table=True, text=True)
+        return _unsupported(info, "deferred_pptx")
     if extension in {".csv", ".tsv"} and detected in {"delimited_text", "plain_text", "unknown"}:
         business_format = BusinessFormat.TSV if extension == ".tsv" else BusinessFormat.CSV
         return _supported(info, business_format, table=True, text=False)
@@ -135,7 +138,7 @@ def plan_processing(info: RegistryFileInfo) -> ProcessingPlan:
         if legacy_format is BusinessFormat.XLS:
             return _supported(info, legacy_format, table=True, text=False)
         if legacy_format in {BusinessFormat.DOC, BusinessFormat.PPT}:
-            return _supported(info, legacy_format, table=True, text=True)
+            return _unsupported(info, f"deferred_{legacy_format.value}")
         return _unsupported(info, "unsupported_ambiguous_ole_container")
     if extension == ".xls" and detected in {"ole_compound", "unknown", "plain_text", "zip"}:
         return _supported(info, BusinessFormat.XLS, table=True, text=False)

@@ -515,7 +515,7 @@ def test_ai_settings_state_machine_and_dpapi_secret_boundary(tmp_path: Path) -> 
         provider.fail = True
         with pytest.raises(ApiError) as failure:
             app.handle_api("POST", "/api/v1/settings/ai/test", {}, request_id="req_test_fail")
-        assert failure.value.code == "AI_CONNECTION_FAILED"
+        assert failure.value.code == "CONNECTION_FAILED"
         failed = load_runtime_ai_settings(project)
         assert failed.status == "CONFIGURED"
         assert failed.enabled is True

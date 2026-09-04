@@ -41,6 +41,7 @@ from .report import (
     validate_report_payload,
 )
 from .quality import QualityService
+from .reset import WorkspaceResetError, WorkspaceResetService
 from .sql import (
     SqlAssetError,
     SqlExecutionError,
@@ -69,6 +70,8 @@ __all__ = [
     "validate_analysis_action",
     "ProcessTaskManager",
     "QualityService",
+    "WorkspaceResetError",
+    "WorkspaceResetService",
     "SqlAssetError",
     "SqlExecutionError",
     "SqlQueryService",

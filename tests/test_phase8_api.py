@@ -96,7 +96,7 @@ def test_process_task_catalog_previews_and_quality_update(api_server) -> None:
     assert task["summary"]["tableAssets"] >= 1
     assert task["summary"]["textAssets"] >= 1
 
-    status, catalog = _request(base, "/api/v1/catalog?limit=2&offset=0")
+    status, catalog = _request(base, "/api/v1/catalog?view=assets&limit=2&offset=0")
     assert status == 200
     assert catalog["pagination"]["total"] >= 3
     assert len(catalog["items"]) <= 2

@@ -164,6 +164,8 @@ $emptyDirectories = @(
     'workspace\artifacts\cleaning',
     'workspace\artifacts\cleaning\tables',
     'workspace\artifacts\cleaning\text',
+    'workspace\artifacts\analysis',
+    'workspace\artifacts\reports',
     'workspace\input',
     'workspace\staging',
     'workspace\output',

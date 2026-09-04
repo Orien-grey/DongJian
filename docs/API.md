@@ -15,10 +15,12 @@ browser contract.
 | --- | --- | --- |
 | GET | `/api/v1/health` | App, portable runtime, registry, and optional LLM status. No key is returned. |
 | GET | `/api/v1/settings/ai` | Project-local AI status and editable fields; never returns the key. |
-| PUT | `/api/v1/settings/ai` | Atomically write `config/llm.json` from the Settings page. |
+| PUT | `/api/v1/settings/ai` | Atomically write `config/llm.json` from the Settings page; write failures return a classified, secret-free diagnostic. |
 | POST | `/api/v1/settings/ai/test` | Explicit connection test; does not run automatically during extraction. |
 | GET | `/api/v1/overview` | File, asset, quality, semantic-pending, and format counts. |
-| GET | `/api/v1/catalog` | Metadata list with `type`, `quality`, `format`, `q`, `limit`, `offset`. |
+| GET | `/api/v1/catalog` | File-level Catalog by default; supports `category`, `quality`, `format`, `q`, `limit`, `offset`. Use `view=assets` with optional `type=table|text` for child assets. |
+| GET | `/api/v1/files/{file-id}` | One source-file detail with ordered text previews and child asset metadata. |
+| GET | `/api/v1/files/{file-id}/content` | Bounded mixed file content for the primary detail view: PDF pages, DOCX body order, workbook sheets, image OCR/candidate tables, or TXT text. |
 | GET | `/api/v1/assets/{asset-id}` | Unified asset metadata, provenance, profile, issues, and semantic history. |
 | POST | `/api/v1/assets/{asset-id}/semantic-enrich` | Explicitly enrich exactly one table/text asset; requires configured provider and UI confirmation. |
 | GET | `/api/v1/assets/{asset-id}/table-preview` | Bounded Parquet preview with `layer=raw\|normalized`, `limit`, `offset`. |
@@ -34,11 +36,25 @@ browser contract.
 | POST | `/api/v1/process` | Validate a directory and queue `{ "source": "..." }`. Returns `202` and `taskId`. |
 | GET | `/api/v1/tasks` | Recent in-memory process tasks. |
 | GET | `/api/v1/tasks/{task-id}` | One task's status, stage, progress, counts, and error summary. |
+| POST | `/api/v1/workspace/reset` | Explicitly clear generated current-project data after `{ "confirmation": "清空" }`; rejects active tasks, reports completed phases on failure, preserves sources, runtime/models, AI config, and the active server log. |
 
-Catalog and issue list responses contain `items` and `pagination`. Table
-previews are hard capped at 200 rows; text previews are hard capped at 20,000
-characters. The service resolves artifact paths only from a Registry asset ID;
-there is no `file?path=` endpoint.
+Catalog and issue list responses contain `items` and `pagination`. Asset detail
+previews are hard capped at 200 rows and 20,000 characters. The file content
+contract is stricter: at most 12,000 text characters, 20 rows, 32 columns,
+2,048 characters per preview cell, 200 table assets, and 500 mixed blocks.
+`truncated` and table pagination indicate that the response is a preview. The
+default table block preview is the raw/source matrix when available; a bounded
+normalized data preview is also exposed for the data-oriented view. The service
+resolves artifact paths only from a Registry asset ID; there is no `file?path=` endpoint.
+
+`POST /api/v1/settings/ai/test` accepts the current temporary draft (`baseUrl`,
+optional `apiKey`, `model`, `timeout`, and `visionEnabled`) and never writes it.
+It sends one minimal OpenAI-compatible chat completion request with no project
+content and omits strict `response_format` requirements. The response separates
+`connectionOk` from `structuredOutputOk`. Provider failures expose only bounded,
+sanitized diagnostics and a neutral category such as `BAD_REQUEST`,
+`AUTH_FAILED`, `ENDPOINT_OR_MODEL_NOT_FOUND`, `RATE_LIMITED`, `TIMEOUT`,
+`CONNECTION_FAILED`, or `INVALID_RESPONSE`.
 
 ## Search
 

@@ -73,8 +73,9 @@ records. AI-generated display names never become stable asset IDs.
 | XLS, XLSX | yes | optional later metadata text | no | supported |
 | PDF | yes | yes | scanned/complex pages may need it | supported |
 | JPG, JPEG, PNG | yes | yes | yes; screenshots remain images | supported |
-| DOC, DOCX | yes | yes | future evidence-based escalation only | supported |
-| PPT, PPTX | yes | yes | future evidence-based escalation only | supported |
+| DOCX | yes | yes | future evidence-based escalation only | supported |
+| DOC | no | no | no | registered, deferred |
+| PPTX | no | no | no | registered, deferred |
 | TXT | no | yes | no | supported |
 | HTML, CSS, XML, JS | no | no | no | unsupported, retained in Registry |
 | ZIP contents | no | no | no | unsupported, archive is not expanded |
@@ -83,6 +84,8 @@ records. AI-generated display names never become stable asset IDs.
 The Phase 2 lightweight detector remains in place. Detection records what a
 file appears to be; the deterministic processing policy separately records
 whether the product supports it and which extraction branches are candidates.
+See [docs/SUPPORT_MATRIX.md](docs/SUPPORT_MATRIX.md) for the user-facing matrix,
+including the deferred PPTX/HTML/XML/DOC and catalog-only formats.
 The Phase 4A PyMuPDF branch and Phase 4B `img2table` native-text candidate are
 independent: `extract pdf-table` preserves the Phase 4A
 `TextAsset`/`TextChunk` rows while adding zero or more PDF `TableAsset` rows.

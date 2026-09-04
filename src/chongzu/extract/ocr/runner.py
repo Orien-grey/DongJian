@@ -42,6 +42,7 @@ from .img2table_adapter import (
     ImageTableAdapterError,
     ImageTableConfig,
     extract_tables_from_document,
+    filter_image_table_candidates,
     load_image_document,
     publish_image_table,
 )
@@ -497,7 +498,17 @@ def _extract_one(source: StructuredSource, run_id: str, identity: str, targets: 
                 )
                 return
             result.timings.image_table_ms += table_ms
-            for table_index, table in enumerate(tables):
+            candidate_tables, filter_decisions = filter_image_table_candidates(tables)
+            if filter_decisions:
+                result.warnings.append(
+                    {
+                        "target": target.as_dict(),
+                        "image_table_candidate_filter": filter_decisions,
+                        "input_candidate_count": len(tables),
+                        "published_candidate_count": len(candidate_tables),
+                    }
+                )
+            for table_index, table in candidate_tables:
                 try:
                     publication = publish_image_table(
                         source=source,
@@ -542,7 +553,9 @@ def _extract_one(source: StructuredSource, run_id: str, identity: str, targets: 
             result.warnings.append(
                 {
                     "target": target.as_dict(),
-                    "image_table_count": len(tables),
+                    "image_table_count": len(candidate_tables),
+                    "image_table_input_count": len(tables),
+                    "image_table_count_semantics": "candidate_tables_after_conservative_filter",
                     "image_table_ocr_reused": True,
                     "image_table_ocr_backend_calls": 0,
                     "image_table_ms": table_ms,

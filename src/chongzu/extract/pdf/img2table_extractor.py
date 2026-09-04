@@ -39,6 +39,7 @@ from ..artifacts import (
     write_json_atomic,
     write_parquet_atomic,
 )
+from ..img2table_compat import ensure_img2table_threshold_compat
 from ..models import StructuredSource
 from .profiling import TABLE_CANDIDATE_SEMANTICS
 from .table_quality import DetectedTable
@@ -432,6 +433,7 @@ def extract_pdf_tables_file(
         PDF = _require_img2table()
         import pymupdf
 
+        ensure_img2table_threshold_compat()
         result.extractor_version = EXTRACTOR_VERSION
         document = PDF(
             source.path,

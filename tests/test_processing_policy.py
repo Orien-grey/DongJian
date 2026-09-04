@@ -54,14 +54,11 @@ def test_txt_policy_attempts_only_text_extraction() -> None:
 
 @pytest.mark.parametrize(
     ("detected_type", "extension", "business_format", "table", "text"),
-    [
-        ("delimited_text", ".csv", BusinessFormat.CSV, True, False),
-        ("delimited_text", ".tsv", BusinessFormat.TSV, True, False),
-        ("ole_compound", ".doc", BusinessFormat.DOC, True, True),
-        ("docx", ".docx", BusinessFormat.DOCX, True, True),
-        ("ole_compound", ".ppt", BusinessFormat.PPT, True, True),
-        ("pptx", ".pptx", BusinessFormat.PPTX, True, True),
-    ],
+        [
+            ("delimited_text", ".csv", BusinessFormat.CSV, True, False),
+            ("delimited_text", ".tsv", BusinessFormat.TSV, True, False),
+            ("docx", ".docx", BusinessFormat.DOCX, True, True),
+        ],
 )
 def test_remaining_supported_format_matrix(
     detected_type: str,

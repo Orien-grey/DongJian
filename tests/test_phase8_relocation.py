@@ -101,7 +101,7 @@ def test_moved_project_start_process_catalog_stop() -> None:
 
         overview = _json_request(base, "/api/v1/overview")
         assert overview["supported"] >= 7
-        catalog = _json_request(base, "/api/v1/catalog?limit=100")
+        catalog = _json_request(base, "/api/v1/catalog?view=assets&limit=100")
         assert catalog["pagination"]["total"] >= 6
         table = next(item for item in catalog["items"] if item["assetType"] == "table")
         text = next(item for item in catalog["items"] if item["assetType"] == "text")

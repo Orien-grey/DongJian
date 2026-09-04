@@ -6,8 +6,12 @@ import type {
   ReportsResponse,
   ReportStartResponse,
   AssetDetail,
+  AIConnectionTestResponse,
   AISettingsResponse,
   CatalogResponse,
+  FileDetail,
+  FileContentResponse,
+  FileCatalogResponse,
   HealthResponse,
   Overview,
   QualityResponse,
@@ -22,20 +26,28 @@ import type {
 } from "./types";
 
 interface ApiErrorBody {
-  error?: { code?: string; message?: string; retryable?: boolean; requestId?: string };
+  error?: { code?: string; message?: string; retryable?: boolean; requestId?: string; diagnostic?: string; category?: string; stage?: string; details?: Record<string, unknown> };
 }
 
 export class ApiClientError extends Error {
   readonly code: string;
   readonly requestId?: string;
   readonly retryable: boolean;
+  readonly diagnostic?: string;
+  readonly category?: string;
+  readonly stage?: string;
+  readonly details?: Record<string, unknown>;
 
-  constructor(code: string, message: string, requestId?: string, retryable = false) {
+  constructor(code: string, message: string, requestId?: string, retryable = false, diagnostic?: string, category?: string, stage?: string, details?: Record<string, unknown>) {
     super(message);
     this.name = "ApiClientError";
     this.code = code;
     this.requestId = requestId;
     this.retryable = retryable;
+    this.diagnostic = diagnostic;
+    this.category = category;
+    this.stage = stage;
+    this.details = details;
   }
 }
 
@@ -52,6 +64,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       error?.message ?? `请求失败（${response.status}）`,
       error?.requestId,
       error?.retryable ?? false,
+      error?.diagnostic,
+      error?.category,
+      error?.stage,
+      error?.details,
     );
   }
   return payload as T;
@@ -60,20 +76,28 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export const api = {
   health: () => request<HealthResponse>("/api/v1/health"),
   aiSettings: () => request<AISettingsResponse>("/api/v1/settings/ai"),
-  saveAiSettings: (value: { baseUrl: string; apiKey?: string; model: string; timeout: number; visionEnabled: boolean }) =>
+  saveAiSettings: (value: { baseUrl: string; apiKey?: string; clearApiKey?: boolean; model: string; timeout: number; visionEnabled: boolean }) =>
     request<AISettingsResponse & { saved: boolean }>("/api/v1/settings/ai", {
       method: "PUT",
       body: JSON.stringify(value),
     }),
-  testAiConnection: () =>
-    request<AISettingsResponse & { status: string; requestId: string }>("/api/v1/settings/ai/test", {
+  testAiConnection: (value: { baseUrl: string; apiKey?: string; clearApiKey?: boolean; model: string; timeout: number; visionEnabled: boolean }) =>
+    request<AIConnectionTestResponse>("/api/v1/settings/ai/test", {
       method: "POST",
-      body: JSON.stringify({}),
+      body: JSON.stringify(value),
     }),
   overview: () => request<Overview>("/api/v1/overview"),
   catalog: (params: URLSearchParams) => request<CatalogResponse>(`/api/v1/catalog?${params.toString()}`),
+  files: (params: URLSearchParams) => request<FileCatalogResponse>(`/api/v1/catalog?${params.toString()}`),
   search: (params: URLSearchParams) => request<SearchResponse>(`/api/v1/search?${params.toString()}`),
   asset: (assetId: string) => request<AssetDetail>(`/api/v1/assets/${encodeURIComponent(assetId)}`),
+  file: (fileId: string, signal?: AbortSignal) => request<FileDetail>(`/api/v1/files/${encodeURIComponent(fileId)}`, { signal }),
+  fileContent: (fileId: string, signal?: AbortSignal) => request<FileContentResponse>(`/api/v1/files/${encodeURIComponent(fileId)}/content`, { signal }),
+  resetWorkspace: (confirmation: string) =>
+    request<{ reset: boolean; phases?: Record<string, string>; removed: Record<string, unknown>; preserved: string[] }>("/api/v1/workspace/reset", {
+      method: "POST",
+      body: JSON.stringify({ confirmation }),
+    }),
   semanticEnrich: (assetId: string) =>
     request<SemanticEnrichmentResponse>(`/api/v1/assets/${encodeURIComponent(assetId)}/semantic-enrich`, {
       method: "POST",
@@ -129,6 +153,8 @@ export const api = {
         error?.message ?? `请求失败（${response.status}）`,
         error?.requestId,
         error?.retryable ?? false,
+        error?.diagnostic,
+        error?.category,
       );
     }
     return { content: await response.text(), contentType: response.headers.get("Content-Type") ?? "text/plain; charset=utf-8" };

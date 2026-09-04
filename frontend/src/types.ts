@@ -1,4 +1,4 @@
-export type Page = "overview" | "catalog" | "search" | "query" | "quality" | "analysis" | "reports" | "tasks" | "settings" | "detail";
+export type Page = "overview" | "catalog" | "search" | "query" | "quality" | "analysis" | "reports" | "tasks" | "settings" | "detail" | "file-detail";
 export type AssetType = "table" | "text";
 export type QualityStatus = "ready" | "needs_review" | "unusable";
 export type TaskStatus = "queued" | "running" | "cancelling" | "succeeded" | "failed" | "cancelled" | "interrupted";
@@ -64,6 +64,14 @@ export interface AISettings {
 
 export interface AISettingsResponse {
   settings: AISettings;
+}
+
+export interface AIConnectionTestResponse extends AISettingsResponse {
+  status: string;
+  connectionStatus: string;
+  connectionOk: boolean;
+  structuredOutputOk: boolean;
+  requestId: string;
 }
 
 export interface SemanticField {
@@ -144,6 +152,100 @@ export interface CatalogResponse {
   items: AssetSummary[];
   pagination: Pagination;
   timings?: CatalogTimings;
+}
+
+export interface FileCatalogResponse {
+  items: FileSummary[];
+  pagination: Pagination;
+  timings?: Record<string, number>;
+}
+
+export interface FileSummary {
+  fileId: string;
+  displayName: string;
+  relativePath: string;
+  format: string;
+  observedExtension: string;
+  sizeBytes: number | null;
+  sha256: string | null;
+  supportStatus: string;
+  processingStatus: string;
+  textAssets: number;
+  textPages: number;
+  tableAssets: number;
+  qualityStatus: string;
+  qualityIssueCount: number;
+  semanticStatus: string;
+  sourceRoot?: string;
+  latestErrorCode?: string | null;
+  latestErrorMessage?: string | null;
+}
+
+export interface FileDetail {
+  file: FileSummary;
+  source: { fileId: string; relativePath: string; sha256: string | null; root: string; format: string | null };
+  pages: Array<{ assetId: string; pageNumber: number | null; section: string | null; text: string; truncated: boolean; source: Record<string, unknown> }>;
+  tables: AssetSummary[];
+  assets: AssetSummary[];
+  timings?: { query_ms: number; total_ms: number };
+}
+
+export interface FileContentTextBlock {
+  type: "text";
+  assetId: string;
+  text: string;
+  truncated: boolean;
+  textOffset?: number;
+  nextTextOffset?: number;
+  continuationAvailable?: boolean;
+  order: number | null;
+  pageNumber: number | null;
+  sheetName: string | null;
+  provenance: Record<string, unknown>;
+}
+
+export interface FileContentTableBlock {
+  type: "table";
+  assetId: string;
+  displayName: string;
+  pageNumber: number | null;
+  sheetName: string | null;
+  order?: number | null;
+  candidate: boolean;
+  candidateStatus: string | null;
+  qualityStatus: string | null;
+  preview: TablePreview | null;
+  rawPreview?: TablePreview | null;
+  normalizedPreview?: TablePreview | null;
+  previewLayer?: "raw" | "normalized" | null;
+  previewAvailable: boolean;
+  provenance: Record<string, unknown>;
+}
+
+export type FileContentBlock = FileContentTextBlock | FileContentTableBlock;
+
+export interface FileContentSection {
+  sectionId: string;
+  kind: "page" | "sheet" | "document" | "image" | "text" | "file" | string;
+  label: string;
+  pageNumber: number | null;
+  sheetName: string | null;
+  blocks: FileContentBlock[];
+}
+
+export interface FileContentResponse {
+  file: FileSummary;
+  source: { fileId: string; relativePath: string; sha256: string | null; root: string; format: string | null };
+  sourcePreview?: {
+    available: boolean;
+    kind: "pdf_page" | "image" | string | null;
+    url: string | null;
+    pageParameter: string | null;
+  };
+  sections: FileContentSection[];
+  limits: { maxTextChars: number; maxTableRows: number; maxTableColumns: number; maxTableCellChars?: number; maxTableAssets: number; maxBlocks: number };
+  truncated: boolean;
+  timings?: { query_ms: number; total_ms: number };
 }
 
 export interface SearchResult {
@@ -232,6 +334,7 @@ export interface QualityIssue {
   source_format?: string | null;
   sheet_name?: string | null;
   page_number?: number | null;
+  file_id?: string | null;
 }
 
 export interface QualityResponse {
@@ -287,6 +390,10 @@ export interface TablePreview {
   layer: "raw" | "normalized";
   columns: string[];
   rows: Array<Record<string, unknown>>;
+  headerDetected?: boolean;
+  presentationColumns?: string[];
+  columnsTruncated?: boolean;
+  cellValuesTruncated?: boolean;
   pagination: Pagination;
 }
 

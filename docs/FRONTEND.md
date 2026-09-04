@@ -31,8 +31,12 @@ CSS, and HTML and is served by the Python backend.
 
 - **概览**: file/support/quality state, table/text composition, formats, and
   recent tasks.
-- **数据目录**: bounded type/quality/format filters and source-name search;
-  each row represents one TableAsset or TextAsset.
+- **数据目录**: file-level source aggregation by default, with bounded
+  category/quality/format filters and source-name search; child
+  `TableAsset`/`TextAsset` detail remains available from the file detail page.
+- **文件详情**: the primary content view calls the bounded file-content API and
+  renders text plus table previews inline. Asset-detail links remain for full
+  table data, provenance, quality, and semantic history.
 - **资产详情**: 数据、画像、质量、来源、AI语义 tabs. Tables page raw or
   normalized Parquet; text is a bounded normalized excerpt.
 - **质量检查**: open issues with evidence, suggested action, and review-only
@@ -59,9 +63,16 @@ contract. The UI highlights match offsets in the returned plain-text snippet;
 the backend never returns HTML.
 
 The SQL workbench only sends selected asset IDs and SQL to the local API. It
-never sends a filesystem path, opens DuckDB itself, or exposes the Registry
-schema. It displays the service-generated relation mapping and a truncation
-notice when the 500-row or response-size limit is reached.
+  never sends a filesystem path, opens DuckDB itself, or exposes the Registry
+  schema. It displays the service-generated relation mapping and a truncation
+  notice when the 500-row or response-size limit is reached.
+
+The Settings page keeps persisted settings, the editable draft, and the latest
+connection-test result as separate state. Testing does not save or refresh the
+draft; saving does not test it. A saved API key is represented only by an
+`apiKeyConfigured` status. The dangerous project-clear action requires typing
+`清空` and is handled by the backend reset service, never by a shell command.
+The top navigation is sticky so it remains visible while any page scrolls.
 
 ## UI/data boundary
 

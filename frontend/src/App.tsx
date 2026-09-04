@@ -8,6 +8,9 @@ import type {
   AISettings,
   AssetDetail,
   AssetSummary,
+  FileContentBlock,
+  FileContentResponse,
+  FileSummary,
   HealthResponse,
   Overview,
   Page,
@@ -67,9 +70,23 @@ function number(value: number | null | undefined): string {
   return value == null ? "—" : new Intl.NumberFormat("zh-CN").format(value);
 }
 
+function fileSize(value: number | null | undefined): string {
+  if (value == null) return "—";
+  if (value < 1024) return `${number(value)} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+  if (value < 1024 * 1024 * 1024) return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(value / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+}
+
 function errorText(error: unknown): string {
   if (error instanceof ApiClientError) {
-    return error.requestId ? `${error.message}（请求 ID：${error.requestId}）` : error.message;
+    const diagnostic = error.diagnostic ? `：${error.diagnostic}` : "";
+    const stage = error.stage ? `（阶段：${error.stage}）` : "";
+    const completed = Array.isArray(error.details?.completedPhases) && error.details.completedPhases.length
+      ? `（已完成：${error.details.completedPhases.join("、")}）`
+      : "";
+    const requestId = error.requestId ? `（请求 ID：${error.requestId}）` : "";
+    return `${error.message}${diagnostic}${stage}${completed}${requestId}`;
   }
   return "请求未完成，请稍后重试。";
 }
@@ -164,15 +181,23 @@ function App() {
   const [page, setPage] = useState<Page>("overview");
   const [overview, setOverview] = useState<Overview>(EMPTY_OVERVIEW);
   const [health, setHealth] = useState<HealthResponse | null>(null);
-  const [aiSettings, setAiSettings] = useState<AISettings | null>(null);
-  const [aiForm, setAiForm] = useState({ baseUrl: "", apiKey: "", model: "", timeout: "120", visionEnabled: false });
+  const [aiPersistedSettings, setAiPersistedSettings] = useState<AISettings | null>(null);
+  const [aiForm, setAiForm] = useState({ baseUrl: "", apiKey: "", model: "", timeout: "120", visionEnabled: false, clearApiKey: false });
+  const [aiDraftDirty, setAiDraftDirty] = useState(false);
+  const [aiTestResult, setAiTestResult] = useState<{ kind: "success" | "error"; message: string; structuredOutputOk?: boolean; category?: string } | null>(null);
+  const [aiSettingsState, setAiSettingsState] = useState<"idle" | "loading" | "ready" | "error">("idle");
+  const [aiSettingsError, setAiSettingsError] = useState("");
+  const [resetBusy, setResetBusy] = useState(false);
+  const [resetMessage, setResetMessage] = useState("");
   const [aiBusy, setAiBusy] = useState(false);
   const [aiMessage, setAiMessage] = useState("");
   const [aiMessageKind, setAiMessageKind] = useState<"" | "success" | "error">("");
   const [assets, setAssets] = useState<AssetSummary[]>([]);
+  const [files, setFiles] = useState<FileSummary[]>([]);
   const [catalogTotal, setCatalogTotal] = useState(0);
+  const [catalogError, setCatalogError] = useState("");
   const [catalogOffset, setCatalogOffset] = useState(0);
-  const [catalogType, setCatalogType] = useState<"" | "table" | "text">("");
+  const [catalogType, setCatalogType] = useState<"" | "table_file" | "document" | "image" | "unprocessed" | "failed">("");
   const [catalogQuality, setCatalogQuality] = useState<"" | QualityStatus>("");
   const [catalogFormat, setCatalogFormat] = useState("");
   const [catalogQuery, setCatalogQuery] = useState("");
@@ -215,6 +240,12 @@ function App() {
   const [reportLoading, setReportLoading] = useState(false);
   const [reportError, setReportError] = useState("");
   const [selected, setSelected] = useState<AssetDetail | null>(null);
+  const [selectedFileId, setSelectedFileId] = useState<string | null>(null);
+  const [selectedFileContent, setSelectedFileContent] = useState<FileContentResponse | null>(null);
+  const [fileDetailState, setFileDetailState] = useState<"idle" | "loading" | "ready" | "error">("idle");
+  const [fileDetailError, setFileDetailError] = useState("");
+  const [fileTextLoadingKey, setFileTextLoadingKey] = useState<string | null>(null);
+  const [fileReloadKey, setFileReloadKey] = useState(0);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detailTab, setDetailTab] = useState<"data" | "profile" | "quality" | "source" | "semantic">("data");
   const [tableLayer, setTableLayer] = useState<"raw" | "normalized">("normalized");
@@ -231,6 +262,10 @@ function App() {
   const [error, setError] = useState("");
   const knownTaskStatuses = useRef<Record<string, Task["status"]>>({});
   const pendingIssueUpdates = useRef<Set<string>>(new Set());
+  const catalogRequestGeneration = useRef(0);
+  const fileRequestGeneration = useRef(0);
+  const aiSettingsRequestGeneration = useRef(0);
+  const aiDraftDirtyRef = useRef(false);
 
   const refreshOverview = useCallback(async () => {
     try {
@@ -248,38 +283,54 @@ function App() {
     }
   }, []);
 
-  const refreshAISettings = useCallback(async () => {
+  const refreshAISettings = useCallback(async (replaceDraft = false) => {
+    const generation = aiSettingsRequestGeneration.current + 1;
+    aiSettingsRequestGeneration.current = generation;
+    setAiSettingsState("loading");
+    setAiSettingsError("");
     try {
       const result = await api.aiSettings();
-      setAiSettings(result.settings);
-      setAiForm((current) => ({
-        ...current,
-        baseUrl: result.settings.baseUrl,
-        model: result.settings.model,
-        timeout: String(result.settings.timeout),
-        visionEnabled: result.settings.visionEnabled,
-        apiKey: "",
-      }));
+      if (generation !== aiSettingsRequestGeneration.current) return;
+      setAiPersistedSettings(result.settings);
+      if (replaceDraft || !aiDraftDirtyRef.current) {
+        setAiForm({
+          baseUrl: result.settings.baseUrl,
+          model: result.settings.model,
+          timeout: String(result.settings.timeout),
+          visionEnabled: result.settings.visionEnabled,
+          apiKey: "",
+          clearApiKey: false,
+        });
+        aiDraftDirtyRef.current = false;
+        setAiDraftDirty(false);
+      }
+      setAiSettingsState("ready");
     } catch (cause) {
-      setError(errorText(cause));
+      if (generation !== aiSettingsRequestGeneration.current) return;
+      setAiSettingsError(errorText(cause));
+      setAiSettingsState("error");
     }
   }, []);
 
   const refreshCatalog = useCallback(async () => {
+    const generation = catalogRequestGeneration.current + 1;
+    catalogRequestGeneration.current = generation;
     setLoading(true);
+    setCatalogError("");
     try {
       const params = new URLSearchParams({ limit: "25", offset: String(catalogOffset) });
-      if (catalogType) params.set("type", catalogType);
+       if (catalogType) params.set("category", catalogType);
       if (catalogQuality) params.set("quality", catalogQuality);
       if (catalogFormat) params.set("format", catalogFormat);
       if (catalogQuery.trim()) params.set("q", catalogQuery.trim());
-      const result = await api.catalog(params);
-      setAssets(result.items);
+       const result = await api.files(params);
+       if (generation !== catalogRequestGeneration.current) return;
+       setFiles(result.items);
       setCatalogTotal(result.pagination.total);
     } catch (cause) {
-      setError(errorText(cause));
+      if (generation === catalogRequestGeneration.current) setCatalogError(errorText(cause));
     } finally {
-      setLoading(false);
+      if (generation === catalogRequestGeneration.current) setLoading(false);
     }
   }, [catalogFormat, catalogOffset, catalogQuality, catalogQuery, catalogType]);
 
@@ -305,17 +356,17 @@ function App() {
       knownTaskStatuses.current = Object.fromEntries(next.map((task) => [task.taskId, task.status]));
       setTasks(next);
       if (terminalTransition) {
+        // A terminal process transition refreshes aggregate screens. Detail
+        // pages own their request lifecycle and must not be re-fetched by the
+        // one-second task poller.
         await Promise.all([refreshOverview(), refreshCatalog(), refreshIssues()]);
-        if (selectedId) {
-          void api.asset(selectedId).then(setSelected).catch((cause) => setError(errorText(cause)));
-        }
       }
       return next;
     } catch (cause) {
       setError(errorText(cause));
       return [];
     }
-  }, [refreshCatalog, refreshIssues, refreshOverview, selectedId]);
+  }, [refreshCatalog, refreshIssues, refreshOverview]);
 
   const refreshSearch = useCallback(async (offset = 0, value = searchQuery) => {
     if (!value.trim()) return;
@@ -337,7 +388,7 @@ function App() {
 
   const refreshQueryAssets = useCallback(async () => {
     try {
-      const result = await api.catalog(new URLSearchParams({ type: "table", limit: "100", offset: "0" }));
+      const result = await api.catalog(new URLSearchParams({ view: "assets", type: "table", limit: "100", offset: "0" }));
       setQueryAssets(result.items);
     } catch (cause) {
       setQueryError(errorText(cause));
@@ -347,7 +398,7 @@ function App() {
   const refreshAnalysis = useCallback(async () => {
     try {
       const [catalog, history] = await Promise.all([
-        api.catalog(new URLSearchParams({ limit: "100", offset: "0" })),
+        api.catalog(new URLSearchParams({ view: "assets", limit: "100", offset: "0" })),
         api.analysisRuns(20),
       ]);
       setAnalysisAssets(catalog.items);
@@ -408,6 +459,28 @@ function App() {
       active = false;
     };
   }, [selectedId]);
+
+  useEffect(() => {
+    if (!selectedFileId) return;
+    const controller = new AbortController();
+    const generation = fileRequestGeneration.current + 1;
+    fileRequestGeneration.current = generation;
+    setFileDetailState("loading");
+    setFileDetailError("");
+    setSelectedFileContent(null);
+    void api.fileContent(selectedFileId, controller.signal).then((value) => {
+      if (generation !== fileRequestGeneration.current || controller.signal.aborted) return;
+      setSelectedFileContent(value);
+      setFileDetailState("ready");
+    }).catch((cause) => {
+      if (controller.signal.aborted || generation !== fileRequestGeneration.current) return;
+      setFileDetailError(errorText(cause));
+      setFileDetailState("error");
+    });
+    return () => {
+      controller.abort();
+    };
+  }, [fileReloadKey, selectedFileId]);
 
   useEffect(() => {
     if (!selected || selected.assetType !== "table" || detailTab !== "data") return;
@@ -486,6 +559,53 @@ function App() {
     setSemanticNotice("");
     setPage("detail");
   };
+
+  const openFile = (fileId: string) => {
+    setSelectedFileId(fileId);
+    setFileReloadKey((current) => current + 1);
+    setSelectedFileContent(null);
+    setFileDetailError("");
+    setFileTextLoadingKey(null);
+    setFileDetailState("loading");
+    setSelectedId(null);
+    setPage("file-detail");
+  };
+
+  const retryFile = () => {
+    setFileReloadKey((current) => current + 1);
+  };
+
+  const loadMoreFileText = useCallback(async (blockKey: string, assetId: string, offset: number) => {
+    const generation = fileRequestGeneration.current;
+    setFileTextLoadingKey(blockKey);
+    try {
+      const preview = await api.textPreview(assetId, 12_000, offset);
+      if (generation !== fileRequestGeneration.current) return;
+      setSelectedFileContent((current) => {
+        if (!current) return current;
+        let changed = false;
+        const sections = current.sections.map((section) => ({
+          ...section,
+          blocks: section.blocks.map((block, index) => {
+            if (block.type !== "text" || `${section.sectionId}:${index}` !== blockKey || block.assetId !== assetId) return block;
+            changed = true;
+            return {
+              ...block,
+              text: `${block.text}${preview.text}`,
+              nextTextOffset: preview.offset + preview.text.length,
+              truncated: preview.hasNext,
+              continuationAvailable: preview.hasNext,
+            };
+          }),
+        }));
+        return changed ? { ...current, sections } : current;
+      });
+    } catch (cause) {
+      if (generation === fileRequestGeneration.current) setFileDetailError(errorText(cause));
+    } finally {
+      if (generation === fileRequestGeneration.current) setFileTextLoadingKey(null);
+    }
+  }, []);
 
   const openSearchResult = (result: SearchResult) => {
     openAsset(result.assetId);
@@ -703,37 +823,75 @@ function App() {
     next();
   };
 
-  const saveAISettings = async (testAfterSave = false) => {
+  const aiPayload = (): { baseUrl: string; apiKey?: string; clearApiKey?: boolean; model: string; timeout: number; visionEnabled: boolean } => {
+    const payload: { baseUrl: string; apiKey?: string; clearApiKey?: boolean; model: string; timeout: number; visionEnabled: boolean } = {
+      baseUrl: aiForm.baseUrl,
+      model: aiForm.model,
+      timeout: Number(aiForm.timeout),
+      visionEnabled: aiForm.visionEnabled,
+    };
+    if (aiForm.apiKey.trim()) payload.apiKey = aiForm.apiKey;
+    if (aiForm.clearApiKey) payload.clearApiKey = true;
+    return payload;
+  };
+
+  const saveAISettings = async () => {
     setAiBusy(true);
     setAiMessage("");
     setAiMessageKind("");
     try {
-      const payload: { baseUrl: string; apiKey?: string; model: string; timeout: number; visionEnabled: boolean } = {
-        baseUrl: aiForm.baseUrl,
-        model: aiForm.model,
-        timeout: Number(aiForm.timeout),
-        visionEnabled: aiForm.visionEnabled,
-      };
-      if (aiForm.apiKey.trim()) payload.apiKey = aiForm.apiKey;
-      const saved = await api.saveAiSettings(payload);
-      setAiSettings(saved.settings);
-      setAiForm((current) => ({ ...current, baseUrl: saved.settings.baseUrl, model: saved.settings.model, timeout: String(saved.settings.timeout), visionEnabled: saved.settings.visionEnabled, apiKey: "" }));
+      const saved = await api.saveAiSettings(aiPayload());
+      setAiPersistedSettings(saved.settings);
+      setAiSettingsState("ready");
+      setAiSettingsError("");
+      setAiForm({ baseUrl: saved.settings.baseUrl, model: saved.settings.model, timeout: String(saved.settings.timeout), visionEnabled: saved.settings.visionEnabled, apiKey: "", clearApiKey: false });
+      aiDraftDirtyRef.current = false;
+      setAiDraftDirty(false);
+      setAiTestResult(null);
       await refreshHealth();
       setAiMessage("配置已保存；文本 Semantic/Analysis 可按配置使用，Vision 仅在勾选并明确选择后使用。");
       setAiMessageKind("success");
-      if (testAfterSave) {
-        const tested = await api.testAiConnection();
-        setAiSettings(tested.settings);
-        await refreshHealth();
-        setAiMessage("连接测试成功，AI 已启用。");
-        setAiMessageKind("success");
-      }
     } catch (cause) {
-      await refreshAISettings();
       setAiMessage(errorText(cause));
       setAiMessageKind("error");
     } finally {
       setAiBusy(false);
+    }
+  };
+
+  const testAISettings = async () => {
+    setAiBusy(true);
+    setAiMessage("");
+    setAiMessageKind("");
+    try {
+      const tested = await api.testAiConnection(aiPayload());
+      setAiTestResult({ kind: "success", message: tested.structuredOutputOk ? "连接成功，服务同时返回了可识别的结构化响应。" : "连接成功；基础聊天可用，但结构化 JSON 能力未确认。", structuredOutputOk: tested.structuredOutputOk });
+      setAiMessage("连接测试只验证了当前草稿，尚未保存配置。");
+      setAiMessageKind("success");
+    } catch (cause) {
+      setAiTestResult({ kind: "error", message: errorText(cause), category: cause instanceof ApiClientError ? cause.category : undefined });
+      setAiMessage("连接测试失败；当前草稿未被清空，也没有写入配置。");
+      setAiMessageKind("error");
+    } finally {
+      setAiBusy(false);
+    }
+  };
+
+  const resetProjectData = async (confirmation: string) => {
+    setResetBusy(true);
+    setResetMessage("");
+    try {
+      await api.resetWorkspace(confirmation);
+      setResetMessage("当前项目资料已清空；原始资料和 AI 配置已保留。");
+      setSelectedFileId(null);
+      setSelectedFileContent(null);
+      setFileDetailState("idle");
+      await Promise.all([refreshOverview(), refreshCatalog(), refreshIssues(), refreshTasks()]);
+      setPage("overview");
+    } catch (cause) {
+      setResetMessage(errorText(cause));
+    } finally {
+      setResetBusy(false);
     }
   };
 
@@ -747,7 +905,7 @@ function App() {
         </div>
         <nav className="main-nav" aria-label="主导航">
           <NavButton active={page === "overview"} onClick={() => setPage("overview")}>概览</NavButton>
-          <NavButton active={page === "catalog" || page === "detail"} onClick={() => setPage("catalog")}>数据目录</NavButton>
+          <NavButton active={page === "catalog" || page === "detail" || page === "file-detail"} onClick={() => setPage("catalog")}>数据目录</NavButton>
           <NavButton active={page === "search"} onClick={() => setPage("search")}>数据检索</NavButton>
           <NavButton active={page === "query"} onClick={() => setPage("query")}>数据查询</NavButton>
           <NavButton active={page === "analysis"} onClick={() => setPage("analysis")}>AI 分析</NavButton>
@@ -762,15 +920,19 @@ function App() {
       <main className="main-content">
         {error ? <div className="error-banner" role="alert"><span>{error}</span><button onClick={() => setError("")}>关闭</button></div> : null}
         {page === "overview" ? <OverviewPage overview={overview} health={health} tasks={tasks} onProcess={() => setShowProcess(true)} onNavigate={setPage} onOpenAsset={openAsset} /> : null}
-        {page === "catalog" ? <CatalogPage assets={assets} total={catalogTotal} offset={catalogOffset} loading={loading} type={catalogType} quality={catalogQuality} format={catalogFormat} query={catalogQuery} formats={overview.formats} onType={(value) => resetCatalog(() => setCatalogType(value))} onQuality={(value) => resetCatalog(() => setCatalogQuality(value))} onFormat={(value) => resetCatalog(() => setCatalogFormat(value))} onQuery={(value) => { setCatalogOffset(0); setCatalogQuery(value); }} onOffset={setCatalogOffset} onOpen={openAsset} onProcess={() => setShowProcess(true)} /> : null}
+        {page === "catalog" ? <CatalogPage files={files} total={catalogTotal} offset={catalogOffset} loading={loading} error={catalogError} onRetry={() => void refreshCatalog()} type={catalogType} quality={catalogQuality} format={catalogFormat} query={catalogQuery} formats={overview.formats} onType={(value) => resetCatalog(() => setCatalogType(value))} onQuality={(value) => resetCatalog(() => setCatalogQuality(value))} onFormat={(value) => resetCatalog(() => setCatalogFormat(value))} onQuery={(value) => { setCatalogOffset(0); setCatalogQuery(value); }} onOffset={setCatalogOffset} onOpen={openFile} onProcess={() => setShowProcess(true)} /> : null}
         {page === "search" ? <SearchPage input={searchInput} query={searchQuery} results={searchResults} total={searchTotal} offset={searchOffset} loading={searchLoading} submitted={searchSubmitted} hasAssets={overview.tableAssets + overview.textAssets > 0} type={searchType} quality={searchQuality} format={searchFormat} match={searchMatch} formats={overview.formats} onInput={setSearchInput} onSubmit={submitSearch} onType={(value) => { setSearchType(value); setSearchOffset(0); }} onQuality={(value) => { setSearchQuality(value); setSearchOffset(0); }} onFormat={(value) => { setSearchFormat(value); setSearchOffset(0); }} onMatch={(value) => { setSearchMatch(value); setSearchOffset(0); }} onOffset={(value) => { setSearchOffset(value); void refreshSearch(value); }} onOpen={openSearchResult} /> : null}
         {page === "query" ? <QueryPage assets={queryAssets} selectedIds={querySelectedIds} schema={querySchema} sql={querySql} result={queryResult} loading={queryLoading} error={queryError} onToggle={toggleQueryAsset} onSql={setQuerySql} onRun={runSql} onOpen={openAsset} /> : null}
         {page === "analysis" ? <AnalysisPage health={health} assets={analysisAssets} selectedIds={analysisSelectedIds} scope={analysisScope} question={analysisQuestion} history={analysisHistory} run={analysisRun} task={analysisTaskId ? tasks.find((item) => item.taskId === analysisTaskId) ?? null : null} loading={analysisLoading} error={analysisError} onQuestion={setAnalysisQuestion} onScope={(value) => { setAnalysisScope(value); setAnalysisRun(null); }} onToggleAsset={toggleAnalysisAsset} onStart={() => void startAnalysis()} onCancel={() => void cancelAnalysis()} onHistory={(runId) => void loadAnalysisRun(runId)} onOpenAsset={openAsset} /> : null}
-        {page === "quality" ? <QualityPage issues={issues} onUpdate={updateIssue} onOpen={openAsset} /> : null}
+        {page === "quality" ? <QualityPage issues={issues} onUpdate={updateIssue} onOpen={openAsset} onOpenFile={openFile} /> : null}
         {page === "tasks" ? <TasksPage tasks={tasks} onProcess={() => setShowProcess(true)} onOpenCatalog={() => setPage("catalog")} /> : null}
-        {page === "settings" ? <SettingsPage settings={aiSettings} form={aiForm} busy={aiBusy} message={aiMessage} messageKind={aiMessageKind} onForm={setAiForm} onSave={() => void saveAISettings(false)} onTest={() => void saveAISettings(true)} /> : null}
+        {page === "settings" ? <SettingsPage settings={aiPersistedSettings} settingsState={aiSettingsState} settingsError={aiSettingsError} form={aiForm} draftDirty={aiDraftDirty} testResult={aiTestResult} busy={aiBusy} message={aiMessage} messageKind={aiMessageKind} resetBusy={resetBusy} resetMessage={resetMessage} onForm={(value) => { aiDraftDirtyRef.current = true; setAiDraftDirty(true); setAiForm(value); setAiTestResult(null); }} onSave={() => void saveAISettings()} onTest={() => void testAISettings()} onRetrySettings={() => void refreshAISettings()} onReset={(confirmation) => void resetProjectData(confirmation)} /> : null}
         {page === "detail" && selected ? <DetailPage detail={selected} tab={detailTab} onTab={setDetailTab} tableLayer={tableLayer} onTableLayer={setTableLayer} tableOffset={tableOffset} onTableOffset={setTableOffset} tablePreview={tablePreview} textPreview={textPreview} semanticConfigured={health?.llm.enabled === true} semanticEnriching={semanticEnriching} semanticNotice={semanticNotice} onSemanticEnrich={requestSemanticEnrichment} onBack={() => setPage("catalog")} onUpdateIssue={updateIssue} /> : null}
         {page === "detail" && !selected ? <EmptyState title="正在加载资产" body="正在读取本地目录与画像信息。" /> : null}
+         {page === "file-detail" && fileDetailState === "ready" && selectedFileContent ? <FileDetailPage content={selectedFileContent} onBack={() => setPage("catalog")} onOpenAsset={openAsset} onLoadMoreText={loadMoreFileText} textLoadingKey={fileTextLoadingKey} /> : null}
+         {page === "file-detail" && fileDetailState === "idle" ? <EmptyState title="尚未选择文件" body="从数据目录打开一个源文件后，这里会展示它的主要内容。" /> : null}
+         {page === "file-detail" && fileDetailState === "loading" ? <div className="loading-box file-detail-loading">正在加载文件</div> : null}
+        {page === "file-detail" && fileDetailState === "error" ? <section className="file-detail-error"><strong>加载失败</strong><span>{fileDetailError || "无法读取文件详情。"}</span><button className="secondary-button" onClick={retryFile}>重试</button></section> : null}
         {page === "reports" ? <ReportsPage runs={reportAnalysisRuns} reports={reports} selected={selectedReport} selectedRunIds={reportRunIds} title={reportTitle} purpose={reportPurpose} task={reportTaskId ? tasks.find((item) => item.taskId === reportTaskId) ?? null : null} loading={reportLoading} error={reportError} onToggleRun={toggleReportRun} onTitle={setReportTitle} onPurpose={setReportPurpose} onStart={() => void startReport()} onCancel={() => void cancelReport()} onOpen={(id) => void loadReport(id)} onExport={(format) => void exportReport(format)} onOpenAsset={openAsset} /> : null}
       </main>
 
@@ -785,9 +947,6 @@ function NavButton({ active, onClick, children }: { active: boolean; onClick: ()
 }
 
 function aiStatusLabel(settings: AISettings | null): string {
-  if (settings?.source === "project" && settings.configured) {
-    return settings.visionEnabled ? "project config configured; Vision enabled" : "project config configured; text AI only";
-  }
   if (!settings) return "正在读取配置";
   return {
     NOT_CONFIGURED: "未配置，完全离线",
@@ -904,39 +1063,56 @@ function AnalysisResult({ run, onOpenAsset }: { run: AnalysisRun; onOpenAsset: (
   </div>;
 }
 
-function SettingsPage({ settings, form, busy, message, messageKind, onForm, onSave, onTest }: {
+function SettingsPage({ settings, settingsState, settingsError, form, draftDirty, testResult, busy, message, messageKind, resetBusy, resetMessage, onForm, onSave, onTest, onRetrySettings, onReset }: {
   settings: AISettings | null;
-  form: { baseUrl: string; apiKey: string; model: string; timeout: string; visionEnabled: boolean };
+  settingsState: "idle" | "loading" | "ready" | "error";
+  settingsError: string;
+  form: { baseUrl: string; apiKey: string; model: string; timeout: string; visionEnabled: boolean; clearApiKey: boolean };
+  draftDirty: boolean;
+  testResult: { kind: "success" | "error"; message: string; structuredOutputOk?: boolean; category?: string } | null;
   busy: boolean;
   message: string;
   messageKind: "" | "success" | "error";
-  onForm: (value: { baseUrl: string; apiKey: string; model: string; timeout: string; visionEnabled: boolean }) => void;
+  resetBusy: boolean;
+  resetMessage: string;
+  onForm: (value: { baseUrl: string; apiKey: string; model: string; timeout: string; visionEnabled: boolean; clearApiKey: boolean }) => void;
   onSave: () => void;
   onTest: () => void;
+  onRetrySettings: () => void;
+  onReset: (confirmation: string) => void;
 }) {
-  const configuredSource = settings?.source === "project"
-    ? `Project config: ${settings.configPath || "config/llm.json"}`
-    : settings?.source === "env"
-      ? "Legacy .env fallback; saving this page writes project config/llm.json."
-      : settings?.source === "ui"
-        ? "Legacy DPAPI settings are read only for compatibility migration."
-        : "No project AI configuration; the application remains offline.";
-  return <section className="page-section"><div className="page-heading"><div><div className="eyebrow">SETTINGS</div><h1>设置</h1><p className="heading-note">AI 模型是可选能力；文件扫描、提取、清洗和查询始终可以离线运行。</p></div></div>
-    <section className="panel settings-panel"><PanelTitle title="AI 模型" /><div className="settings-status">状态：<strong>{aiStatusLabel(settings)}</strong>{settings?.apiKeyConfigured ? " · API Key 已保存" : " · 未保存 API Key"}</div>
-      <p className="settings-note">{configuredSource}</p>
-      <div className="settings-form">
-        <label className="settings-field"><span className="field-label">Vision extraction</span><input type="checkbox" checked={form.visionEnabled} onChange={(event) => onForm({ ...form, visionEnabled: event.target.checked })} /><small>vision_enabled=true permits JPG/PNG and clearly scanned PDF page extraction.</small></label>
-        <p className="settings-note">Not configured: fully offline. Configured with Vision disabled: text Semantic/Analysis only. Vision enabled: visual extraction is allowed when explicitly selected.</p>
-        <label className="settings-field"><span className="field-label">Base URL</span><input value={form.baseUrl} onChange={(event) => onForm({ ...form, baseUrl: event.target.value })} placeholder="https://example.com/v1" autoComplete="url" /><small>OpenAI-compatible 服务地址；不会自动访问公共服务。</small></label>
-        <label className="settings-field"><span className="field-label">API Key</span><input type="password" value={form.apiKey} onChange={(event) => onForm({ ...form, apiKey: event.target.value })} placeholder={settings?.apiKeyConfigured ? "留空保持已保存密钥" : "输入 API Key"} autoComplete="new-password" /><small>保存到 project config/llm.json；API Key 不会回显，也不会写入 Registry、任务或日志。</small></label>
-        <label className="settings-field"><span className="field-label">Model</span><input value={form.model} onChange={(event) => onForm({ ...form, model: event.target.value })} placeholder="qwen3.6-35b-a3b" /></label>
-        <label className="settings-field"><span className="field-label">Timeout（秒）</span><input type="number" min="1" max="600" value={form.timeout} onChange={(event) => onForm({ ...form, timeout: event.target.value })} /></label>
-        <div className="settings-actions"><button className="primary-button" disabled={busy} onClick={onTest}>{busy ? "处理中..." : "测试连接"}</button><button className="secondary-button" disabled={busy} onClick={onSave}>保存</button></div>
+  return <section className="page-section settings-page"><div className="page-heading"><div><div className="eyebrow">SETTINGS</div><h1>设置</h1><p className="heading-note">AI 模型是可选能力；文件扫描、提取、清洗和查询始终可以离线运行。</p></div></div>
+    {settingsState === "loading" && !settings ? <div className="settings-load-state" role="status">正在读取 AI 配置…</div> : null}
+    {settingsState === "error" ? <div className="settings-load-error" role="alert"><span>{settingsError || "无法读取 AI 配置。"}</span><button type="button" className="secondary-button" onClick={onRetrySettings}>重试</button></div> : null}
+    <div className="settings-layout">
+      <section className="panel settings-panel"><PanelTitle title="AI 模型" /><div className="settings-status">状态：<strong>{aiStatusLabel(settings)}</strong>{settings?.apiKeyConfigured ? " · API Key 已保存" : " · 未保存 API Key"}{draftDirty ? " · 有未保存草稿" : ""}</div>
+        <div className="settings-form">
+        <div className="settings-field settings-toggle-field"><div><span className="field-label">视觉提取</span><small>开启后，JPG、PNG 和扫描 PDF 可发送给当前配置的 AI 服务处理。</small></div><button type="button" role="switch" aria-checked={form.visionEnabled} className={`settings-toggle ${form.visionEnabled ? "on" : ""}`} onClick={() => onForm({ ...form, visionEnabled: !form.visionEnabled })}><span /></button></div>
+        <p className="settings-note">未配置：完全离线。配置完成但未启用 Vision：仅允许文本 Semantic / Analysis。启用视觉提取后，仍只在用户明确选择时发送图像或扫描 PDF 页面。</p>
+        <label className="settings-field"><span className="field-label">服务地址（Base URL）</span><input value={form.baseUrl} onChange={(event) => onForm({ ...form, baseUrl: event.target.value })} placeholder="https://example.com/v1" autoComplete="url" /><small>OpenAI-compatible 服务地址；不会自动访问公共服务。</small></label>
+        <label className="settings-field"><span className="field-label">API Key</span><input type="password" value={form.apiKey} onChange={(event) => onForm({ ...form, apiKey: event.target.value, clearApiKey: false })} placeholder={settings?.apiKeyConfigured && !form.clearApiKey ? "留空保持已保存密钥" : "输入 API Key"} autoComplete="new-password" /><small>{settings?.apiKeyConfigured && !form.apiKey && !form.clearApiKey ? "已保存密钥；页面不会回显。留空保存时继续保留。" : "密钥只用于当前草稿和请求，不进入 Registry、任务或日志。"}</small>{settings?.apiKeyConfigured || form.apiKey ? <button type="button" className="text-button settings-key-clear" onClick={() => onForm({ ...form, apiKey: "", clearApiKey: true })}>{form.clearApiKey ? "已选择清除密钥" : "清除已保存密钥"}</button> : null}</label>
+        <label className="settings-field"><span className="field-label">模型名称</span><input value={form.model} onChange={(event) => onForm({ ...form, model: event.target.value })} placeholder="qwen3.6-35b-a3b" /></label>
+        <label className="settings-field"><span className="field-label">请求超时（秒）</span><input type="number" min="1" max="600" value={form.timeout} onChange={(event) => onForm({ ...form, timeout: event.target.value })} /></label>
+        <div className="settings-actions"><button type="button" className="primary-button" disabled={busy} onClick={onTest}>{busy ? "处理中..." : "测试连接"}</button><button type="button" className="secondary-button" disabled={busy} onClick={onSave}>保存配置</button></div>
         {message ? <div className={`settings-status ${messageKind}`} role="status">{message}</div> : null}
-        <p className="settings-note">保存完整项目配置不会立即调用模型；文本 Semantic/Analysis 可按配置使用，Vision 还需要勾选并在处理时明确选择。测试连接是单独的显式检查，只发送固定 synthetic 内容，不发送用户资产。</p>
-      </div>
-    </section>
+        {testResult ? <div className={`settings-status ${testResult.kind}`} role="status">{testResult.message}{testResult.category ? `（${testResult.category}）` : ""}</div> : null}
+        <p className="settings-note">测试连接只发送最小固定请求，不发送工作区内容。连接状态仅表示当前配置的服务是否返回了兼容响应。</p>
+        </div>
+      </section>
+      <aside className="settings-rail">
+        <section className="panel settings-side-card"><div className="settings-side-label">当前状态</div><strong>{aiStatusLabel(settings)}</strong><p>{settings?.apiKeyConfigured ? "项目配置中已有密钥，但密钥本身不会回显。" : "尚未保存密钥；当前仍可保持完全离线。"}</p>{draftDirty ? <span className="settings-side-badge">有未保存草稿</span> : <span className="settings-side-badge quiet">草稿与已保存配置一致</span>}</section>
+        <section className="panel settings-side-card"><div className="settings-side-label">最近测试</div>{testResult ? <><strong className={testResult.kind}>{testResult.kind === "success" ? "基础连接成功" : "连接失败"}</strong><p>{testResult.message}</p></> : <p>尚未测试当前草稿。测试不会保存配置，也不会发送工作区内容。</p>}</section>
+        <section className="panel settings-side-card"><div className="settings-side-label">离线边界</div><p>文件扫描、PDF/DOCX/XLSX 提取、目录和查询不依赖 AI。模型只在用户明确测试或触发高级能力时访问配置的地址。</p></section>
+      </aside>
+    </div>
+    <ProjectResetPanel busy={resetBusy} message={resetMessage} onReset={onReset} />
   </section>;
+}
+
+function ProjectResetPanel({ busy, message, onReset }: { busy: boolean; message: string; onReset: (confirmation: string) => void }) {
+  const [confirmation, setConfirmation] = useState("");
+  const confirmed = confirmation.trim() === "清空";
+  return <section className="panel danger-panel"><PanelTitle title="危险操作" /><div className="danger-panel-body"><strong>清空当前项目资料</strong><p>清除当前项目生成的 Registry、目录、产物、缓存和任务结果；原始资料、运行时、模型与 AI 配置会保留。正在运行的 server.log 作为活动日志可能保留，不影响清空完成。</p><label className="settings-field"><span className="field-label">请输入“清空”确认</span><input value={confirmation} onChange={(event) => setConfirmation(event.target.value)} placeholder="清空" autoComplete="off" /></label><button type="button" className="danger-button" disabled={!confirmed || busy} onClick={() => onReset(confirmation)}>{busy ? "正在清空..." : "清空当前项目资料"}</button>{message ? <div className="settings-status error" role="alert">{message}</div> : null}</div></section>;
 }
 
 function OverviewPage({ overview, health, tasks, onProcess, onNavigate, onOpenAsset }: { overview: Overview; health: HealthResponse | null; tasks: Task[]; onProcess: () => void; onNavigate: (page: Page) => void; onOpenAsset: (id: string) => void }) {
@@ -960,25 +1136,49 @@ function Metric({ label, value, tone }: { label: string; value: number; tone: "g
 
 function PanelTitle({ title, action }: { title: string; action?: React.ReactNode }) { return <div className="panel-title"><h2>{title}</h2>{action}</div>; }
 
-function CatalogPage({ assets, total, offset, loading, type, quality, format, query, formats, onType, onQuality, onFormat, onQuery, onOffset, onOpen, onProcess }: { assets: AssetSummary[]; total: number; offset: number; loading: boolean; type: "" | "table" | "text"; quality: "" | QualityStatus; format: string; query: string; formats: Record<string, number>; onType: (value: "" | "table" | "text") => void; onQuality: (value: "" | QualityStatus) => void; onFormat: (value: string) => void; onQuery: (value: string) => void; onOffset: (value: number) => void; onOpen: (id: string) => void; onProcess: () => void }) {
-  return <section className="page-section"><div className="page-heading"><div><div className="eyebrow">DATA CATALOG</div><h1>数据目录</h1><p className="heading-note">每个表格与文本资产独立保留来源、清洗和质量边界</p></div><button className="primary-button" onClick={onProcess}>处理新目录 <span>＋</span></button></div>
-    <div className="filter-panel"><div className="segmented"><button className={!type ? "selected" : ""} onClick={() => onType("")}>全部</button><button className={type === "table" ? "selected" : ""} onClick={() => onType("table")}>表格</button><button className={type === "text" ? "selected" : ""} onClick={() => onType("text")}>文本</button></div><select value={quality} onChange={(event) => onQuality(event.target.value as "" | QualityStatus)}><option value="">全部质量</option><option value="ready">可直接使用</option><option value="needs_review">需要审核</option><option value="unusable">不可用</option></select><select value={format} onChange={(event) => onFormat(event.target.value)}><option value="">全部格式</option>{Object.keys(formats).sort().map((item) => <option key={item} value={item}>{item.toUpperCase()}</option>)}</select><label className="search-box"><span>⌕</span><input value={query} onChange={(event) => onQuery(event.target.value)} placeholder="搜索资产名或来源文件" /></label></div>
-    <div className="list-meta"><span>{loading ? "读取中…" : `${number(total)} 个资产`}</span><span>只搜索来源名称与文件名</span></div>{assets.length ? <div className="asset-list">{assets.map((asset) => <AssetListItem asset={asset} key={asset.assetId} onOpen={onOpen} />)}</div> : <EmptyState title="暂无数据资产" body="处理一个本地资料目录后，表格与文本资产会出现在这里。" />}
+function CatalogPage({ files, total, offset, loading, error, onRetry, type, quality, format, query, formats, onType, onQuality, onFormat, onQuery, onOffset, onOpen, onProcess }: { files: FileSummary[]; total: number; offset: number; loading: boolean; error: string; onRetry: () => void; type: "" | "table_file" | "document" | "image" | "unprocessed" | "failed"; quality: "" | QualityStatus; format: string; query: string; formats: Record<string, number>; onType: (value: "" | "table_file" | "document" | "image" | "unprocessed" | "failed") => void; onQuality: (value: "" | QualityStatus) => void; onFormat: (value: string) => void; onQuery: (value: string) => void; onOffset: (value: number) => void; onOpen: (id: string) => void; onProcess: () => void }) {
+  return <section className="page-section"><div className="page-heading"><div><div className="eyebrow">DATA CATALOG</div><h1>数据目录</h1><p className="heading-note">一级列表按源文件展示；文件详情中查看正文、表格和精确来源。</p></div><button className="primary-button" onClick={onProcess}>处理新目录 <span>＋</span></button></div>
+    <div className="filter-panel"><div className="segmented"><button className={!type ? "selected" : ""} onClick={() => onType("")}>全部</button><button className={type === "table_file" ? "selected" : ""} onClick={() => onType("table_file")}>表格文件</button><button className={type === "document" ? "selected" : ""} onClick={() => onType("document")}>文档</button><button className={type === "image" ? "selected" : ""} onClick={() => onType("image")}>图片</button></div><select value={type === "unprocessed" || type === "failed" ? type : ""} onChange={(event) => onType(event.target.value as "" | "unprocessed" | "failed")}><option value="">处理状态</option><option value="unprocessed">未处理</option><option value="failed">失败</option></select><select value={quality} onChange={(event) => onQuality(event.target.value as "" | QualityStatus)}><option value="">全部质量</option><option value="ready">可直接使用</option><option value="needs_review">需要审核</option><option value="unusable">不可用</option></select><select value={format} onChange={(event) => onFormat(event.target.value)}><option value="">全部格式</option>{Object.keys(formats).sort().map((item) => <option key={item} value={item}>{item.toUpperCase()}</option>)}</select><label className="search-box"><span>⌕</span><input value={query} onChange={(event) => onQuery(event.target.value)} placeholder="搜索文件名或来源路径" /></label></div>
+    {error ? <div className="catalog-error" role="alert"><span>{error}</span><button type="button" className="secondary-button" onClick={onRetry}>重试</button></div> : null}<div className="list-meta"><span>{loading ? "读取中…" : `${number(total)} 个文件`}</span><span>文件是一级目录单位；内部 TableAsset/TextAsset 保留在详情页</span></div>{files.length ? <div className="asset-list">{files.map((file) => <FileListItem file={file} key={file.fileId} onOpen={onOpen} />)}</div> : error ? null : <EmptyState title="暂无文件" body="处理一个本地资料目录后，源文件会出现在这里。" />}
     {total > 25 ? <Pagination offset={offset} limit={25} total={total} onOffset={onOffset} /> : null}</section>;
 }
 
-function AssetListItem({ asset, onOpen }: { asset: AssetSummary; onOpen: (id: string) => void }) {
-  return <button className="asset-list-item" onClick={() => onOpen(asset.assetId)}><div className={`asset-type-mark ${asset.assetType}`}>{asset.assetType === "table" ? "表" : "文"}</div><div className="asset-main"><div className="asset-name">{asset.effectiveDisplayName || asset.fallbackDisplayName}</div><div className="asset-source">{asset.source.relativePath} <span>·</span> {asset.source.format?.toUpperCase() || "UNKNOWN"}</div></div><div className="asset-size">{dimensions(asset)}</div><div className={`quality-pill ${asset.qualityStatus}`}>{qualityLabel(asset.qualityStatus)}</div><div className="asset-extractor">{asset.extractor}</div><div className={`semantic-pill ${asset.semanticStatus}`}>{asset.semanticStatus === "enriched" ? "AI 已整理" : "AI 未整理"}</div><span className="chevron">›</span></button>;
+function FileListItem({ file, onOpen }: { file: FileSummary; onOpen: (id: string) => void }) {
+  const quality = file.qualityStatus as QualityStatus;
+  const processingLabel = file.processingStatus === "ready" ? "已处理" : file.processingStatus === "failed" ? "处理失败" : file.processingStatus === "unsupported" ? "暂不支持" : file.processingStatus === "processing" ? "处理中" : "未处理";
+  return <button className="asset-list-item file-list-item" onClick={() => onOpen(file.fileId)}><div className="asset-type-mark">文</div><div className="asset-main"><div className="asset-name">{file.displayName}</div><div className="asset-source">{file.relativePath} <span>·</span> {file.format?.toUpperCase() || "UNKNOWN"}</div></div><div className="file-counts">{fileSize(file.sizeBytes)} · {file.textPages} 页文本 · {file.tableAssets} 个表格</div><div className={`quality-pill ${quality}`}>{qualityLabel(quality)}</div><div className={`file-status-pill ${file.processingStatus}`}>{processingLabel}</div><div className={`semantic-pill ${file.semanticStatus}`}>{file.semanticStatus === "enriched" ? "AI 已整理" : "AI 未整理"}</div><span className="chevron">›</span></button>;
 }
 
-function QualityPage({ issues, onUpdate, onOpen }: { issues: QualityIssue[]; onUpdate: (issue: QualityIssue, status: QualityIssue["status"]) => void; onOpen: (id: string) => void }) {
-  return <section className="page-section"><div className="page-heading"><div><div className="eyebrow">QUALITY REVIEW</div><h1>质量检查</h1><p className="heading-note">这里只改变审核状态，不会修改原始或规范化数据</p><p className="quality-status-help">确认问题：认可系统判断；标记已处理：表示已在外部完成处理；暂时忽略：当前先不处理。三种操作都不会修改原始或规范化数据。</p></div><div className="open-count">{number(issues.length)} 个待审核</div></div>{issues.length ? <div className="quality-list">{issues.map((issue) => <IssueCard key={issue.issue_id} issue={issue} onUpdate={onUpdate} onOpen={onOpen} />)}</div> : <EmptyState title="暂无待处理问题" body="当前没有待审核的质量问题。" />}</section>;
+function FileDetailPage({ content, onBack, onOpenAsset, onLoadMoreText, textLoadingKey }: { content: FileContentResponse; onBack: () => void; onOpenAsset: (id: string) => void; onLoadMoreText: (blockKey: string, assetId: string, offset: number) => void; textLoadingKey: string | null }) {
+  const file = content.file;
+  const tableBlocks = content.sections.flatMap((section) => section.blocks).filter((block): block is Extract<FileContentBlock, { type: "table" }> => block.type === "table");
+  const textAssetIds = Array.from(new Set(content.sections.flatMap((section) => section.blocks).filter((block): block is Extract<FileContentBlock, { type: "text" }> => block.type === "text").map((block) => block.assetId)));
+  const candidateCount = tableBlocks.filter((block) => block.candidate).length;
+  const isImage = ["jpg", "jpeg", "png"].includes(file.format.toLowerCase());
+  const sourcePreview = content.sourcePreview;
+  const sourceImageUrl = sourcePreview?.available && sourcePreview.kind === "image" ? sourcePreview.url : null;
+  return <section className="page-section file-detail-section"><button className="back-button" onClick={onBack}>← 数据目录</button><div className="detail-heading"><div className="asset-type-mark large">文</div><div><div className="eyebrow">文件详情</div><h1>{file.displayName}</h1><div className="detail-source">{file.relativePath} · {file.format.toUpperCase()} · {fileSize(file.sizeBytes)}</div></div><div className={`quality-pill ${file.qualityStatus as QualityStatus}`}>{qualityLabel(file.qualityStatus as QualityStatus)}</div></div><div className="file-detail-grid"><section className="panel file-pages-panel"><div className="panel-title"><div><h2>文件内容</h2><span className="panel-note">按源文件顺序直接阅读有界正文与表格预览</span></div><span>{file.textPages} 页文本 · {file.tableAssets} 个表格</span></div>{sourceImageUrl ? <div className="source-image-preview"><div className="source-preview-label">原始图片</div><img src={sourceImageUrl} alt={`原始图片：${file.displayName}`} loading="lazy" /></div> : null}{isImage ? <div className="candidate-notice">检测到 {candidateCount} 个候选表格；候选结果需要结合原图和质量信息核对。</div> : candidateCount ? <div className="candidate-notice">检测到 {candidateCount} 个候选表格；候选结果需要结合原页面和质量信息核对。</div> : null}{content.truncated ? <div className="content-limit-notice">内容较长，当前页面先展示有界连续阅读预览，可按段继续加载；完整 raw / normalized 数据和 provenance 仍可从高级资产详情打开。</div> : null}{content.sections.length ? <div className="file-pages">{content.sections.map((section) => <article className="file-page" key={section.sectionId}><div className="file-page-title"><span>{section.label}</span><span className="panel-note">{section.blocks.length} 个阅读段</span></div>{sourcePreview?.available && sourcePreview.kind === "pdf_page" && section.pageNumber != null ? <details className="source-page-preview"><summary>原始页面预览</summary><img src={`${sourcePreview.url}?page=${section.pageNumber}`} alt={`${file.displayName} 第 ${section.pageNumber} 页`} loading="lazy" /></details> : null}{section.blocks.map((block, index) => block.type === "text" ? <div className="file-content-text" key={`${block.assetId}-text-${index}`}><p>{block.text || "（空文本）"}</p>{block.truncated ? <><small>文本预览已截断</small><button type="button" className="text-button continuation-button" disabled={textLoadingKey === `${section.sectionId}:${index}`} onClick={() => onLoadMoreText(`${section.sectionId}:${index}`, block.assetId, block.nextTextOffset ?? block.text.length)}>{textLoadingKey === `${section.sectionId}:${index}` ? "正在加载…" : "继续加载"}</button></> : null}</div> : <FileContentTableBlock block={block} onOpenAsset={onOpenAsset} key={`${block.assetId}-table-${index}`} />)}</article>)}</div> : <EmptyState compact title="暂无可展示内容" body="当前文件没有可用于主视图的正文或表格预览。" />}</section><aside className="panel file-side-panel"><div className="panel-title"><h2>高级资产</h2><span>{number(textAssetIds.length)} 个文本 · {number(tableBlocks.length)} 个表格</span></div>{textAssetIds.length ? <div className="file-table-list file-text-asset-list">{textAssetIds.map((assetId) => <button className="file-table-item" key={assetId} onClick={() => onOpenAsset(assetId)}><strong>高级文本详情</strong><small>查看完整资产、raw / normalized 与 provenance</small></button>)}</div> : null}{tableBlocks.length ? <div className="file-table-list">{tableBlocks.map((block) => <button className="file-table-item" key={block.assetId} onClick={() => onOpenAsset(block.assetId)}><strong>{block.displayName || "表格资产"}</strong><small>{block.candidate ? "候选表格" : "表格"} · {block.sheetName || (block.pageNumber != null ? `第 ${block.pageNumber} 页` : "文件内容")}</small></button>)}</div> : !textAssetIds.length ? <EmptyState compact title="暂无高级资产" body="该文件当前没有可打开的文本或表格资产。" /> : null}<div className="file-source-box"><h2>来源</h2><dl><dt>SHA-256</dt><dd>{file.sha256 || "—"}</dd><dt>file_id</dt><dd>{file.fileId}</dd><dt>AI 状态</dt><dd>{file.semanticStatus === "enriched" ? "已整理" : "未整理"}</dd></dl></div></aside></div></section>;
 }
 
-function IssueCard({ issue, onUpdate, onOpen }: { issue: QualityIssue; onUpdate: (issue: QualityIssue, status: QualityIssue["status"]) => void; onOpen: (id: string) => void }) {
+function FileContentTableBlock({ block, onOpenAsset }: { block: Extract<FileContentBlock, { type: "table" }>; onOpenAsset: (id: string) => void }) {
+  const rawPreview = block.rawPreview ?? (block.preview?.layer === "raw" ? block.preview : null);
+  const normalizedPreview = block.normalizedPreview ?? (block.preview?.layer === "normalized" ? block.preview : null);
+  const [layer, setLayer] = useState<"raw" | "normalized">(rawPreview ? "raw" : "normalized");
+  const preview = layer === "raw" ? rawPreview ?? normalizedPreview : normalizedPreview ?? rawPreview;
+  const showingRaw = preview?.layer === "raw";
+  const displayColumns = showingRaw && preview?.presentationColumns?.length === preview.columns.length ? preview.presentationColumns : preview?.columns ?? [];
+  const displayRows = showingRaw && preview?.headerDetected ? preview.rows.slice(1) : preview?.rows ?? [];
+  return <div className="file-content-table"><div className="file-content-table-heading"><div><strong>{block.displayName || "表格"}</strong><span className={block.candidate ? "candidate-label" : "table-label"}>{block.candidate ? "候选表格" : "表格"}</span></div><button className="text-button" onClick={() => onOpenAsset(block.assetId)}>查看高级表格详情</button></div>{rawPreview && normalizedPreview ? <div className="file-table-layer-switch" role="group" aria-label="表格视图"><button type="button" className={showingRaw ? "selected" : ""} aria-pressed={showingRaw} onClick={() => setLayer("raw")}>原始提取视图</button><button type="button" className={!showingRaw ? "selected" : ""} aria-pressed={!showingRaw} onClick={() => setLayer("normalized")}>规范化数据视图</button></div> : null}{preview ? <><div className="table-preview-caption">当前为{showingRaw ? "原始提取视图" : "规范化数据视图"}{showingRaw && preview.headerDetected ? "（首行作为表头）" : ""}</div><div className="table-preview-scroll"><table className="data-table"><thead><tr>{displayColumns.map((column, columnIndex) => <th key={`${column}-${columnIndex}`}>{column}</th>)}</tr></thead><tbody>{displayRows.map((row, rowIndex) => <tr key={rowIndex}>{preview.columns.map((column, columnIndex) => <td key={`${rowIndex}-${column}-${columnIndex}`}>{displayValue(row[column])}</td>)}</tr>)}</tbody></table></div></> : <p className="muted">当前没有可读取的表格预览，请打开高级表格详情查看技术数据。</p>}{preview?.columnsTruncated ? <small className="candidate-help">列数较多，当前只展示前 32 列；完整表格资产仍可打开查看。</small> : null}{block.candidate ? <small className="candidate-help">这是提取器检测到的候选结构，不代表已确认的正确表格。</small> : null}</div>;
+}
+
+function QualityPage({ issues, onUpdate, onOpen, onOpenFile }: { issues: QualityIssue[]; onUpdate: (issue: QualityIssue, status: QualityIssue["status"]) => void; onOpen: (id: string) => void; onOpenFile: (id: string) => void }) {
+  return <section className="page-section"><div className="page-heading"><div><div className="eyebrow">QUALITY REVIEW</div><h1>质量检查</h1><p className="heading-note">这里只改变审核状态，不会修改原始或规范化数据</p><p className="quality-status-help">确认问题：认可系统判断；标记已处理：表示已在外部完成处理；暂时忽略：当前先不处理。三种操作都不会修改原始或规范化数据。</p></div><div className="open-count">{number(issues.length)} 个待审核</div></div>{issues.length ? <div className="quality-list">{issues.map((issue) => <IssueCard key={issue.issue_id} issue={issue} onUpdate={onUpdate} onOpen={onOpen} onOpenFile={onOpenFile} />)}</div> : <EmptyState title="暂无待处理问题" body="当前没有待审核的质量问题。" />}</section>;
+}
+
+function IssueCard({ issue, onUpdate, onOpen, onOpenFile }: { issue: QualityIssue; onUpdate: (issue: QualityIssue, status: QualityIssue["status"]) => void; onOpen: (id: string) => void; onOpenFile: (id: string) => void }) {
   const source = issue.source_file || issue.effective_display_name || issue.fallback_display_name || issue.asset_id;
   const location = issue.page_number ? ` · 第 ${issue.page_number} 页` : issue.sheet_name ? ` · ${issue.sheet_name}` : "";
-  return <article className="issue-card"><div className={`severity-mark ${issue.severity}`} /> <div className="issue-content"><div className="issue-top"><span className={`severity-label ${issue.severity}`}>{severityLabel(issue.severity)}</span><button className="issue-asset" onClick={() => onOpen(issue.asset_id)}>{issue.effective_display_name || issue.fallback_display_name || issue.asset_id}</button><span className="issue-time">{formatDate(issue.created_at)}</span></div><h3>{issueTypeLabel(issue.issue_type)}</h3><p>{issueDescription(issue)}</p><div className="issue-source">来源：{source}{issue.source_format ? ` · ${issue.source_format.toUpperCase()}` : ""}{location}</div><details className="evidence"><summary>查看系统证据</summary><pre>{compactValue(issue.evidence)}</pre></details><div className="suggestion">处理建议：{suggestedActionLabel(issue.suggested_action)}</div><p className="issue-help">这些操作只改变审核状态，不会修改原始或规范化数据。</p><div className="issue-actions"><button onClick={() => onUpdate(issue, "accepted")}>确认问题</button><button onClick={() => onUpdate(issue, "resolved")}>标记已处理</button><button className="quiet" onClick={() => onUpdate(issue, "ignored")}>暂时忽略</button><button className="text-button" onClick={() => onOpen(issue.asset_id)}>查看资产</button></div></div></article>;
+  return <article className="issue-card"><div className={`severity-mark ${issue.severity}`} /> <div className="issue-content"><div className="issue-top"><span className={`severity-label ${issue.severity}`}>{severityLabel(issue.severity)}</span><button className="issue-asset" onClick={() => onOpenFile(issue.file_id || issue.asset_id)}>{issue.effective_display_name || issue.fallback_display_name || issue.asset_id}</button><span className="issue-time">{formatDate(issue.created_at)}</span></div><h3>{issueTypeLabel(issue.issue_type)}</h3><p>{issueDescription(issue)}</p><div className="issue-source">来源：{source}{issue.source_format ? ` · ${issue.source_format.toUpperCase()}` : ""}{location}</div><details className="evidence"><summary>查看系统证据</summary><pre>{compactValue(issue.evidence)}</pre></details><div className="suggestion">处理建议：{suggestedActionLabel(issue.suggested_action)}</div><p className="issue-help">这些操作只改变审核状态，不会修改原始或规范化数据。</p><div className="issue-actions"><button onClick={() => onUpdate(issue, "accepted")}>确认问题</button><button onClick={() => onUpdate(issue, "resolved")}>标记已处理</button><button className="quiet" onClick={() => onUpdate(issue, "ignored")}>暂时忽略</button><button className="text-button" onClick={() => onOpen(issue.asset_id)}>查看资产</button></div></div></article>;
 }
 
 function TasksPage({ tasks, onProcess, onOpenCatalog }: { tasks: Task[]; onProcess: () => void; onOpenCatalog: () => void }) {
@@ -1078,7 +1278,7 @@ function TextData({ detail, preview }: { detail: AssetDetail; preview: TextPrevi
 
 function ProfileView({ detail }: { detail: AssetDetail }) { const profile = detail.profile; if (!profile) return <EmptyState title="暂无画像" body="该资产尚未完成确定性数据画像。" />; const columns = Array.isArray(profile.columns) ? profile.columns as Array<Record<string, unknown>> : []; return <div className="detail-panel"><div className="data-toolbar"><div><h2>确定性画像</h2><p>画像只描述数据，不改变原始或规范化结果。</p></div></div><div className="profile-summary"><span>行 {number(Number(profile.row_count ?? profile.char_count ?? 0))}</span><span>列 {number(Number(profile.column_count ?? 0))}</span><span>空值 {number(Number(profile.null_count ?? 0))}</span><span>版本 {String(profile.profile_version ?? "—")}</span></div>{columns.length ? <div className="profile-columns">{columns.map((column) => <div className="profile-column" key={String(column.name)}><div><strong>{String(column.name)}</strong><span>{String(column.inferred_physical_type ?? "string")}</span></div><div className="profile-column-stats"><span>空值 {number(Number(column.null_count ?? 0))} · 不同值 {number(Number(column.distinct_count ?? 0))}</span><span>示例：{compactValue(column.sample_values)}</span></div></div>)}</div> : <pre className="json-preview">{JSON.stringify(profile, null, 2)}</pre>}</div>; }
 
-function DetailQuality({ detail, onUpdate }: { detail: AssetDetail; onUpdate: (issue: QualityIssue, status: QualityIssue["status"]) => void }) { return <div className="detail-panel">{detail.qualityIssues.length ? <div className="quality-list compact">{detail.qualityIssues.map((issue) => <IssueCard key={issue.issue_id} issue={issue} onUpdate={onUpdate} onOpen={() => undefined} />)}</div> : <EmptyState title="暂无质量问题" body="这个资产目前没有记录的质量问题。" />}</div>; }
+function DetailQuality({ detail, onUpdate }: { detail: AssetDetail; onUpdate: (issue: QualityIssue, status: QualityIssue["status"]) => void }) { return <div className="detail-panel">{detail.qualityIssues.length ? <div className="quality-list compact">{detail.qualityIssues.map((issue) => <IssueCard key={issue.issue_id} issue={issue} onUpdate={onUpdate} onOpen={() => undefined} onOpenFile={() => undefined} />)}</div> : <EmptyState title="暂无质量问题" body="这个资产目前没有记录的质量问题。" />}</div>; }
 
 function SourceView({ detail }: { detail: AssetDetail }) { return <div className="detail-panel"><div className="source-grid"><SourceField label="来源文件" value={detail.source.relativePath} /><SourceField label="格式" value={detail.source.format?.toUpperCase()} /><SourceField label="SHA-256" value={detail.source.sha256} wide /><SourceField label="file_id" value={detail.source.fileId} wide /><SourceField label="提取器" value={`${detail.provenance.extractor} · ${detail.provenance.extractorVersion}`} /><SourceField label="提取运行 ID" value={detail.provenance.extractionRunId} /><SourceField label="工作表 / 页面" value={[detail.provenance.sheetName, detail.provenance.pageNumber ? `第 ${detail.provenance.pageNumber} 页` : null].filter(Boolean).join(" / ") || "—"} /><SourceField label="来源范围" value={compactValue(detail.provenance.sourceRange)} wide /><SourceField label="原始结果" value={detail.artifacts.raw} wide /><SourceField label="规范化结果" value={detail.artifacts.normalized} wide /><SourceField label="数据画像" value={detail.artifacts.profile} wide /></div></div>; }
 

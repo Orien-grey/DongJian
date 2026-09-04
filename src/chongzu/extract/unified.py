@@ -25,6 +25,7 @@ from .pdf.table_runner import PDFTableExtractionSummary, extract_pdf_tables
 from .structured import StructuredExtractionSummary, extract_structured
 from .ocr.runner import OCRExtractionSummary, extract_ocr
 from .text import TextExtractionSummary, extract_text
+from .docx import DocxExtractionSummary, extract_docx
 
 
 class UnifiedExtractionError(RuntimeError):
@@ -56,6 +57,7 @@ class UnifiedExtractionSummary:
     text_chunks: int = 0
     quality_issues: int = 0
     structured_files: int = 0
+    docx_files: int = 0
     native_pdf_pages: int = 0
     ocr_pages_images: int = 0
     deferred: int = 0
@@ -64,6 +66,7 @@ class UnifiedExtractionSummary:
     wall_time_ms: float = 0.0
     route_timings: dict[str, float] = field(default_factory=dict)
     structured_summary: StructuredExtractionSummary | None = field(default=None, repr=False)
+    docx_summary: DocxExtractionSummary | None = field(default=None, repr=False)
     pdf_summary: PDFExtractionSummary | None = field(default=None, repr=False)
     pdf_table_summary: PDFTableExtractionSummary | None = field(default=None, repr=False)
     ocr_summary: OCRExtractionSummary | None = field(default=None, repr=False)
@@ -87,6 +90,7 @@ class UnifiedExtractionSummary:
             "text_chunks": self.text_chunks,
             "quality_issues": self.quality_issues,
             "structured_files": self.structured_files,
+            "docx_files": self.docx_files,
             "native_pdf_pages": self.native_pdf_pages,
             "ocr_pages_images": self.ocr_pages_images,
             "deferred": self.deferred,
@@ -164,6 +168,8 @@ def _processing_counts(registry: Registry, rows: list[dict[str, Any]]) -> tuple[
             expected = statuses.get("vision_llm") or statuses.get("ocr_rapidocr")
         elif fmt == "txt":
             expected = statuses.get("text_plain")
+        elif fmt == "docx":
+            expected = statuses.get("docx_native")
         else:
             expected = None
         if expected in {"successful", "partial"}:
@@ -233,6 +239,9 @@ def extract_unified(
     formats = {str(row.get("business_format") or "") for row in rows if row.get("support_status") == "supported"}
     summary.structured_files = sum(
         1 for row in rows if row.get("support_status") == "supported" and row.get("business_format") in {"csv", "tsv", "xls", "xlsx"}
+    )
+    summary.docx_files = sum(
+        1 for row in rows if row.get("support_status") == "supported" and row.get("business_format") == "docx"
     )
 
     route_kwargs = {
@@ -315,6 +324,12 @@ def extract_unified(
             "text", lambda: extract_text(source, **route_kwargs)
         )
         summary.route_timings["text"] = elapsed
+    if "docx" in formats:
+        check_cancel(cancel_event)
+        summary.docx_summary, elapsed = _run_route(
+            "docx", lambda: extract_docx(source, **route_kwargs)
+        )
+        summary.route_timings["docx"] = elapsed
 
     check_cancel(cancel_event)
     registry = Registry.open(registry_file, initialize=False)
@@ -331,6 +346,7 @@ def extract_unified(
     summary.reused = 0
     for stage in (
         summary.structured_summary,
+        summary.docx_summary,
         summary.pdf_summary,
         summary.pdf_table_summary,
         summary.ocr_summary,

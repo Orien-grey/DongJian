@@ -14,6 +14,7 @@ import hashlib
 import json
 import statistics
 import time
+from difflib import SequenceMatcher
 from typing import Any, Sequence
 import unicodedata
 
@@ -31,6 +32,7 @@ from chongzu.assets import (
 )
 
 from ..artifacts import matrix_frame, positional_names, write_json_atomic, write_parquet_atomic
+from ..img2table_compat import ensure_img2table_threshold_compat
 from ..models import StructuredSource
 from ..pdf.table_quality import DetectedTable
 from .rapidocr_engine import OCRBlock
@@ -138,6 +140,7 @@ def extract_tables_from_document(
 
     candidate_config = config or ImageTableConfig()
     try:
+        ensure_img2table_threshold_compat()
         image = document.images[0]
         height, width = int(image.shape[0]), int(image.shape[1])
         document.ocr_data = ocr_data_from_blocks(blocks)
@@ -175,21 +178,108 @@ def _table_rows(table: Any) -> list[list[Any]]:
     ]
 
 
+def _bbox_tuple(table: Any) -> tuple[float, float, float, float] | None:
+    bbox = getattr(table, "bbox", None)
+    try:
+        values = (float(bbox.x1), float(bbox.y1), float(bbox.x2), float(bbox.y2))
+    except (AttributeError, TypeError, ValueError):
+        return None
+    if values[2] <= values[0] or values[3] <= values[1]:
+        return None
+    return values
+
+
+def _bbox_iou(left: Any, right: Any) -> float:
+    first = _bbox_tuple(left)
+    second = _bbox_tuple(right)
+    if first is None or second is None:
+        return 0.0
+    left_edge = max(first[0], second[0])
+    top_edge = max(first[1], second[1])
+    right_edge = min(first[2], second[2])
+    bottom_edge = min(first[3], second[3])
+    intersection = max(0.0, right_edge - left_edge) * max(0.0, bottom_edge - top_edge)
+    if not intersection:
+        return 0.0
+    first_area = (first[2] - first[0]) * (first[3] - first[1])
+    second_area = (second[2] - second[0]) * (second[3] - second[1])
+    return intersection / max(1e-9, first_area + second_area - intersection)
+
+
+def _row_signature(table: Any) -> str:
+    rows = _table_rows(table)
+    return json.dumps(
+        [["" if value is None else unicodedata.normalize("NFC", str(value)).strip().casefold() for value in row] for row in rows],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+
+
+def filter_image_table_candidates(tables: Sequence[Any]) -> tuple[list[tuple[int, Any]], list[dict[str, Any]]]:
+    """Drop only high-confidence duplicate candidates, retaining source indexes.
+
+    Empty candidates are intentionally passed to ``publish_image_table`` so
+    the rejected structure still leaves a provenance-bearing quality issue.
+    Candidates without bounding boxes are never deduplicated: there is no
+    safe spatial basis for deciding that two matrices came from one region.
+    """
+
+    kept: list[tuple[int, Any]] = []
+    decisions: list[dict[str, Any]] = []
+    signatures: list[tuple[Any, str]] = []
+    for index, table in enumerate(tables):
+        signature = _row_signature(table)
+        rows = _table_rows(table)
+        has_nonempty_value = any(
+            value is not None and str(value).strip()
+            for row in rows
+            for value in row
+        )
+        duplicate_of: int | None = None
+        if has_nonempty_value:
+            for previous_table, previous_signature in signatures:
+                if _bbox_iou(previous_table, table) < 0.90:
+                    continue
+                similarity = SequenceMatcher(None, previous_signature, signature, autojunk=False).ratio()
+                if similarity >= 0.92:
+                    duplicate_of = next(
+                        (previous_index for previous_index, candidate in kept if candidate is previous_table),
+                        None,
+                    )
+                    if duplicate_of is not None:
+                        break
+        if duplicate_of is not None:
+            decisions.append(
+                {
+                    "candidate_index": index,
+                    "decision": "deduplicated",
+                    "reason": "high_overlap_high_similarity",
+                    "kept_candidate_index": duplicate_of,
+                }
+            )
+            continue
+        kept.append((index, table))
+        signatures.append((table, signature))
+    return kept, decisions
+
+
 def _table_bbox(
     table: Any,
     *,
     scale_x: float,
     scale_y: float,
 ) -> BoundingBox | None:
-    bbox = getattr(table, "bbox", None)
+    values = _bbox_tuple(table)
+    if values is None:
+        return None
     try:
         return BoundingBox(
-            float(bbox.x1) * scale_x,
-            float(bbox.y1) * scale_y,
-            float(bbox.x2) * scale_x,
-            float(bbox.y2) * scale_y,
+            values[0] * scale_x,
+            values[1] * scale_y,
+            values[2] * scale_x,
+            values[3] * scale_y,
         )
-    except (AttributeError, TypeError, ValueError):
+    except (TypeError, ValueError):
         return None
 
 
@@ -205,12 +295,14 @@ def _quality_flags(
     cell_values = [value for row in rows for value in row]
     nonempty = [value for value in cell_values if value is not None and str(value).strip()]
     flags: list[str] = []
-    if width == 1 and len(rows) >= 2:
+    if width <= 1:
         flags.append("suspicious_single_column")
-    if len(rows) == 1 and width >= 2:
+    if len(rows) <= 1:
         flags.append("suspicious_single_row")
     if len(set(widths)) > 1:
         flags.append("possible_column_shift")
+    if len(rows) >= 3 and width >= 3 and min(widths) <= max(1, width // 2):
+        flags.append("severe_raggedness")
     if cell_values and len(nonempty) < max(2, (len(cell_values) + 1) // 2):
         flags.append("sparse_ocr")
     if nonempty:
@@ -299,7 +391,12 @@ def publish_image_table(
     rows = _table_rows(table)
     width = max((len(row) for row in rows), default=0)
     candidate_label = f"image-table:{source.file_id}:page:{page_number or 1}:table:{table_index}"
-    if not rows or width == 0:
+    has_nonempty_value = any(
+        value is not None and str(value).strip()
+        for row in rows
+        for value in row
+    )
+    if not rows or width == 0 or not has_nonempty_value:
         return ImageTablePublication(
             asset=None,
             detected=None,
@@ -369,14 +466,18 @@ def publish_image_table(
             "coordinate_system": "zero-based half-open candidate matrix",
         },
         "candidate_bbox": bbox.__dict__ if bbox else None,
-        "img2table_bbox_pixels": {
-            "x1": int(getattr(getattr(table, "bbox", None), "x1", 0)),
-            "y1": int(getattr(getattr(table, "bbox", None), "y1", 0)),
-            "x2": int(getattr(getattr(table, "bbox", None), "x2", 0)),
-            "y2": int(getattr(getattr(table, "bbox", None), "y2", 0)),
-            "image_width": image_width,
-            "image_height": image_height,
-        },
+        "img2table_bbox_pixels": (
+            {
+                "x1": int(getattr(getattr(table, "bbox", None), "x1")),
+                "y1": int(getattr(getattr(table, "bbox", None), "y1")),
+                "x2": int(getattr(getattr(table, "bbox", None), "x2")),
+                "y2": int(getattr(getattr(table, "bbox", None), "y2")),
+                "image_width": image_width,
+                "image_height": image_height,
+            }
+            if _bbox_tuple(table) is not None
+            else None
+        ),
         "rows": len(rows),
         "columns": width,
         "raw_row_widths": row_widths,

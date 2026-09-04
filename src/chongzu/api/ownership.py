@@ -18,11 +18,12 @@ import sys
 import time
 from typing import Any, Iterable
 
+from chongzu import paths
 from chongzu.locking import FileLock, LockUnavailable
 
 
-SERVER_LOCK_NAME = "server.lock"
-SERVER_START_LOCK_NAME = "server.start.lock"
+SERVER_LOCK_NAME = paths.SERVER_LOCK_NAME
+SERVER_START_LOCK_NAME = paths.SERVER_START_LOCK_NAME
 SERVER_JOB_PREFIX = "Local\\ChongZu-"
 
 

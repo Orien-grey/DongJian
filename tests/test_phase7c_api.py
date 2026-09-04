@@ -92,7 +92,7 @@ def _server(tmp_path: Path, *, configured: bool = True, provider: object | None 
 
 
 def _catalog_ids(base: str) -> tuple[str, str]:
-    status, payload = _request(base, "/api/v1/catalog?limit=100")
+    status, payload = _request(base, "/api/v1/catalog?view=assets&limit=100")
     assert status == 200
     table = next(item for item in payload["items"] if item["assetType"] == "table")
     text = next(item for item in payload["items"] if item["assetType"] == "text")

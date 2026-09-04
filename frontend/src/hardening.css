@@ -14,7 +14,7 @@
 .issue-actions { flex-wrap: wrap; }
 .evidence summary { cursor: pointer; color: #68848a; }
 .evidence pre { overflow: auto; max-height: 180px; padding: 8px; margin: 6px 0 0; white-space: pre-wrap; word-break: break-word; color: #68777c; background: #f7f9f9; border: 1px solid #e8edef; border-radius: 4px; font: 10px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; }
-.settings-panel { max-width: 720px; }
+.settings-page .settings-panel { max-width: none; width: 100%; }
 .settings-form { display: grid; gap: 15px; }
 .settings-field { display: grid; gap: 7px; }
 .settings-field input { width: 100%; height: 38px; padding: 0 11px; color: #415761; border: 1px solid #cfdadd; border-radius: 5px; outline-color: #5e9ca0; font-size: 13px; }

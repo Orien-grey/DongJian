@@ -39,6 +39,8 @@ TEXT_CHUNK_CONFIG_VERSION = "text-chunk-v1"
 PDF_TABLE_CONFIG_VERSION = "pdf-table-v2"
 OCR_CONFIG_VERSION = "ocr-v2"
 TEXT_CONFIG_VERSION = "text-v1"
+DOCX_PIPELINE_VERSION = "phase-hands-on-docx-stdlib"
+DOCX_CONFIG_VERSION = "docx-stdlib-v1"
 IMAGE_TABLE_CONFIG_VERSION = "image-table-v1"
 CLEANING_PIPELINE_VERSION = "phase6-deterministic-clean-profile"
 CLEANING_CONFIG_VERSION = "clean-v1"
@@ -137,6 +139,17 @@ QUARANTINE_ROOT = WORKSPACE_ROOT / "quarantine"
 STATE_ROOT = WORKSPACE_ROOT / "state"
 LOGS_ROOT = WORKSPACE_ROOT / "logs"
 REGISTRY_PATH = STATE_ROOT / "registry.duckdb"
+
+# These files are owned by the running product lifecycle rather than by the
+# project data reset operation. Keep the names in one path contract so the
+# reset service, launchers, and diagnostics share the same safe boundary.
+SERVER_LOCK_NAME = "server.lock"
+SERVER_START_LOCK_NAME = "server.start.lock"
+SERVER_PID_NAME = "server.pid"
+ACTIVE_RUNTIME_CONTROL_FILE_NAMES = frozenset(
+    {SERVER_LOCK_NAME, SERVER_START_LOCK_NAME, SERVER_PID_NAME}
+)
+ACTIVE_RUNTIME_LOG_FILE_NAMES = frozenset({"server.log"})
 
 CORE_DIRECTORIES = {
     "project_root": PROJECT_ROOT,
