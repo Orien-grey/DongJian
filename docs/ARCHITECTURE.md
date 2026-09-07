@@ -2,7 +2,7 @@
 
 ## Product boundary
 
-ChongZu is a fully relocatable Windows x64 workbench for organizing research
+DongJian is a fully relocatable Windows x64 workbench for organizing research
 data in one local scientific project. The core has exactly two extraction
 responsibilities: tables and text. File discovery, extraction, deterministic
 normalization, semantic suggestions, persistence, and future retrieval remain
@@ -111,7 +111,7 @@ its real type is an image, not HTML.
 
 ## Extraction contracts
 
-The canonical Python models live in `src/chongzu/assets.py`; the schema mapping
+The canonical Python models live in `src/dongjian/assets.py`; the schema mapping
 is documented in [DATA_MODEL.md](DATA_MODEL.md).
 
 `TableAsset` records provenance, a zero-based half-open source row/column
@@ -119,14 +119,14 @@ range, dimensions and columns, raw/normalized/metadata artifact paths,
 extraction confidence, and quality status. Large row data is not copied into
 the catalog: Phase 3 stores it in Parquet below `workspace/artifacts/`.
 
-Phase 3 adapters are separated under `src/chongzu/extract/`: strict delimited
+Phase 3 adapters are separated under `src/dongjian/extract/`: strict delimited
 validation, Calamine workbook access, conservative table-region detection,
 atomic artifact publication, and the bounded registry-backed coordinator.
 `extract structured` first performs an incremental scan, then submits at most
 twice the bounded worker count. Workers never write DuckDB; the coordinator is
 the single catalog writer.
 
-Phase 4A keeps PDF logic in `src/chongzu/extract/pdf/`. The PyMuPDF route opens
+Phase 4A keeps PDF logic in `src/dongjian/extract/pdf/`. The PyMuPDF route opens
 one registered PDF at a time, inventories every page, extracts only native text
 blocks, and records page dimensions, rotation, image/drawing signals, block
 bounding boxes, timings, and a PDF profile. A PDF can therefore produce many
@@ -150,7 +150,7 @@ absent.
 
 ### Phase 4B native PDF table candidate
 
-`src/chongzu/extract/pdf/table_runner.py` is a second, independent coordinator.
+`src/dongjian/extract/pdf/table_runner.py` is a second, independent coordinator.
 It first ensures the Phase 4A PyMuPDF profile exists, then routes only pages
 with native-text evidence to the `img2table` candidate with `ocr=None` and
 `pdf_text_extraction=True`. `native_text` PDFs use all pages; `mixed` PDFs use
@@ -197,7 +197,7 @@ decision is inferred from candidate output.
 
 ### Phase 5A offline OCR foundation
 
-`src/chongzu/extract/ocr/` contains a lazy RapidOCR adapter and a bounded
+`src/dongjian/extract/ocr/` contains a lazy RapidOCR adapter and a bounded
 coordinator. Images are one OCR target each; a PDF first reuses/establishes the
 Phase 4A profile and sends only pages without reliable native text to OCR. A
 native page and a scanned page in one PDF therefore publish separate
@@ -218,7 +218,7 @@ Phase 5B adapter below.
 
 ### Phase 5B image/scanned-PDF dual extraction
 
-`src/chongzu/extract/ocr/rapidocr_engine.py` maps engine output immediately to
+`src/dongjian/extract/ocr/rapidocr_engine.py` maps engine output immediately to
 the stable internal `OCRBlock` contract: text, polygon bbox, confidence,
 one-based page or image provenance, block index, extractor, and version. Raw
 RapidOCR return objects do not cross into the registry, asset builders, or
@@ -248,11 +248,11 @@ status/issues only; they do not silently delete candidate tables. The profile's
 marked `heuristic_hint_not_ground_truth` in profile/metadata evidence.
 
 The extraction coordinator is `extract_unified()` and the expert command is
-`chongzu extract SOURCE`. It scans once, invokes the independent structured,
+`dongjian extract SOURCE`. It scans once, invokes the independent structured,
 native PDF, native PDF-table, OCR/image-table, and TXT routes as applicable,
 then reads current catalog counts. Each route keeps its own identity and reuse
 key, so one file failure does not cancel other files or erase an independent
-asset type. The formal user workflow is `chongzu process SOURCE`, which calls
+asset type. The formal user workflow is `dongjian process SOURCE`, which calls
 that extractor and then the Phase 6 cleaning/profile/catalog coordinator. See
 [UNIFIED_EXTRACTION.md](UNIFIED_EXTRACTION.md).
 
@@ -335,7 +335,7 @@ It cannot mutate raw or normalized data directly.
 
 ### Phase 6 cleaning, profiling, and catalog
 
-`src/chongzu/clean/` is a deterministic post-extraction layer. It reads only
+`src/dongjian/clean/` is a deterministic post-extraction layer. It reads only
 the published raw artifact, writes a new artifact below
 `workspace/artifacts/cleaning/`, and records a machine-readable manifest with
 the raw identity, cleaner/config/profile versions, column mapping, actions, and
@@ -365,14 +365,14 @@ of extraction reuse.
 
 ## Semantic provider boundary
 
-`src/chongzu/semantic/` defines `SemanticRequest`/`SemanticResponse`, the
+`src/dongjian/semantic/` defines `SemanticRequest`/`SemanticResponse`, the
 provider protocol, versioned prompts, bounded input builders, strict local
 validation, the deterministic Fake Provider, and the standard-library
 OpenAI-compatible adapter. The Fake Provider remains the default test path;
 the HTTP adapter is available only through explicit authorization (the CLI
 flag or the confirmed single-asset API action). There is no vendor-specific
 branch: the configured service remains a provider/model choice rather than a
-ChongZu dependency or contract type.
+DongJian dependency or contract type.
 
 The formal configuration source is the project-root `.env`, represented by
 `.env.example`; the tracked `config/llm.example.json` is documentation-only
@@ -391,7 +391,7 @@ status, or stable IDs. See [SEMANTIC_ENRICHMENT.md](SEMANTIC_ENRICHMENT.md).
 
 ## Embedded data catalog
 
-ChongZu uses the embedded file
+DongJian uses the embedded file
 `workspace/state/registry.duckdb`; it does not need MySQL or a database service
 process. DuckDB stores catalog metadata, provenance, policy and run state, and
 future query state. It directly queries large Parquet table artifacts.
@@ -438,7 +438,7 @@ policy status for existing file rows. See [REGISTRY.md](REGISTRY.md).
 when present, and current `text_chunks`. It normalizes queries with Unicode NFC,
 uses case-insensitive Latin matching, preserves no-space Chinese substrings,
 and treats whitespace-separated input as deterministic tokens. Ranking weights
-are centralized in `src/chongzu/search.py`; scores are ordinal local ranking
+are centralized in `src/dongjian/search.py`; scores are ordinal local ranking
 values, not semantic probabilities. Results retain file, SHA, asset, page/sheet,
 chunk, extractor, and extraction-run provenance. Each asset is capped at three
 results so a document's chunks cannot flood the result page.

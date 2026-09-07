@@ -22,12 +22,12 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-import chongzu.services.process as process_module
-from chongzu.api.app import BackendApp
-from chongzu.api.server import ChongZuHTTPServer
-from chongzu.clean import process_source
-from chongzu.semantic.fake_provider import FakeSemanticProvider
-from chongzu.services.file_insight import FileInsightPolicyStore
+import dongjian.services.process as process_module
+from dongjian.api.app import BackendApp
+from dongjian.api.server import DongJianHTTPServer
+from dongjian.clean import process_source
+from dongjian.semantic.fake_provider import FakeSemanticProvider
+from dongjian.services.file_insight import FileInsightPolicyStore
 from tests.pdf_factory import write_pdf
 from tests.xlsx_factory import write_xlsx
 
@@ -165,7 +165,7 @@ def main() -> int:
         semantic_provider=SlowFakeProvider(),
     )
     print("APP_READY", flush=True)
-    server = ChongZuHTTPServer(("127.0.0.1", args.port), app)
+    server = DongJianHTTPServer(("127.0.0.1", args.port), app)
     print(f"PORT={server.server_address[1]}", flush=True)
     print(f"STATIC_SOURCE={static_source}", flush=True)
     print(f"DYNAMIC_SOURCE={dynamic_source}", flush=True)

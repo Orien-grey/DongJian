@@ -8,11 +8,11 @@ import zipfile
 
 import pytest
 
-from chongzu.api.app import ApiError, BackendApp
-from chongzu.services.process import ProcessTaskManager, TaskAdmissionError
-import chongzu.services.reset as reset_module
-from chongzu.services.catalog import CatalogService
-from chongzu.clean import process_source
+from dongjian.api.app import ApiError, BackendApp
+from dongjian.services.process import ProcessTaskManager, TaskAdmissionError
+import dongjian.services.reset as reset_module
+from dongjian.services.catalog import CatalogService
+from dongjian.clean import process_source
 from tests.xlsx_factory import write_xlsx
 
 
@@ -177,7 +177,7 @@ def test_save_replace_failure_is_classified_without_changing_existing_config(tmp
     def fail_replace(_source: object, _target: object) -> None:
         raise OSError("synthetic replace failure")
 
-    monkeypatch.setattr("chongzu.semantic.settings.os.replace", fail_replace)
+    monkeypatch.setattr("dongjian.semantic.settings.os.replace", fail_replace)
     try:
         with pytest.raises(ApiError) as raised:
             app.handle_api(

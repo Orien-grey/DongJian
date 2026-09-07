@@ -8,10 +8,10 @@ The coordinator automatically performs an incremental scan, selects supported
 ## Operator commands
 
 ```text
-.\chongzu.cmd extract pdf "D:\Research Project" [--workers 1..4] [--force]
-.\chongzu.cmd benchmark pdf "D:\Research Project" [--workers 1..4] [--force]
-.\chongzu.cmd extract pdf-table "D:\Research Project" [--workers 1..4] [--force]
-.\chongzu.cmd benchmark pdf-table "D:\Research Project" [--workers 1..4] [--force] [--ground-truth reference.json]
+.\dongjian.cmd extract pdf "D:\Research Project" [--workers 1..4] [--force]
+.\dongjian.cmd benchmark pdf "D:\Research Project" [--workers 1..4] [--force]
+.\dongjian.cmd extract pdf-table "D:\Research Project" [--workers 1..4] [--force]
+.\dongjian.cmd benchmark pdf-table "D:\Research Project" [--workers 1..4] [--force] [--ground-truth reference.json]
 ```
 
 The explicit `pdf` and `pdf-table` subcommands remain available as expert
@@ -25,7 +25,7 @@ process pool and retain a single DuckDB writer.
 
 ## Extraction layers
 
-`src/chongzu/extract/pdf/` separates the route into:
+`src/dongjian/extract/pdf/` separates the route into:
 
 - `pymupdf_extractor.py`: opens the PDF, inventories pages, extracts text blocks,
   and creates `TextAsset`/`TextChunk` contracts;

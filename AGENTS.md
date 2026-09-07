@@ -1,13 +1,13 @@
 # Repository Instructions
 
-These instructions apply to the entire ChongZu repository.
+These instructions apply to the entire DongJian repository.
 
 Global Codex instructions remain in effect. When this file is more specific,
-follow this file for ChongZu-specific product and architecture constraints.
+follow this file for DongJian-specific product and architecture constraints.
 
 # 1. Product Mission
 
-ChongZu is a fully relocatable Windows x64 local workbench for organizing and
+DongJian is a fully relocatable Windows x64 local workbench for organizing and
 processing files from one scientific research project.
 
 Its primary processing jobs are:
@@ -23,7 +23,7 @@ depend on an LLM.
 
 The current development root is:
 
-`E:\Desktop\ChongZu`
+`E:\Desktop\DongJian`
 
 Never hard-code that absolute path into relocatable runtime behavior. Runtime
 paths must derive from the project or launcher location.
@@ -533,13 +533,13 @@ Do not turn a focused coding task into a repository review.
 
 # 17. Research and External Patterns
 
-Prefer existing ChongZu patterns first.
+Prefer existing DongJian patterns first.
 
 For a non-trivial new UX, API, architecture, workflow, or product-design
 decision, briefly study how established products, mature open-source projects,
 or official frameworks solve the same problem before inventing a new design.
 
-Prefer proven conventions when they fit ChongZu.
+Prefer proven conventions when they fit DongJian.
 
 External research must remain bounded:
 

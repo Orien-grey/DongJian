@@ -1,7 +1,7 @@
 # Data model
 
 The canonical Python contracts are frozen standard-library dataclasses in
-`src/chongzu/assets.py`. They describe real future extraction/catalog rows; the
+`src/dongjian/assets.py`. They describe real future extraction/catalog rows; the
 Architecture Refactor does not create sample business assets.
 
 ## Cardinality

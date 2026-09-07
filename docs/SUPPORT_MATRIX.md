@@ -1,6 +1,6 @@
 # 文件支持矩阵
 
-ChongZu 的一级目录单位是源文件。一个文件可以在内部产生多个独立的
+DongJian 的一级目录单位是源文件。一个文件可以在内部产生多个独立的
 `TableAsset`、`TextAsset` 和 `TextChunk`，但 Catalog 默认按一个文件展示。
 
 | 类别 | 格式 | 当前行为 |

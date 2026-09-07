@@ -5,13 +5,13 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
-from chongzu.extract.pdf.blocks import chunk_text, normalize_text
-from chongzu.extract.pdf.runner import (
+from dongjian.extract.pdf.blocks import chunk_text, normalize_text
+from dongjian.extract.pdf.runner import (
     MAX_PDF_WORKERS,
     extract_pdf,
     normalize_pdf_workers,
 )
-from chongzu.registry import Registry
+from dongjian.registry import Registry
 
 from .pdf_factory import write_pdf
 
@@ -133,7 +133,7 @@ def test_pdf_corpus_extracts_native_text_profiles_and_isolates_corruption(tmp_pa
     profile = json.loads((_workspace(tmp_path) / profile_path).read_text(encoding="utf-8"))
     assert profile["source_relative_path"] == "native.pdf"
     assert profile["pages"][0]["page_number"] == 1
-    assert profile["metadata"]["title"] == "Synthetic ChongZu PDF"
+    assert profile["metadata"]["title"] == "Synthetic DongJian PDF"
     assert profile["pages"][0]["rotation"] == 0
     rotated_profile = profile_by_name["rotated.pdf"][0]["profile"]
     assert rotated_profile["pages"][0]["rotation"] == 90
@@ -238,8 +238,8 @@ def test_pdf_reuse_force_change_and_extractor_version_invalidation(tmp_path: Pat
     assert changed.extracted == 1 and changed.reused == 0
     assert _sha256(pdf) != before
 
-    import chongzu.extract.pdf.runner as runner
-    import chongzu.extract.pdf.pymupdf_extractor as extractor
+    import dongjian.extract.pdf.runner as runner
+    import dongjian.extract.pdf.pymupdf_extractor as extractor
 
     monkeypatch.setattr(runner, "EXTRACTOR_VERSION", "test-pymupdf-version")
     monkeypatch.setattr(extractor, "EXTRACTOR_VERSION", "test-pymupdf-version")
@@ -268,7 +268,7 @@ def test_pdf_failure_isolated_and_workers_are_bounded(tmp_path: Path) -> None:
 
 
 def test_pdf_cli_force_is_forwarded(monkeypatch, capsys, tmp_path: Path) -> None:
-    import chongzu.__main__ as cli
+    import dongjian.__main__ as cli
 
     captured: dict[str, object] = {}
 

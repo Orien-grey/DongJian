@@ -15,13 +15,13 @@ from pathlib import Path
 import tempfile
 from typing import Any
 
-from chongzu import paths
-from chongzu.clean import process_source
-from chongzu.registry import Registry
-from chongzu.semantic.config import load_semantic_config
-from chongzu.semantic.input_builder import build_semantic_request
-from chongzu.semantic.openai_compatible import OpenAICompatibleProvider
-from chongzu.semantic.runner import SemanticRunner, provider_for_name
+from dongjian import paths
+from dongjian.clean import process_source
+from dongjian.registry import Registry
+from dongjian.semantic.config import load_semantic_config
+from dongjian.semantic.input_builder import build_semantic_request
+from dongjian.semantic.openai_compatible import OpenAICompatibleProvider
+from dongjian.semantic.runner import SemanticRunner, provider_for_name
 
 
 def _sha256(path: Path) -> str:

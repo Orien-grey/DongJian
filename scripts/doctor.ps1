@@ -7,7 +7,7 @@ $projectRoot = (Resolve-Path -LiteralPath (Join-Path -Path $scriptRoot -ChildPat
 
 . (Join-Path -Path $scriptRoot -ChildPath 'env.ps1')
 
-$pythonExe = $env:CHONGZU_PYTHON
+$pythonExe = $env:DONGJIAN_PYTHON
 if (-not (Test-Path -LiteralPath $pythonExe -PathType Leaf)) {
     Write-Error "Project standalone Python was not found: $pythonExe"
     exit 2
@@ -15,7 +15,7 @@ if (-not (Test-Path -LiteralPath $pythonExe -PathType Leaf)) {
 
 Push-Location -LiteralPath $projectRoot
 try {
-    & $pythonExe -m chongzu doctor
+    & $pythonExe -m dongjian doctor
     $exitCode = $LASTEXITCODE
 } finally {
     Pop-Location

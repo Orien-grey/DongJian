@@ -9,11 +9,11 @@ import time
 import pytest
 import duckdb
 
-from chongzu.clean import process_source
-from chongzu.registry import Registry
-import chongzu.search as search_module
-from chongzu.search import RetrievalReference, SearchQuery, SearchService
-from chongzu.services.sql import (
+from dongjian.clean import process_source
+from dongjian.registry import Registry
+import dongjian.search as search_module
+from dongjian.search import RetrievalReference, SearchQuery, SearchService
+from dongjian.services.sql import (
     SqlServiceError,
     SqlTimeoutError,
     SqlQueryService,
@@ -240,7 +240,7 @@ def test_sql_timeout_and_sandbox_contract(prepared, monkeypatch: pytest.MonkeyPa
     _source, registry_path, tables, _texts = prepared
     service = SqlQueryService(registry_path=registry_path, workspace_root=registry_path.parent.parent)
     table_id = str(next(item for item in tables if str(item["source_file"]).endswith("measurements.csv"))["asset_id"])
-    import chongzu.services.sql as sql_module
+    import dongjian.services.sql as sql_module
 
     monkeypatch.setattr(sql_module, "SQL_TIMEOUT_SECONDS", 0.0001)
     with pytest.raises(SqlTimeoutError):

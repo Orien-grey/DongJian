@@ -18,10 +18,10 @@ project-local portable runtime under `runtime/node-dev`. Its npm cache must be
 under `cache/npm`, and no system PATH or user cache is changed:
 
 ```powershell
-$env:Path = "E:\Desktop\ChongZu\runtime\node-dev;$env:Path"
-& E:\Desktop\ChongZu\runtime\node-dev\npm.cmd install --cache E:\Desktop\ChongZu\cache\npm --no-audit --no-fund
-& E:\Desktop\ChongZu\runtime\node-dev\npm.cmd run typecheck
-& E:\Desktop\ChongZu\runtime\node-dev\npm.cmd run build
+$env:Path = "E:\Desktop\DongJian\runtime\node-dev;$env:Path"
+& E:\Desktop\DongJian\runtime\node-dev\npm.cmd install --cache E:\Desktop\DongJian\cache\npm --no-audit --no-fund
+& E:\Desktop\DongJian\runtime\node-dev\npm.cmd run typecheck
+& E:\Desktop\DongJian\runtime\node-dev\npm.cmd run build
 ```
 
 Vite uses a relative asset base. The finished output contains only local JS,

@@ -13,13 +13,13 @@ import zipfile
 
 import pytest
 
-from chongzu.api.app import ApiError, BackendApp
-from chongzu.clean import process_source
-from chongzu.processing_policy import BusinessFormat, RegistryFileInfo, SupportStatus, plan_processing
-from chongzu.search import SearchQuery, SearchService
-from chongzu.semantic.provider import SemanticProviderError
-from chongzu.semantic.settings import ProjectAIConfigStore
-from chongzu.services.catalog import CatalogService
+from dongjian.api.app import ApiError, BackendApp
+from dongjian.clean import process_source
+from dongjian.processing_policy import BusinessFormat, RegistryFileInfo, SupportStatus, plan_processing
+from dongjian.search import SearchQuery, SearchService
+from dongjian.semantic.provider import SemanticProviderError
+from dongjian.semantic.settings import ProjectAIConfigStore
+from dongjian.services.catalog import CatalogService
 from tests.pdf_factory import write_pdf
 
 
@@ -110,7 +110,7 @@ def test_corrupt_docx_isolated_without_hiding_valid_docx(tmp_path: Path) -> None
     assert summary.extraction_failures == 1
     catalog = CatalogService(registry_path=workspace / "state" / "registry.duckdb", workspace_root=workspace)
     assert catalog.list_files()["pagination"]["total"] == 2
-    from chongzu.registry import Registry
+    from dongjian.registry import Registry
 
     registry = Registry.open(workspace / "state" / "registry.duckdb")
     try:

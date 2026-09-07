@@ -1,7 +1,7 @@
 # Phase 0 environment audit
 
 Audit time: 2026-09-01 (Asia/Shanghai)  
-Project root: `E:\Desktop\ChongZu`
+Project root: `E:\Desktop\DongJian`
 
 Planning implications in this historical Phase 0 snapshot record the plan at
 audit time. The later Architecture Refactor supersedes the Java/Tika direction:

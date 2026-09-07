@@ -11,8 +11,8 @@ from urllib.request import Request, urlopen
 
 import pytest
 
-from chongzu.api.app import BackendApp
-from chongzu.api.server import ChongZuHTTPServer
+from dongjian.api.app import BackendApp
+from dongjian.api.server import DongJianHTTPServer
 
 
 def _request(base: str, path: str, *, method: str = "GET", payload: object | None = None) -> tuple[int, dict]:
@@ -34,7 +34,7 @@ def api_server(tmp_path: Path):
     (project / "workspace" / "state").mkdir(parents=True)
     (project / "workspace" / "logs").mkdir(parents=True)
     (project / "frontend" / "dist").mkdir(parents=True)
-    (project / "frontend" / "dist" / "index.html").write_text("<!doctype html><title>ChongZu</title>", encoding="utf-8")
+    (project / "frontend" / "dist" / "index.html").write_text("<!doctype html><title>DongJian</title>", encoding="utf-8")
     source.mkdir()
     (source / "clean.csv").write_text("姓名,编号,值\n张三,001,10\n李四,002,20\n", encoding="utf-8")
     (source / "duplicate.csv").write_text("项目,项目\n甲,乙\n", encoding="utf-8")
@@ -44,7 +44,7 @@ def api_server(tmp_path: Path):
     registry_path = project / "workspace" / "state" / "registry.duckdb"
     workspace = project / "workspace"
     app = BackendApp(project_root=project, registry_path=registry_path, workspace_root=workspace, frontend_dist=project / "frontend" / "dist")
-    server = ChongZuHTTPServer(("127.0.0.1", 0), app)
+    server = DongJianHTTPServer(("127.0.0.1", 0), app)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     base = f"http://127.0.0.1:{server.server_port}"
@@ -61,12 +61,12 @@ def test_health_empty_and_static_are_local(api_server) -> None:
     base, _source = api_server
     status, payload = _request(base, "/api/v1/health")
     assert status == 200
-    assert payload["app"]["name"] == "ChongZu"
+    assert payload["app"]["name"] == "DongJian"
     assert payload["llm"]["status"] == "NOT_CONFIGURED"
     assert payload["llm"]["networkCalls"] == "disabled"
     with urlopen(f"{base}/", timeout=10) as response:
         assert response.status == 200
-        assert "ChongZu" in response.read().decode("utf-8")
+        assert "DongJian" in response.read().decode("utf-8")
 
 
 def test_bad_source_and_asset_404_use_stable_errors(api_server) -> None:

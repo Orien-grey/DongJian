@@ -4,7 +4,7 @@ from dataclasses import fields
 
 import pytest
 
-from chongzu.assets import (
+from dongjian.assets import (
     AssetQualityStatus,
     AssetType,
     ChunkProvenance,

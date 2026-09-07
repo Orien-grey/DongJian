@@ -1359,9 +1359,9 @@ function App() {
   return (
     <div className="app-shell">
       <header className="topbar">
-        <div className="brand-mark">重</div>
+        <div className="brand-mark">洞</div>
         <div className="brand-copy">
-          <div className="brand-name">ChongZu</div>
+          <div className="brand-name">洞见</div>
           <div className="brand-subtitle">科研资料工作台</div>
         </div>
         <nav className="main-nav" aria-label="主导航">
@@ -2244,7 +2244,7 @@ function SearchPage({ input, query, results, total, offset, loading, submitted, 
   return <section className="page-section"><div className="page-heading"><div><div className="eyebrow">LOCAL RETRIEVAL</div><h1>数据检索</h1><p className="heading-note">本地确定性检索：文件、表格元数据和文本段落；不使用模型改写或二次排序</p></div></div>
     <form className="search-command" onSubmit={(event) => { event.preventDefault(); onSubmit(); }}><span className="search-command-icon">⌕</span><input aria-label="搜索资料" value={input} onChange={(event) => onInput(event.target.value)} placeholder="搜索资料、表格、正文、列名……" /><button className="primary-button" type="submit">搜索</button></form>
     <div className="filter-panel search-filters"><div className="segmented"><button className={type === "all" ? "selected" : ""} onClick={() => onType("all")} type="button">全部</button><button className={type === "table" ? "selected" : ""} onClick={() => onType("table")} type="button">表格</button><button className={type === "text" ? "selected" : ""} onClick={() => onType("text")} type="button">文本</button></div><select value={quality} onChange={(event) => onQuality(event.target.value as "" | QualityStatus)}><option value="">全部质量</option><option value="ready">可直接使用</option><option value="needs_review">需要审核</option><option value="unusable">不可用</option></select><select value={format} onChange={(event) => onFormat(event.target.value)}><option value="">全部格式</option>{Object.keys(formats).sort().map((item) => <option key={item} value={item}>{item.toUpperCase()}</option>)}</select><select value={match} onChange={(event) => onMatch(event.target.value as "all" | "phrase")}><option value="all">按词匹配</option><option value="phrase">完整短语</option></select></div>
-    {loading ? <div className="loading-box search-loading"><LoadingMessage loading label="正在检索本地目录……" /></div> : !submitted ? <EmptyState title="尚未输入搜索内容" body="输入关键词后，ChongZu 会在本地目录与文本段落中检索。" /> : !query ? <EmptyState title="尚未输入搜索内容" body="搜索框为空；不会执行全库扫描。" /> : !hasAssets ? <EmptyState title="当前尚未处理任何资料" body="先处理一个本地资料目录，建立数据目录后再进行检索。" /> : !results.length ? <EmptyState title="没有找到匹配结果" body={`没有找到与“${query}”匹配的资料、列名或正文片段。`} /> : <><div className="list-meta"><span>{number(total)} 个结果</span><span>结果按本地确定性分数排序；每个资产最多显示 3 条</span></div><div className="search-results">{results.map((result) => <SearchResultItem key={result.resultId} result={result} onOpen={onOpen} />)}</div>{total > 30 ? <Pagination offset={offset} limit={30} total={total} onOffset={onOffset} /> : null}</>}
+    {loading ? <div className="loading-box search-loading"><LoadingMessage loading label="正在检索本地目录……" /></div> : !submitted ? <EmptyState title="尚未输入搜索内容" body="输入关键词后，洞见会在本地目录与文本段落中检索。" /> : !query ? <EmptyState title="尚未输入搜索内容" body="搜索框为空；不会执行全库扫描。" /> : !hasAssets ? <EmptyState title="当前尚未处理任何资料" body="先处理一个本地资料目录，建立数据目录后再进行检索。" /> : !results.length ? <EmptyState title="没有找到匹配结果" body={`没有找到与“${query}”匹配的资料、列名或正文片段。`} /> : <><div className="list-meta"><span>{number(total)} 个结果</span><span>结果按本地确定性分数排序；每个资产最多显示 3 条</span></div><div className="search-results">{results.map((result) => <SearchResultItem key={result.resultId} result={result} onOpen={onOpen} />)}</div>{total > 30 ? <Pagination offset={offset} limit={30} total={total} onOffset={onOffset} /> : null}</>}
   </section>;
 }
 

@@ -5,8 +5,8 @@ from __future__ import annotations
 import socket
 from pathlib import Path
 
-from chongzu import doctor
-from chongzu.api.lifecycle import _port_in_use
+from dongjian import doctor
+from dongjian.api.lifecycle import _port_in_use
 
 
 def test_lifecycle_bind_probe_detects_listening_port() -> None:

@@ -1,4 +1,4 @@
-from chongzu.extract.table_regions import detect_table_regions
+from dongjian.extract.table_regions import detect_table_regions
 
 
 def test_outer_blank_margin_and_two_regions() -> None:

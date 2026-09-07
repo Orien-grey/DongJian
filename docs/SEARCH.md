@@ -22,7 +22,7 @@ contract and retains the same asset/chunk/source/provenance identity.
 
 ## Backend and matching
 
-The implementation is `SearchService` in `src/chongzu/search.py`. The current
+The implementation is `SearchService` in `src/dongjian/search.py`. The current
 backend is `duckdb-live-catalog`, version `lexical-live-v1`. It reads current
 `catalog_assets`, `text_chunks`, table column metadata, bounded profile samples,
 and current semantic metadata when available. It does not create a duplicate
@@ -61,8 +61,8 @@ queries. These are observations for this corpus, not a future-scale KPI.
 
 ```text
 GET /api/v1/search?q=北京大学&type=all&format=&quality=&match=all&limit=30&offset=0
-.\chongzu.cmd search "北京大学" --type text --limit 20
-.\chongzu.cmd benchmark search
+.\dongjian.cmd search "北京大学" --type text --limit 20
+.\dongjian.cmd benchmark search
 ```
 
 The API caps query length at 512 characters, limit at 100, and offset at

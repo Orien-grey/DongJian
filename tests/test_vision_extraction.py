@@ -7,15 +7,15 @@ from typing import Any
 import pytest
 from PIL import Image
 
-from chongzu.clean import process_source
-from chongzu.extract.ocr.runner import OCRExtractionSummary
-from chongzu.extract.unified import extract_unified
-from chongzu.registry import Registry
-from chongzu.search import SearchQuery, SearchService
-from chongzu.vision.models import VisionCapabilities, VisionRequest, VisionResponse
-from chongzu.vision.provider import VisionProviderError
-from chongzu.vision.runner import extract_vision
-from chongzu.vision.validator import VisionContractError, validate_vision_payload
+from dongjian.clean import process_source
+from dongjian.extract.ocr.runner import OCRExtractionSummary
+from dongjian.extract.unified import extract_unified
+from dongjian.registry import Registry
+from dongjian.search import SearchQuery, SearchService
+from dongjian.vision.models import VisionCapabilities, VisionRequest, VisionResponse
+from dongjian.vision.provider import VisionProviderError
+from dongjian.vision.runner import extract_vision
+from dongjian.vision.validator import VisionContractError, validate_vision_payload
 from tests.fixtures.stability_factory import write_direct_docx
 from tests.xlsx_factory import write_xlsx
 
@@ -207,7 +207,7 @@ def test_vision_table_flows_through_cleaning_catalog_search_and_preview(tmp_path
     assert "sample alpha" in response.results[0].snippet
 
     # The existing catalog detail/preview services can open a Vision table.
-    from chongzu.services.catalog import CatalogService
+    from dongjian.services.catalog import CatalogService
 
     service = CatalogService(registry_path=_registry(tmp_path), workspace_root=_workspace(tmp_path))
     detail = service.asset_detail(table_id)
@@ -352,7 +352,7 @@ def test_local_mode_does_not_call_vision_and_keeps_ocr_route(monkeypatch: pytest
         def extract(self, _request):  # pragma: no cover - assertion is the test
             raise AssertionError("Vision provider called while local mode is selected")
 
-    monkeypatch.setattr("chongzu.extract.unified.extract_ocr", fake_ocr)
+    monkeypatch.setattr("dongjian.extract.unified.extract_ocr", fake_ocr)
     summary = extract_unified(
         source,
         workers=1,
@@ -380,7 +380,7 @@ def test_ai_vision_image_owns_ocr_route(monkeypatch: pytest.MonkeyPatch, tmp_pat
     def local_route_must_not_run(*_args: Any, **_kwargs: Any) -> None:
         raise AssertionError("local OCR/image-table route entered in ai_vision mode")
 
-    monkeypatch.setattr("chongzu.extract.unified.extract_ocr", local_route_must_not_run)
+    monkeypatch.setattr("dongjian.extract.unified.extract_ocr", local_route_must_not_run)
     summary = extract_unified(
         source,
         workers=1,
@@ -437,8 +437,8 @@ def test_ai_vision_keeps_structured_text_and_docx_local(tmp_path: Path) -> None:
 def test_vision_provider_request_contains_image_not_registry_identity() -> None:
     # This is a contract-level test for the provider seam; local identity is
     # attached later by the runner and cannot be selected by the model.
-    from chongzu.semantic.config import SemanticConfig
-    from chongzu.vision.openai_compatible import OpenAICompatibleVisionProvider
+    from dongjian.semantic.config import SemanticConfig
+    from dongjian.vision.openai_compatible import OpenAICompatibleVisionProvider
 
     provider = OpenAICompatibleVisionProvider(
         SemanticConfig(base_url="https://example.invalid/v1", api_key="secret", model="vision-model")

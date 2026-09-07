@@ -8,12 +8,12 @@ import time
 from xml.sax.saxutils import escape
 import zipfile
 
-from chongzu.api.app import BackendApp
-from chongzu.clean import process_source
-from chongzu.semantic.provider import SemanticProviderError
-from chongzu.services.catalog import CatalogService
-from chongzu.services.report import ReportComposer
-from chongzu.search import SearchQuery, SearchService
+from dongjian.api.app import BackendApp
+from dongjian.clean import process_source
+from dongjian.semantic.provider import SemanticProviderError
+from dongjian.services.catalog import CatalogService
+from dongjian.services.report import ReportComposer
+from dongjian.search import SearchQuery, SearchService
 from tests.pdf_factory import write_pdf
 from tests.xlsx_factory import write_xlsx
 

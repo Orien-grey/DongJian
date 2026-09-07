@@ -7,7 +7,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from chongzu import paths
+from dongjian import paths
 from tests.xlsx_factory import write_xlsx
 from tests.pdf_factory import write_pdf
 
@@ -24,9 +24,9 @@ def _portable_env(root: Path, *, clean_host: bool = False) -> dict[str, str]:
     env = os.environ.copy()
     if clean_host:
         # Keep the host PATH for cmd.exe/PowerShell discovery, but remove all
-        # inherited ChongZu and Python path hints to exercise relocation.
+        # inherited DongJian and Python path hints to exercise relocation.
         for name in list(env):
-            if name.startswith("CHONGZU_") or name in {
+            if name.startswith("DONGJIAN_") or name in {
                 "PYTHONPATH",
                 "PYTHONHOME",
                 "PYTHONNOUSERSITE",
@@ -36,18 +36,18 @@ def _portable_env(root: Path, *, clean_host: bool = False) -> dict[str, str]:
                 env.pop(name, None)
     env.update(
         {
-            "CHONGZU_PROJECT_ROOT": str(root),
-            "CHONGZU_ROOT": str(root),
-            "CHONGZU_RUNTIME_ROOT": str(runtime),
-            "CHONGZU_PYTHON": str(python_dir / "python.exe"),
-            "CHONGZU_RUNTIME_PYTHON": str(python_dir / "python.exe"),
-            "CHONGZU_DEV_PYTHON": str(runtime / "venv" / "Scripts" / "python.exe"),
-            "CHONGZU_PROJECT_PYTHON": str(python_dir / "python.exe"),
-            "CHONGZU_PACKAGES": str(packages),
-            "CHONGZU_SRC": str(root / "src"),
-            "CHONGZU_CACHE_TEMP": str(temp),
-            "CHONGZU_OCR_MODELS": str(runtime / "models" / "ocr"),
-            "CHONGZU_PROJECT_UV": str(runtime / "uv" / "uv.exe"),
+            "DONGJIAN_PROJECT_ROOT": str(root),
+            "DONGJIAN_ROOT": str(root),
+            "DONGJIAN_RUNTIME_ROOT": str(runtime),
+            "DONGJIAN_PYTHON": str(python_dir / "python.exe"),
+            "DONGJIAN_RUNTIME_PYTHON": str(python_dir / "python.exe"),
+            "DONGJIAN_DEV_PYTHON": str(runtime / "venv" / "Scripts" / "python.exe"),
+            "DONGJIAN_PROJECT_PYTHON": str(python_dir / "python.exe"),
+            "DONGJIAN_PACKAGES": str(packages),
+            "DONGJIAN_SRC": str(root / "src"),
+            "DONGJIAN_CACHE_TEMP": str(temp),
+            "DONGJIAN_OCR_MODELS": str(runtime / "models" / "ocr"),
+            "DONGJIAN_PROJECT_UV": str(runtime / "uv" / "uv.exe"),
             "PYTHONNOUSERSITE": "1",
             "PYTHONUTF8": "1",
             "PYTHONPYCACHEPREFIX": str(temp / "pycache"),
@@ -113,10 +113,10 @@ def _sha256(path: Path) -> str:
 def test_standalone_runtime_and_target_package_imports() -> None:
     env = _portable_env(paths.PROJECT_ROOT)
     code = (
-        "import json,site,sys,duckdb,polars,python_calamine,chongzu; "
+        "import json,site,sys,duckdb,polars,python_calamine,dongjian; "
         "print(json.dumps({'exe':sys.executable,'prefix':sys.prefix,'base':sys.base_prefix,"
         "'duckdb':duckdb.__file__,'polars':polars.__file__,'calamine':python_calamine.__file__,"
-        "'chongzu':chongzu.__file__,'user_site':site.ENABLE_USER_SITE}))"
+        "'dongjian':dongjian.__file__,'user_site':site.ENABLE_USER_SITE}))"
     )
     completed = subprocess.run(
         [str(paths.PYTHON_EXE), "-c", code],
@@ -133,15 +133,15 @@ def test_standalone_runtime_and_target_package_imports() -> None:
     assert paths.PACKAGES_ROOT.resolve() in Path(result["duckdb"]).resolve().parents
     assert paths.PACKAGES_ROOT.resolve() in Path(result["polars"]).resolve().parents
     assert paths.PACKAGES_ROOT.resolve() in Path(result["calamine"]).resolve().parents
-    assert paths.SRC_ROOT.resolve() in Path(result["chongzu"]).resolve().parents
+    assert paths.SRC_ROOT.resolve() in Path(result["dongjian"]).resolve().parents
     assert result["user_site"] is False
 
 
 def test_formal_launcher_does_not_depend_on_development_venv() -> None:
-    launcher = (paths.PROJECT_ROOT / "scripts" / "chongzu.ps1").read_text(encoding="utf-8").lower()
-    cmd = (paths.PROJECT_ROOT / "chongzu.cmd").read_text(encoding="utf-8").lower()
+    launcher = (paths.PROJECT_ROOT / "scripts" / "dongjian.ps1").read_text(encoding="utf-8").lower()
+    cmd = (paths.PROJECT_ROOT / "dongjian.cmd").read_text(encoding="utf-8").lower()
     assert "venv" not in launcher
-    assert "chongzu_dev_python" not in launcher
+    assert "dongjian_dev_python" not in launcher
     assert "venv" not in cmd
 
 
@@ -152,7 +152,7 @@ def test_cmd_launcher_preserves_unicode_and_space_arguments(tmp_path: Path) -> N
     sample.write_text("portable launcher", encoding="utf-8")
     before = _sha256(sample)
     completed = _run_cmd(
-        paths.PROJECT_ROOT / "chongzu.cmd",
+        paths.PROJECT_ROOT / "dongjian.cmd",
         ["scan", str(source)],
         paths.PROJECT_ROOT,
         _portable_env(paths.PROJECT_ROOT),
@@ -177,7 +177,7 @@ def _build_relocated_copy(root: Path, destination: Path) -> None:
     (destination / "config").mkdir(parents=True, exist_ok=True)
     shutil.copy2(root / "config" / "llm.example.json", destination / "config" / "llm.example.json")
     shutil.copy2(root / "config" / "llm.example.json", destination / "config" / "llm.json")
-    for filename in ("pyproject.toml", "uv.lock", "doctor.cmd", "chongzu.cmd", "start.cmd", "stop.cmd"):
+    for filename in ("pyproject.toml", "uv.lock", "doctor.cmd", "dongjian.cmd", "start.cmd", "stop.cmd"):
         shutil.copy2(root / filename, destination / filename)
     for relative in (
         "cache/uv",
@@ -222,11 +222,11 @@ def test_relocated_copy_reanchors_runtime_registry_and_cache() -> None:
         (source / "note file.txt").write_text("moved", encoding="utf-8")
         (source / "renamed.download").write_bytes(b"%PDF-1.7\nportable")
         source_file_hashes = {_sha256(path) for path in source.iterdir()}
-        scan = _run_cmd(destination / "chongzu.cmd", ["scan", str(source)], destination, clean_env)
+        scan = _run_cmd(destination / "dongjian.cmd", ["scan", str(source)], destination, clean_env)
         assert scan.returncode == 0, scan.stdout + scan.stderr
         assert "Discovered: 2" in scan.stdout
         assert "Hashed: 2" in scan.stdout
-        summary = _run_cmd(destination / "chongzu.cmd", ["registry", "summary"], destination, clean_env)
+        summary = _run_cmd(destination / "dongjian.cmd", ["registry", "summary"], destination, clean_env)
         assert summary.returncode == 0, summary.stdout + summary.stderr
         summary_data = json.loads(summary.stdout)
         assert str(destination).lower() in summary_data["source_root"].lower()
@@ -252,7 +252,7 @@ def test_relocated_copy_reanchors_runtime_registry_and_cache() -> None:
         )
         structured_hashes = {_sha256(path) for path in structured_source.iterdir()}
         extraction = _run_cmd(
-            destination / "chongzu.cmd",
+            destination / "dongjian.cmd",
             ["extract", "structured", str(structured_source), "--workers", "2"],
             destination,
             clean_env,
@@ -262,7 +262,7 @@ def test_relocated_copy_reanchors_runtime_registry_and_cache() -> None:
         assert "Tables produced: 2" in extraction.stdout
         assert structured_hashes == {_sha256(path) for path in structured_source.iterdir()}
         catalog = _run_cmd(
-            destination / "chongzu.cmd",
+            destination / "dongjian.cmd",
             ["registry", "summary", "--source", str(structured_source)],
             destination,
             clean_env,
@@ -277,7 +277,7 @@ def test_relocated_copy_reanchors_runtime_registry_and_cache() -> None:
         write_pdf(pdf_source / "native.pdf", [{"texts": [(72, 72, "relocated native text")]}])
         pdf_hashes = {_sha256(path) for path in pdf_source.iterdir()}
         pdf_extraction = _run_cmd(
-            destination / "chongzu.cmd",
+            destination / "dongjian.cmd",
             ["extract", "pdf", str(pdf_source)],
             destination,
             clean_env,
@@ -287,7 +287,7 @@ def test_relocated_copy_reanchors_runtime_registry_and_cache() -> None:
         assert "Text assets produced: 1" in pdf_extraction.stdout
         assert pdf_hashes == {_sha256(path) for path in pdf_source.iterdir()}
         pdf_catalog = _run_cmd(
-            destination / "chongzu.cmd",
+            destination / "dongjian.cmd",
             ["registry", "summary", "--source", str(pdf_source)],
             destination,
             clean_env,
@@ -316,7 +316,7 @@ def test_relocated_copy_reanchors_runtime_registry_and_cache() -> None:
         write_pdf(table_pdf, [table_pdf_spec])
         table_hash = _sha256(table_pdf)
         table_extraction = _run_cmd(
-            destination / "chongzu.cmd",
+            destination / "dongjian.cmd",
             ["benchmark", "pdf-table", str(table_source), "--workers", "1", "--force"],
             destination,
             clean_env,
@@ -336,7 +336,7 @@ def test_relocated_copy_reanchors_runtime_registry_and_cache() -> None:
         image.save(ocr_image)
         ocr_hash = _sha256(ocr_image)
         ocr_extraction = _run_cmd(
-            destination / "chongzu.cmd",
+            destination / "dongjian.cmd",
             ["extract", "ocr", str(ocr_source), "--workers", "1", "--force"],
             destination,
             clean_env,
@@ -397,7 +397,7 @@ def test_relocated_copy_reanchors_runtime_registry_and_cache() -> None:
             for path in unified_source.iterdir()
         }
         unified_extraction = _run_cmd(
-            destination / "chongzu.cmd",
+            destination / "dongjian.cmd",
             ["extract", str(unified_source), "--workers", "1", "--force"],
             destination,
             clean_env,
@@ -415,7 +415,7 @@ def test_relocated_copy_reanchors_runtime_registry_and_cache() -> None:
             for path in unified_source.iterdir()
         }
         unified_catalog = _run_cmd(
-            destination / "chongzu.cmd",
+            destination / "dongjian.cmd",
             ["registry", "summary", "--source", str(unified_source)],
             destination,
             clean_env,
@@ -426,7 +426,7 @@ def test_relocated_copy_reanchors_runtime_registry_and_cache() -> None:
         assert unified_catalog_data["catalog"]["text_assets"] >= 5
 
         unified_process = _run_cmd(
-            destination / "chongzu.cmd",
+            destination / "dongjian.cmd",
             ["process", str(unified_source), "--workers", "1"],
             destination,
             clean_env,
@@ -442,7 +442,7 @@ def test_relocated_copy_reanchors_runtime_registry_and_cache() -> None:
         }
 
         catalog_summary = _run_cmd(
-            destination / "chongzu.cmd",
+            destination / "dongjian.cmd",
             ["catalog", "summary", "--source", str(unified_source)],
             destination,
             clean_env,
@@ -453,7 +453,7 @@ def test_relocated_copy_reanchors_runtime_registry_and_cache() -> None:
         assert "Semantic pending:" in catalog_summary.stdout
 
         catalog_table_list = _run_cmd(
-            destination / "chongzu.cmd",
+            destination / "dongjian.cmd",
             ["catalog", "list", "--source", str(unified_source), "--type", "table", "--limit", "1"],
             destination,
             clean_env,
@@ -462,7 +462,7 @@ def test_relocated_copy_reanchors_runtime_registry_and_cache() -> None:
         table_rows = json.loads(catalog_table_list.stdout)
         assert len(table_rows) == 1
         table_show = _run_cmd(
-            destination / "chongzu.cmd",
+            destination / "dongjian.cmd",
             ["catalog", "show", table_rows[0]["asset_id"], "--rows", "2"],
             destination,
             clean_env,
@@ -472,7 +472,7 @@ def test_relocated_copy_reanchors_runtime_registry_and_cache() -> None:
         assert len(table_payload["preview"]) <= 2
         assert table_payload["asset"]["asset_type"] == "table"
         semantic_status = _run_cmd(
-            destination / "chongzu.cmd",
+            destination / "dongjian.cmd",
             ["semantic", "status"],
             destination,
             clean_env,
@@ -480,7 +480,7 @@ def test_relocated_copy_reanchors_runtime_registry_and_cache() -> None:
         assert semantic_status.returncode == 0, semantic_status.stdout + semantic_status.stderr
         assert "LLM_STATUS = NOT_CONFIGURED" in semantic_status.stdout
         fake_semantic = _run_cmd(
-            destination / "chongzu.cmd",
+            destination / "dongjian.cmd",
             ["semantic", "enrich", "--provider", "fake", "--asset", table_rows[0]["asset_id"]],
             destination,
             clean_env,
@@ -488,7 +488,7 @@ def test_relocated_copy_reanchors_runtime_registry_and_cache() -> None:
         assert fake_semantic.returncode == 0, fake_semantic.stdout + fake_semantic.stderr
         assert "Enriched: 1" in fake_semantic.stdout
         semantic_show = _run_cmd(
-            destination / "chongzu.cmd",
+            destination / "dongjian.cmd",
             ["catalog", "show", table_rows[0]["asset_id"], "--rows", "2"],
             destination,
             clean_env,
@@ -499,7 +499,7 @@ def test_relocated_copy_reanchors_runtime_registry_and_cache() -> None:
         assert semantic_payload["asset"]["effective_display_name"].startswith("Fake |")
 
         catalog_text_list = _run_cmd(
-            destination / "chongzu.cmd",
+            destination / "dongjian.cmd",
             ["catalog", "list", "--source", str(unified_source), "--type", "text", "--limit", "1"],
             destination,
             clean_env,
@@ -508,7 +508,7 @@ def test_relocated_copy_reanchors_runtime_registry_and_cache() -> None:
         text_rows = json.loads(catalog_text_list.stdout)
         assert len(text_rows) == 1
         text_show = _run_cmd(
-            destination / "chongzu.cmd",
+            destination / "dongjian.cmd",
             ["catalog", "show", text_rows[0]["asset_id"], "--chars", "80"],
             destination,
             clean_env,

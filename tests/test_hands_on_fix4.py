@@ -16,12 +16,12 @@ from urllib.request import Request, urlopen
 
 import pytest
 
-from chongzu.api.app import BackendApp
-from chongzu.api.lifecycle import stop_server
-from chongzu.api.server import ChongZuHTTPServer
-from chongzu.clean import process_source
-from chongzu import paths
-from chongzu.semantic.settings import ProjectAIConfigStore, load_runtime_ai_settings
+from dongjian.api.app import BackendApp
+from dongjian.api.lifecycle import stop_server
+from dongjian.api.server import DongJianHTTPServer
+from dongjian.clean import process_source
+from dongjian import paths
+from dongjian.semantic.settings import ProjectAIConfigStore, load_runtime_ai_settings
 from tests.pdf_factory import write_pdf
 
 
@@ -52,7 +52,7 @@ def _free_port() -> int:
 def _make_project(tmp_path: Path) -> Path:
     project = tmp_path / "project"
     (project / "frontend" / "dist").mkdir(parents=True)
-    (project / "frontend" / "dist" / "index.html").write_text("<!doctype html><title>ChongZu</title>", encoding="utf-8")
+    (project / "frontend" / "dist" / "index.html").write_text("<!doctype html><title>DongJian</title>", encoding="utf-8")
     config = project / "config" / "llm.json"
     config.parent.mkdir(parents=True)
     config.write_text(
@@ -80,7 +80,7 @@ def _threaded_server(project: Path):
         workspace_root=workspace,
         frontend_dist=project / "frontend" / "dist",
     )
-    server = ChongZuHTTPServer(("127.0.0.1", 0), app)
+    server = DongJianHTTPServer(("127.0.0.1", 0), app)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
@@ -116,7 +116,7 @@ def _start_bundled_server(project: Path, port: int, monkeypatch: pytest.MonkeyPa
             item for item in (str(repo / "src"), str(repo / "runtime" / "packages"), os.environ.get("PYTHONPATH", "")) if item
         ),
     )
-    monkeypatch.setenv("CHONGZU_PROJECT_ROOT", str(project))
+    monkeypatch.setenv("DONGJIAN_PROJECT_ROOT", str(project))
     monkeypatch.delenv("VIRTUAL_ENV", raising=False)
     monkeypatch.delenv("PYTHONHOME", raising=False)
     monkeypatch.setenv("PYTHONNOUSERSITE", "1")
@@ -128,7 +128,7 @@ def _start_bundled_server(project: Path, port: int, monkeypatch: pytest.MonkeyPa
         [
             str(executable),
             "-m",
-            "chongzu.api.lifecycle",
+            "dongjian.api.lifecycle",
             "start",
             "--project-root",
             str(project),
@@ -348,6 +348,6 @@ def test_fix4_frontend_presentation_settings_and_runtime_contracts() -> None:
 
 @pytest.mark.parametrize("name", ("server.lock", "server.start.lock", "server.pid"))
 def test_runtime_control_names_are_centralized_and_excluded_from_reset(name: str) -> None:
-    from chongzu import paths
+    from dongjian import paths
 
     assert name in paths.ACTIVE_RUNTIME_CONTROL_FILE_NAMES

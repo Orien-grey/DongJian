@@ -5,10 +5,10 @@ from pathlib import Path
 
 import pytest
 
-from chongzu.api.app import ApiError, BackendApp
-from chongzu.clean import process_source
-from chongzu.services.analysis import AnalysisService
-from chongzu.services.sql import SqlServiceError
+from dongjian.api.app import ApiError, BackendApp
+from dongjian.clean import process_source
+from dongjian.services.analysis import AnalysisService
+from dongjian.services.sql import SqlServiceError
 
 
 def _prepare(tmp_path: Path) -> tuple[Path, Path]:
@@ -27,7 +27,7 @@ def _prepare(tmp_path: Path) -> tuple[Path, Path]:
 
 
 def _asset_ids(workspace: Path) -> tuple[str, str]:
-    from chongzu.registry import Registry
+    from dongjian.registry import Registry
 
     registry = Registry.open(workspace / "state/registry.duckdb")
     try:

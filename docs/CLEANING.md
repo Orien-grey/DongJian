@@ -103,8 +103,8 @@ cleaner produces `cleaning_status=failed` and a `cleaning_failed` issue in the
 Catalog while leaving raw extraction untouched; other assets continue.
 
 ```text
-.\chongzu.cmd process "D:\Research Data\Project" --workers 2
-.\chongzu.cmd benchmark cleaning "D:\Research Data\Project"
+.\dongjian.cmd process "D:\Research Data\Project" --workers 2
+.\dongjian.cmd benchmark cleaning "D:\Research Data\Project"
 ```
 
 The benchmark reports asset counts, rows/chars, cleaned/reused counts,

@@ -19,30 +19,30 @@ import time
 
 import pytest
 
-import chongzu.extract.pdf.table_runner as table_runner
-import chongzu.registry as registry_module
-import chongzu.services.process as process_service
-from chongzu.api.app import ApiError, BackendApp
-from chongzu.api.lifecycle import stop_server
-from chongzu.api.ownership import (
+import dongjian.extract.pdf.table_runner as table_runner
+import dongjian.registry as registry_module
+import dongjian.services.process as process_service
+from dongjian.api.app import ApiError, BackendApp
+from dongjian.api.lifecycle import stop_server
+from dongjian.api.ownership import (
     acquire_server_lock,
     command_fingerprint,
     job_name,
     process_identity,
     project_root_fingerprint,
 )
-from chongzu.extract.pdf.runner import extract_pdf
-from chongzu.extract.pdf.table_runner import extract_pdf_tables
-from chongzu.extract.unified import UnifiedExtractionSummary
-from chongzu.clean.models import CleaningSummary
-from chongzu.locking import LockUnavailable
-from chongzu.registry import Registry, RegistryError
-from chongzu.search import SearchQuery
-from chongzu.semantic.models import SemanticRequest, SemanticResponse
-from chongzu.semantic.provider import SemanticProviderError
-from chongzu.semantic.settings import AISettingsStore, load_runtime_ai_settings
-from chongzu.services.process import ProcessTask, ProcessTaskManager
-from chongzu.worker_runtime import configure_hidden_worker_executable
+from dongjian.extract.pdf.runner import extract_pdf
+from dongjian.extract.pdf.table_runner import extract_pdf_tables
+from dongjian.extract.unified import UnifiedExtractionSummary
+from dongjian.clean.models import CleaningSummary
+from dongjian.locking import LockUnavailable
+from dongjian.registry import Registry, RegistryError
+from dongjian.search import SearchQuery
+from dongjian.semantic.models import SemanticRequest, SemanticResponse
+from dongjian.semantic.provider import SemanticProviderError
+from dongjian.semantic.settings import AISettingsStore, load_runtime_ai_settings
+from dongjian.services.process import ProcessTask, ProcessTaskManager
+from dongjian.worker_runtime import configure_hidden_worker_executable
 
 from .pdf_factory import write_pdf
 
@@ -136,7 +136,7 @@ def test_second_server_instance_is_blocked_by_os_lifetime_lock(tmp_path: Path) -
     child_code = (
         "import sys, time\n"
         "from pathlib import Path\n"
-        "from chongzu.api.ownership import acquire_server_lock\n"
+        "from dongjian.api.ownership import acquire_server_lock\n"
         "project = Path(sys.argv[1])\n"
         "ready = Path(sys.argv[2])\n"
         "release = Path(sys.argv[3])\n"
@@ -285,7 +285,7 @@ def test_api_maps_registry_configuration_conflict_to_busy(
 
 @pytest.mark.skipif(os.name != "nt", reason="production worker executable contract is Windows-only")
 def test_windows_workers_use_bundled_windowless_python() -> None:
-    executable = Path(__import__("chongzu.paths", fromlist=["PYTHONW_EXE"]).PYTHONW_EXE).resolve()
+    executable = Path(__import__("dongjian.paths", fromlist=["PYTHONW_EXE"]).PYTHONW_EXE).resolve()
     if not executable.is_file():
         pytest.skip("bundled pythonw.exe is not provisioned in this development checkout")
     from multiprocessing.spawn import get_executable, set_executable
@@ -494,7 +494,7 @@ def test_ai_settings_state_machine_and_dpapi_secret_boundary(tmp_path: Path) -> 
         assert tested.payload["settings"]["status"] == "CONFIGURED"
         assert tested.payload["settings"]["enabled"] is True
         assert len(provider.requests) == 1
-        assert provider.requests[0].asset_id == "chongzu-settings-connection-test"
+        assert provider.requests[0].asset_id == "dongjian-settings-connection-test"
         assert secret not in json.dumps(provider.requests[0].payload, ensure_ascii=False)
 
         changed = app.handle_api(

@@ -9,8 +9,8 @@ image/OCR, semantic/LLM, search, or UI work.
 ## Operator contract
 
 ```text
-.\chongzu.cmd extract structured "D:\Research Project" [--workers 1..8] [--force]
-.\chongzu.cmd benchmark structured "D:\Research Project" [--workers 1..8] [--force]
+.\dongjian.cmd extract structured "D:\Research Project" [--workers 1..8] [--force]
+.\dongjian.cmd benchmark structured "D:\Research Project" [--workers 1..8] [--force]
 ```
 
 The command automatically performs an incremental Phase 2 scan first. Scan

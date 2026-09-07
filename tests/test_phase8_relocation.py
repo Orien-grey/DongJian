@@ -11,7 +11,7 @@ import time
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
-from chongzu import paths
+from dongjian import paths
 from tests.pdf_factory import write_pdf
 from tests.test_portable_runtime import _build_relocated_copy, _portable_env
 from tests.xlsx_factory import write_xlsx
@@ -84,7 +84,7 @@ def test_moved_project_start_process_catalog_stop() -> None:
         state = json.loads((destination / "workspace" / "state" / "server.pid").read_text(encoding="utf-8"))
         base = f"http://127.0.0.1:{state['port']}"
         health = _json_request(base, "/api/v1/health")
-        assert health["app"]["name"] == "ChongZu"
+        assert health["app"]["name"] == "DongJian"
         assert health["llm"]["status"] == "NOT_CONFIGURED"
 
         queued = _json_request(base, "/api/v1/process", method="POST", payload={"source": str(source)})

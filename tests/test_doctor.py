@@ -2,7 +2,7 @@ import os
 import subprocess
 from pathlib import Path
 
-from chongzu import doctor, paths
+from dongjian import doctor, paths
 
 
 def test_doctor_passes_in_project_environment() -> None:
@@ -26,7 +26,7 @@ def test_phase_one_heavy_tools_are_nonfatal_information() -> None:
 
 
 def test_llm_configuration_is_optional() -> None:
-    from chongzu.semantic.config import load_semantic_config
+    from dongjian.semantic.config import load_semantic_config
 
     report = doctor.run_checks()
     checks = [check for check in report.checks if check.name == "LLM STATUS"]
@@ -41,10 +41,10 @@ def test_portable_doctor_passes_with_standalone_python() -> None:
     env = os.environ.copy()
     env.update(
         {
-            "CHONGZU_PROJECT_ROOT": str(root),
-            "CHONGZU_ROOT": str(root),
-            "CHONGZU_CACHE_TEMP": str(paths.TEMP_ROOT),
-            "CHONGZU_OCR_MODELS": str(paths.OCR_MODELS_ROOT),
+            "DONGJIAN_PROJECT_ROOT": str(root),
+            "DONGJIAN_ROOT": str(root),
+            "DONGJIAN_CACHE_TEMP": str(paths.TEMP_ROOT),
+            "DONGJIAN_OCR_MODELS": str(paths.OCR_MODELS_ROOT),
             "PYTHONNOUSERSITE": "1",
             "PYTHONPATH": os.pathsep.join((str(paths.SRC_ROOT), str(paths.PACKAGES_ROOT))),
             "PYTHONPYCACHEPREFIX": str(paths.PYTHON_BYTECODE_CACHE),
@@ -60,7 +60,7 @@ def test_portable_doctor_passes_with_standalone_python() -> None:
     env.pop("VIRTUAL_ENV", None)
     env.pop("PYTHONHOME", None)
     completed = subprocess.run(
-        [str(paths.PYTHON_EXE), "-m", "chongzu", "doctor"],
+        [str(paths.PYTHON_EXE), "-m", "dongjian", "doctor"],
         cwd=str(root),
         env=env,
         capture_output=True,

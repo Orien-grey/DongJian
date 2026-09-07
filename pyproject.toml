@@ -3,14 +3,14 @@ requires = ["setuptools==80.10.2"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "chongzu"
+name = "dongjian"
 version = "0.1.0.dev0"
 description = "Relocatable Windows research table and text organization workbench"
 readme = "README.md"
 requires-python = ">=3.11,<3.12"
 license = { text = "Proprietary - project-specific research tooling" }
 authors = [
-  { name = "ChongZu project" },
+  { name = "DongJian project" },
 ]
 dependencies = [
     "duckdb==1.5.5",

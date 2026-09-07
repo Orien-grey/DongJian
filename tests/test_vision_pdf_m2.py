@@ -10,13 +10,13 @@ import pymupdf
 import pytest
 from PIL import Image
 
-from chongzu.clean import process_source
-from chongzu.extract.unified import extract_unified
-from chongzu.registry import Registry
-from chongzu.search import SearchQuery, SearchService
-from chongzu.vision.models import VisionCapabilities, VisionRequest, VisionResponse
-from chongzu.vision.pdf_runner import extract_vision_pdf
-from chongzu.vision.provider import VisionProviderError
+from dongjian.clean import process_source
+from dongjian.extract.unified import extract_unified
+from dongjian.registry import Registry
+from dongjian.search import SearchQuery, SearchService
+from dongjian.vision.models import VisionCapabilities, VisionRequest, VisionResponse
+from dongjian.vision.pdf_runner import extract_vision_pdf
+from dongjian.vision.provider import VisionProviderError
 
 
 def _workspace(tmp_path: Path) -> Path:
@@ -116,7 +116,7 @@ def test_scanned_pdf_one_page_renders_and_publishes_existing_assets(monkeypatch:
     def local_route_must_not_run(*_args: Any, **_kwargs: Any) -> None:
         raise AssertionError("local OCR route entered in ai_vision mode")
 
-    monkeypatch.setattr("chongzu.extract.unified.extract_ocr", local_route_must_not_run)
+    monkeypatch.setattr("dongjian.extract.unified.extract_ocr", local_route_must_not_run)
 
     def progress(_stage: str, _value: float, **kwargs: Any) -> None:
         if kwargs.get("current_substage"):
@@ -233,11 +233,11 @@ def test_native_pdf_does_not_call_vision_and_local_mode_keeps_pdf_fallback(monke
 
     def fake_ocr(_source: Path, **kwargs: Any):
         calls.append(bool(kwargs["include_pdfs"]))
-        from chongzu.extract.ocr.runner import OCRExtractionSummary
+        from dongjian.extract.ocr.runner import OCRExtractionSummary
 
         return OCRExtractionSummary(source_root=str(source.resolve()))
 
-    monkeypatch.setattr("chongzu.extract.unified.extract_ocr", fake_ocr)
+    monkeypatch.setattr("dongjian.extract.unified.extract_ocr", fake_ocr)
     fallback = extract_unified(
         source,
         workers=1,
@@ -354,7 +354,7 @@ def test_pdf_vision_assets_flow_through_clean_catalog_search_and_detail(tmp_path
     )
     assert search.results and search.results[0].page_number == 1
     vision_text_id = search.results[0].asset_id
-    from chongzu.services.catalog import CatalogService
+    from dongjian.services.catalog import CatalogService
 
     catalog = CatalogService(registry_path=_registry(tmp_path), workspace_root=_workspace(tmp_path))
     detail = catalog.asset_detail(vision_text_id)

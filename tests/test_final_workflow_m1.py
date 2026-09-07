@@ -9,14 +9,14 @@ import xml.etree.ElementTree as ET
 import pytest
 from PIL import Image
 
-from chongzu.clean import process_source
-from chongzu.extract.docx import _table_presentation
-from chongzu.extract.ocr.runner import MAX_OCR_PAGE_PIXELS, _guard_page_pixels
-from chongzu.registry import Registry
-from chongzu.semantic.models import SemanticResponse
-from chongzu.services.catalog import CatalogService
-from chongzu.services.file_insight import FileInsightError, FileInsightQueueStore, FileInsightService
-from chongzu.search import SearchQuery, SearchService
+from dongjian.clean import process_source
+from dongjian.extract.docx import _table_presentation
+from dongjian.extract.ocr.runner import MAX_OCR_PAGE_PIXELS, _guard_page_pixels
+from dongjian.registry import Registry
+from dongjian.semantic.models import SemanticResponse
+from dongjian.services.catalog import CatalogService
+from dongjian.services.file_insight import FileInsightError, FileInsightQueueStore, FileInsightService
+from dongjian.search import SearchQuery, SearchService
 
 from tests.pdf_factory import write_pdf
 from tests.xlsx_factory import write_xlsx

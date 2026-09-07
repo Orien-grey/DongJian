@@ -2,7 +2,7 @@ import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 
 const localOnlyRuntimeUrls: Plugin = {
-  name: "chongzu-local-only-runtime-urls",
+  name: "dongjian-local-only-runtime-urls",
   generateBundle(_options, bundle) {
     for (const output of Object.values(bundle)) {
       if (output.type === "chunk") {

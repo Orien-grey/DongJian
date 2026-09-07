@@ -13,12 +13,12 @@ from urllib.request import Request, urlopen
 
 import pytest
 
-from chongzu.api.app import BackendApp
-from chongzu.api.server import ChongZuHTTPServer
-from chongzu.clean import process_source
-from chongzu.semantic.fake_provider import FakeSemanticProvider
-from chongzu.semantic.models import SemanticRequest, SemanticResponse
-from chongzu.semantic.provider import SemanticProviderError
+from dongjian.api.app import BackendApp
+from dongjian.api.server import DongJianHTTPServer
+from dongjian.clean import process_source
+from dongjian.semantic.fake_provider import FakeSemanticProvider
+from dongjian.semantic.models import SemanticRequest, SemanticResponse
+from dongjian.semantic.provider import SemanticProviderError
 
 
 def _request(base: str, path: str, *, method: str = "GET", payload: object | None = None) -> tuple[int, dict]:
@@ -79,7 +79,7 @@ def _server(tmp_path: Path, *, configured: bool = True, provider: object | None 
         workspace_root=workspace,
         semantic_provider=selected_provider,
     )
-    server = ChongZuHTTPServer(("127.0.0.1", 0), app)
+    server = DongJianHTTPServer(("127.0.0.1", 0), app)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:

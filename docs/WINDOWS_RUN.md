@@ -29,7 +29,7 @@ not modify the system PATH.
 ```
 
 Stop reads the recorded PID, verifies the recorded localhost endpoint is a
-ChongZu health endpoint, and terminates that exact PID with `/PID /T /F` on
+DongJian health endpoint, and terminates that exact PID with `/PID /T /F` on
 Windows. It never uses `taskkill /IM python.exe`. The PID state is removed
 after a successful stop or when the server is demonstrably stale.
 
@@ -53,7 +53,7 @@ columns, bounded profile samples, and TextChunks. The command-line equivalent
 is:
 
 ```text
-.\chongzu.cmd search "北京大学" --type text --limit 20
+.\dongjian.cmd search "北京大学" --type text --limit 20
 ```
 
 Use **数据查询** only after selecting one or more table assets. The service
@@ -89,7 +89,7 @@ runtime\venv\Scripts\python.exe scripts\run_phase10_acceptance.py
 ```
 
 The builder requires a clean Git tree, uses an explicit allowlist, and writes
-`release\ChongZu-0.1.0-rc2-win-x64`, its ZIP, SHA-256 sidecar, third-party
+`release\DongJian-0.1.0-rc2-win-x64`, its ZIP, SHA-256 sidecar, third-party
 manifest, and local `licenses/` evidence. The bundle contains only the standalone
 runtime, production packages/models, source, scripts, docs, and built
 `frontend\dist`; it does not contain `runtime\uv`, `runtime\venv`,

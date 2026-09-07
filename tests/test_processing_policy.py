@@ -4,9 +4,9 @@ from pathlib import Path
 
 import pytest
 
-from chongzu.processing_policy import BusinessFormat, RegistryFileInfo, SupportStatus, plan_processing
-from chongzu.registry import Registry, canonical_source_root
-from chongzu.scan import scan_source
+from dongjian.processing_policy import BusinessFormat, RegistryFileInfo, SupportStatus, plan_processing
+from dongjian.registry import Registry, canonical_source_root
+from dongjian.scan import scan_source
 
 
 def _info(detected_type: str, extension: str = "") -> RegistryFileInfo:

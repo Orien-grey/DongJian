@@ -10,9 +10,9 @@ from types import SimpleNamespace
 import duckdb
 import polars as pl
 
-from chongzu.extract.artifacts import artifact_absolute
-from chongzu.extract.structured import MAX_STRUCTURED_WORKERS, extract_structured, normalize_workers
-from chongzu.registry import Registry, canonical_source_root
+from dongjian.extract.artifacts import artifact_absolute
+from dongjian.extract.structured import MAX_STRUCTURED_WORKERS, extract_structured, normalize_workers
+from dongjian.registry import Registry, canonical_source_root
 
 from .xlsx_factory import write_xlsx
 
@@ -156,7 +156,7 @@ def test_incremental_reuse_change_force_and_catalog_runs(tmp_path: Path, monkeyp
     changed = _extract(tmp_path, source)
     assert (changed.extracted, changed.reused, changed.total_rows) == (1, 0, 2)
 
-    import chongzu.extract.structured as structured
+    import dongjian.extract.structured as structured
 
     original = structured._extractor
     monkeypatch.setattr(structured, "_extractor", lambda name: (original(name)[0], "test-version-invalidation"))
@@ -203,7 +203,7 @@ def test_structured_worker_bound() -> None:
 
 
 def test_cli_force_is_forwarded(monkeypatch, capsys, tmp_path: Path) -> None:
-    import chongzu.__main__ as cli
+    import dongjian.__main__ as cli
 
     captured: dict[str, object] = {}
 

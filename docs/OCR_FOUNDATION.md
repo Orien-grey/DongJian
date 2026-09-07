@@ -97,14 +97,14 @@ silently deleted.
 The PDF profile remains the routing source of truth. Only pages without
 reliable native text are rendered/OCR'd, so a mixed PDF is processed page by
 page rather than OCR'd wholesale. The formal user command is
-`chongzu extract SOURCE`; see [UNIFIED_EXTRACTION.md](UNIFIED_EXTRACTION.md).
+`dongjian extract SOURCE`; see [UNIFIED_EXTRACTION.md](UNIFIED_EXTRACTION.md).
 
 ## Commands
 
 ```text
-.\chongzu.cmd extract ocr "D:\Research Data\Project" --workers 2
-.\chongzu.cmd benchmark ocr "D:\Research Data\Project" --workers 2
-.\chongzu.cmd extract "D:\Research Data\Project" --workers 2
+.\dongjian.cmd extract ocr "D:\Research Data\Project" --workers 2
+.\dongjian.cmd benchmark ocr "D:\Research Data\Project" --workers 2
+.\dongjian.cmd extract "D:\Research Data\Project" --workers 2
 ```
 
 The command automatically performs an incremental Registry scan and establishes
@@ -122,5 +122,5 @@ Phase 6 consumes both OCR TextAssets and image/scanned-page TableAssets through
 the same deterministic cleaning/profile layer. OCR/image tables default to
 `needs_review` unless they are clearly empty/unusable; cleaning never changes
 the raw OCR/table artifact and creates a separate manifest/profile. Use
-`chongzu process SOURCE` for extraction plus cleaning/catalog, or keep
-`chongzu extract SOURCE` for the raw extraction-only route.
+`dongjian process SOURCE` for extraction plus cleaning/catalog, or keep
+`dongjian extract SOURCE` for the raw extraction-only route.

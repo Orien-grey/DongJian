@@ -7,8 +7,8 @@ from pathlib import Path
 import pymupdf
 import pytest
 
-from chongzu.extract.ocr import extract_ocr
-from chongzu.registry import Registry
+from dongjian.extract.ocr import extract_ocr
+from dongjian.registry import Registry
 
 from .pdf_factory import write_pdf
 
@@ -29,7 +29,7 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _image(path: Path, text: str = "ChongZu OCR 123") -> Path:
+def _image(path: Path, text: str = "DongJian OCR 123") -> Path:
     from PIL import Image, ImageDraw
 
     image = Image.new("RGB", (800, 260), "white")
@@ -155,7 +155,7 @@ def test_blank_and_corrupt_images_are_isolated(tmp_path: Path) -> None:
 
 
 def test_image_ocr_models_are_project_local() -> None:
-    from chongzu.extract.ocr.rapidocr_engine import RapidOCREngine, validate_ocr_models
+    from dongjian.extract.ocr.rapidocr_engine import RapidOCREngine, validate_ocr_models
 
     paths = validate_ocr_models()
     assert all(path.is_file() for path in paths.values())

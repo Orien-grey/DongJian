@@ -1,6 +1,6 @@
-# ChongZu
+# DongJian
 
-ChongZu is a fully relocatable, Windows x64 local research-data organization
+DongJian is a fully relocatable, Windows x64 local research-data organization
 workbench. It inventories one scientific project directory, independently
 extracts tables and text, deterministically cleans/profiles the derived assets,
 and catalogs the results in embedded DuckDB plus Parquet. A user-configured
@@ -9,7 +9,7 @@ explanations, summaries, and complex quality suggestions without overwriting
 extracted data. No LLM or network endpoint is configured or called in the
 current core workflow.
 
-The fixed development root is `E:\Desktop\ChongZu`; launchers derive the root
+The fixed development root is `E:\Desktop\DongJian`; launchers derive the root
 from their own location, so a prepared bundle can be moved as a directory.
 
 Phase 3 now implements the first business extraction path: strict CSV/TSV and
@@ -132,7 +132,7 @@ See [Architecture](docs/ARCHITECTURE.md), [Data model](docs/DATA_MODEL.md),
 
 | Path | Purpose |
 | --- | --- |
-| `src/chongzu/` | Registry, detector, policy, asset/semantic/search contracts, and CLI |
+| `src/dongjian/` | Registry, detector, policy, asset/semantic/search contracts, and CLI |
 | `frontend/src/` | React + TypeScript local catalog UI source |
 | `frontend/package.json`, `frontend/package-lock.json` | Development/build contract; `node_modules/` is ignored |
 | `frontend/dist/` | Generated self-contained production UI; ignored in Git but required in a release bundle |
@@ -162,28 +162,28 @@ Formal portable launchers require no activation:
 .\doctor.cmd
 .\start.cmd
 .\stop.cmd
-.\chongzu.cmd scan "D:\Research Data\Project"
-.\chongzu.cmd extract structured "D:\Research Data\Project" --workers 4
-.\chongzu.cmd benchmark structured "D:\Research Data\Project"
-.\chongzu.cmd extract pdf "D:\Research Data\Project"
-.\chongzu.cmd benchmark pdf "D:\Research Data\Project"
-.\chongzu.cmd extract pdf-table "D:\Research Data\Project" --workers 2
-.\chongzu.cmd benchmark pdf-table "D:\Research Data\Project" --ground-truth reference.json
-.\chongzu.cmd extract ocr "D:\Research Data\Project" --workers 2
-.\chongzu.cmd extract "D:\Research Data\Project" --workers 2
-.\chongzu.cmd process "D:\Research Data\Project" --workers 2
-.\chongzu.cmd benchmark cleaning "D:\Research Data\Project" --workers 2
-.\chongzu.cmd catalog summary
-.\chongzu.cmd catalog list --type table --quality needs_review --limit 20
-.\chongzu.cmd catalog show <asset-id> --rows 20 --chars 2000
-.\chongzu.cmd semantic status
-.\chongzu.cmd semantic enrich --provider fake --asset <asset-id>
-.\chongzu.cmd search "北京大学" --type text --limit 20
-.\chongzu.cmd benchmark search
-.\chongzu.cmd benchmark sql
-.\chongzu.cmd benchmark pdf-consistency
-.\chongzu.cmd benchmark ocr "D:\Research Data\Project" --workers 2
-.\chongzu.cmd registry summary
+.\dongjian.cmd scan "D:\Research Data\Project"
+.\dongjian.cmd extract structured "D:\Research Data\Project" --workers 4
+.\dongjian.cmd benchmark structured "D:\Research Data\Project"
+.\dongjian.cmd extract pdf "D:\Research Data\Project"
+.\dongjian.cmd benchmark pdf "D:\Research Data\Project"
+.\dongjian.cmd extract pdf-table "D:\Research Data\Project" --workers 2
+.\dongjian.cmd benchmark pdf-table "D:\Research Data\Project" --ground-truth reference.json
+.\dongjian.cmd extract ocr "D:\Research Data\Project" --workers 2
+.\dongjian.cmd extract "D:\Research Data\Project" --workers 2
+.\dongjian.cmd process "D:\Research Data\Project" --workers 2
+.\dongjian.cmd benchmark cleaning "D:\Research Data\Project" --workers 2
+.\dongjian.cmd catalog summary
+.\dongjian.cmd catalog list --type table --quality needs_review --limit 20
+.\dongjian.cmd catalog show <asset-id> --rows 20 --chars 2000
+.\dongjian.cmd semantic status
+.\dongjian.cmd semantic enrich --provider fake --asset <asset-id>
+.\dongjian.cmd search "北京大学" --type text --limit 20
+.\dongjian.cmd benchmark search
+.\dongjian.cmd benchmark sql
+.\dongjian.cmd benchmark pdf-consistency
+.\dongjian.cmd benchmark ocr "D:\Research Data\Project" --workers 2
+.\dongjian.cmd registry summary
 .\scripts\build_release.ps1
 runtime\venv\Scripts\python.exe scripts\run_phase10_acceptance.py
 ```
@@ -211,8 +211,8 @@ the same temporary bypass used by the `.cmd` launchers.
 
 ```powershell
 . .\scripts\env.ps1
-& $env:CHONGZU_DEV_PYTHON -m pytest
-& $env:CHONGZU_PROJECT_UV lock --check --offline
+& $env:DONGJIAN_DEV_PYTHON -m pytest
+& $env:DONGJIAN_PROJECT_UV lock --check --offline
 ```
 
 `extract structured` automatically performs an incremental registry scan, so
@@ -245,7 +245,7 @@ verified by adversarial tests; the Registry connection is never exposed to
 user SQL.
 
 Phase 10.1 has a deterministic release-candidate path. `VERSION` remains
-`0.1.0`; RC2 uses the artifact name `ChongZu-0.1.0-rc2-win-x64`.
+`0.1.0`; RC2 uses the artifact name `DongJian-0.1.0-rc2-win-x64`.
 `scripts\build_release.ps1` requires a clean Git tree, assembles an explicit
 allowlist under `release\`, and writes the release manifest, third-party audit,
 license evidence, ZIP, and SHA-256 sidecar. The RC excludes the development

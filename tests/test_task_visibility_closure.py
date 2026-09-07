@@ -5,8 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 import time
 
-from chongzu.api.app import BackendApp
-from chongzu.clean import process_source
+from dongjian.api.app import BackendApp
+from dongjian.clean import process_source
 from tests.fixtures.stability_factory import BoundedChineseFileInsightProvider
 
 

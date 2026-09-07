@@ -7,13 +7,13 @@ import time
 
 import pytest
 
-from chongzu.clean import process_source
-from chongzu.services.catalog import CatalogService
-from chongzu.services.file_insight import FileInsightService
-from chongzu.services.process import ProcessTaskManager
-from chongzu.services.report import ReportComposer, ReportRunStore
-from chongzu.services.sql import SqlAssetError, SqlQueryService
-from chongzu.services.table_trust import CANDIDATE_ONLY, CONFIRMED_STRUCTURE, UNUSABLE, table_trust_level
+from dongjian.clean import process_source
+from dongjian.services.catalog import CatalogService
+from dongjian.services.file_insight import FileInsightService
+from dongjian.services.process import ProcessTaskManager
+from dongjian.services.report import ReportComposer, ReportRunStore
+from dongjian.services.sql import SqlAssetError, SqlQueryService
+from dongjian.services.table_trust import CANDIDATE_ONLY, CONFIRMED_STRUCTURE, UNUSABLE, table_trust_level
 from tests.fixtures.stability_factory import (
     SlowInvalidFileInsightProvider,
     SlowReportProvider,
@@ -143,7 +143,7 @@ def test_file_insight_batch_uses_two_workers_and_minimal_chinese_contract(tmp_pa
 
 def test_report_cancel_discards_late_provider_result(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
-    from chongzu.services.analysis import AnalysisRunStore
+    from dongjian.services.analysis import AnalysisRunStore
 
     runs = AnalysisRunStore(workspace)
     runs.write(_run("analysis_1"))

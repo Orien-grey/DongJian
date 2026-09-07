@@ -8,12 +8,12 @@ from types import SimpleNamespace
 
 import pytest
 
-from chongzu.api.app import BackendApp
-from chongzu.semantic.models import SemanticRequest, SemanticResponse
-from chongzu.semantic.provider import SemanticProviderError
-from chongzu.services.analysis import AnalysisRunStore
-from chongzu.services.process import ProcessTaskManager
-from chongzu.services.report import (
+from dongjian.api.app import BackendApp
+from dongjian.semantic.models import SemanticRequest, SemanticResponse
+from dongjian.semantic.provider import SemanticProviderError
+from dongjian.services.analysis import AnalysisRunStore
+from dongjian.services.process import ProcessTaskManager
+from dongjian.services.report import (
     ReportComposer,
     ReportExecutionError,
     ReportRunStore,

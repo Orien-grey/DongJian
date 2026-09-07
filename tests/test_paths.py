@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from chongzu import paths
+from dongjian import paths
 
 
 def test_project_root_is_repository_root() -> None:

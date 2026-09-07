@@ -30,7 +30,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 RELEASE_ROOT = ROOT / "release"
 VERSION = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
-BUNDLE_NAME = f"ChongZu-{VERSION}-rc2-win-x64"
+BUNDLE_NAME = f"DongJian-{VERSION}-rc2-win-x64"
 SOURCE_NAME = "接受 测试资料 中文 with spaces"
 WORK_ROOT = ROOT / "cache" / "temp" / "phase10-acceptance"
 DEFAULT_TIMEOUT = 30
@@ -68,7 +68,7 @@ def _fingerprints(root: Path) -> dict[str, FileFingerprint]:
 def _clean_process_env() -> dict[str, str]:
     env = os.environ.copy()
     for key in list(env):
-        if key.startswith("CHONGZU_") or key in {
+        if key.startswith("DONGJIAN_") or key in {
             "PYTHONPATH",
             "PYTHONHOME",
             "VIRTUAL_ENV",
@@ -76,7 +76,7 @@ def _clean_process_env() -> dict[str, str]:
             env.pop(key, None)
     env["PYTHONNOUSERSITE"] = "1"
     env["PYTHONUTF8"] = "1"
-    env["CHONGZU_NO_BROWSER"] = "1"
+    env["DONGJIAN_NO_BROWSER"] = "1"
     return env
 
 
@@ -162,7 +162,7 @@ def _write_image(path: Path) -> bytes:
 
     image = Image.new("RGB", (1_200, 520), "white")
     draw = ImageDraw.Draw(image)
-    draw.text((45, 35), "ChongZu OCR 001 Beijing University", fill="black")
+    draw.text((45, 35), "DongJian OCR 001 Beijing University", fill="black")
     draw.text((45, 95), "scanned evidence keyword", fill="black")
     left, top, right, bottom = 45, 190, 1_100, 450
     draw.rectangle((left, top, right, bottom), outline="black", width=3)
@@ -332,7 +332,7 @@ def _assert_release_allowlist(bundle: Path) -> None:
     if "尚未配置 AI 模型" not in frontend_text or "semantic-enrich" not in frontend_text:
         raise AssertionError("release frontend semantic no-config flow is missing")
     forbidden_strings = (
-        r"E:\Desktop\ChongZu",
+        r"E:\Desktop\DongJian",
         "C:\\Users\\",
         "runtime\\node-dev",
         "runtime\\venv",
@@ -344,7 +344,7 @@ def _assert_release_allowlist(bundle: Path) -> None:
         # Documentation is allowed to mention development examples; runtime
         # code/configuration is not.  The standalone CPython standard library
         # contains generic Windows examples (including Lib/venv activation
-        # templates); it is not ChongZu configuration and is audited by the
+        # templates); it is not DongJian configuration and is audited by the
         # exact-runtime-directory checks above instead.
         relative_parts = {part.casefold() for part in path.relative_to(bundle).parts}
         if "docs" in relative_parts or "runtime/python" in path.relative_to(bundle).as_posix().casefold():
@@ -385,12 +385,12 @@ def _run_journey(bundle: Path, source: Path, *, label: str, assert_reuse: bool) 
     base = f"http://127.0.0.1:{int(state['port'])}"
     try:
         health = _ok(base, "/api/v1/health")
-        assert health["app"]["name"] == "ChongZu"
+        assert health["app"]["name"] == "DongJian"
         assert health["llm"]["status"] == "NOT_CONFIGURED"
         assert health["llm"]["networkCalls"] == "disabled"
         with urlopen(f"{base}/", timeout=DEFAULT_TIMEOUT) as response:
             assert response.status == 200
-            assert "ChongZu" in response.read().decode("utf-8")
+            assert "DongJian" in response.read().decode("utf-8")
         empty = _ok(base, "/api/v1/overview")
         assert empty["files"] == 0 and empty["tableAssets"] == 0 and empty["textAssets"] == 0, empty
 
@@ -565,7 +565,7 @@ def main() -> int:
     _make_corpus(source)
     source_before = _fingerprints(source)
 
-    relocated = WORK_ROOT / "重组 发布测试" / BUNDLE_NAME
+    relocated = WORK_ROOT / "洞见 发布测试" / BUNDLE_NAME
     _copy_tree(bundle, relocated)
     _run_required(relocated, "doctor.cmd", timeout=120)
     relocated_result = _run_journey(relocated, source, label="directory relocation", assert_reuse=True)

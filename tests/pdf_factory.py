@@ -12,7 +12,7 @@ def write_pdf(
     path: Path,
     pages: Iterable[Mapping[str, Any]],
     *,
-    title: str = "Synthetic ChongZu PDF",
+    title: str = "Synthetic DongJian PDF",
 ) -> Path:
     """Write deterministic-enough native, blank, image, and rotated pages.
 
@@ -21,7 +21,7 @@ def write_pdf(
     """
 
     document = pymupdf.open()
-    document.set_metadata({"title": title, "producer": "ChongZu synthetic fixture"})
+    document.set_metadata({"title": title, "producer": "DongJian synthetic fixture"})
     for specification in pages:
         page = document.new_page(
             width=float(specification.get("width", 595)),

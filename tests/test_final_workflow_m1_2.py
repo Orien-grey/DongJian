@@ -9,14 +9,14 @@ import time
 
 import pytest
 
-import chongzu.scan as scan_module
-from chongzu.cancellation import CancellationRequested
-from chongzu.clean import process_source
-from chongzu.clean.runner import MAX_READY_PROCESS_QUEUE
-from chongzu.discovery import discover_iter
-from chongzu.registry import Registry
-from chongzu.services.catalog import CatalogService
-from chongzu.services.process import ProcessTask, ProcessTaskManager
+import dongjian.scan as scan_module
+from dongjian.cancellation import CancellationRequested
+from dongjian.clean import process_source
+from dongjian.clean.runner import MAX_READY_PROCESS_QUEUE
+from dongjian.discovery import discover_iter
+from dongjian.registry import Registry
+from dongjian.services.catalog import CatalogService
+from dongjian.services.process import ProcessTask, ProcessTaskManager
 
 
 def _fixture(tmp_path: Path, count: int = 8) -> tuple[Path, Path, Path]:

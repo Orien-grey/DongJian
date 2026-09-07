@@ -6,12 +6,12 @@ import json
 from pathlib import Path
 import time
 
-from chongzu.api.app import BackendApp
-from chongzu.clean import process_source
-from chongzu.search import SearchQuery, SearchService
-from chongzu.semantic.models import SemanticResponse
-from chongzu.services.catalog import CatalogService
-from chongzu.services.file_insight import FileInsightQueueStore
+from dongjian.api.app import BackendApp
+from dongjian.clean import process_source
+from dongjian.search import SearchQuery, SearchService
+from dongjian.semantic.models import SemanticResponse
+from dongjian.services.catalog import CatalogService
+from dongjian.services.file_insight import FileInsightQueueStore
 
 
 class _BulkProvider:

@@ -2,7 +2,7 @@
 
 Phase 1 runtime preparation and Phase 2.5 portable-runtime validation were
 performed on 2026-09-01 (Asia/Shanghai) for the fixed development root
-`E:\Desktop\ChongZu`. The later Architecture Refactor changes the product
+`E:\Desktop\DongJian`. The later Architecture Refactor changes the product
 shape but does not change this accepted runtime contract. Launchers and the production paths below are root-relative
 at runtime and are intended to survive copying the project directory.
 
@@ -20,7 +20,7 @@ The distribution was installed with uv's managed standalone CPython mechanism:
 
 ```text
 runtime\uv\uv.exe python install 3.11.15 `
-  --install-dir E:\Desktop\ChongZu\runtime\python `
+  --install-dir E:\Desktop\DongJian\runtime\python `
   --no-bin --no-registry
 ```
 
@@ -29,7 +29,7 @@ The source mechanism is uv's official managed Python download catalog, which sup
 Installed executable:
 
 ```text
-E:\Desktop\ChongZu\runtime\python\cpython-3.11.15-windows-x86_64-none\python.exe
+E:\Desktop\DongJian\runtime\python\cpython-3.11.15-windows-x86_64-none\python.exe
 ```
 
 Observed values:
@@ -46,7 +46,7 @@ The existing host executable was copied, not moved or modified:
 
 ```text
 Source:  C:\Users\Orion\.local\bin\uv.exe
-Private: E:\Desktop\ChongZu\runtime\uv\uv.exe
+Private: E:\Desktop\DongJian\runtime\uv\uv.exe
 Version: uv 0.11.21 (5aa65dd7a 2026-06-11 x86_64-pc-windows-msvc)
 SHA-256: 5a7ec85884c2ccb1be560cb8fac3eb890df1adf49bfcc070a270ba70401bdd68
 ```
@@ -58,15 +58,15 @@ Subsequent project commands must invoke `runtime\uv\uv.exe` explicitly. The bina
 The development and Phase 1 execution environment is:
 
 ```text
-E:\Desktop\ChongZu\runtime\venv\Scripts\python.exe
+E:\Desktop\DongJian\runtime\venv\Scripts\python.exe
 ```
 
 It was created from the project CPython with uv, without `--system-site-packages`. A live check reported:
 
 ```text
-sys.executable = E:\Desktop\ChongZu\runtime\venv\Scripts\python.exe
-sys.prefix     = E:\Desktop\ChongZu\runtime\venv
-sys.base_prefix= E:\Desktop\ChongZu\runtime\python\cpython-3.11.15-windows-x86_64-none
+sys.executable = E:\Desktop\DongJian\runtime\venv\Scripts\python.exe
+sys.prefix     = E:\Desktop\DongJian\runtime\venv
+sys.base_prefix= E:\Desktop\DongJian\runtime\python\cpython-3.11.15-windows-x86_64-none
 ```
 
 This is project-contained, but an ordinary Windows venv is **not claimed to be fully relocatable**. Its launcher/metadata can retain the base interpreter path. Moving the whole project directory may therefore require rebuilding `runtime\venv` from the project CPython. A genuinely relocatable release bundle is a later release-phase concern.
@@ -83,7 +83,7 @@ runtime\packages\
 src\
 ```
 
-Formal launchers (`doctor.cmd` and `chongzu.cmd`) derive the project root from
+Formal launchers (`doctor.cmd` and `dongjian.cmd`) derive the project root from
 their own location, set `PYTHONPATH` to the relocated `src;runtime\packages`,
 and invoke the standalone executable directly. They never activate or invoke
 `runtime\venv`. In the standalone process `sys.prefix == sys.base_prefix` is
@@ -194,18 +194,18 @@ payload before distribution.
 The script controls at least:
 
 ```text
-UV_CACHE_DIR             E:\Desktop\ChongZu\cache\uv
-PIP_CACHE_DIR            E:\Desktop\ChongZu\cache\pip
-HF_HOME                  E:\Desktop\ChongZu\cache\huggingface
-HUGGINGFACE_HUB_CACHE    E:\Desktop\ChongZu\cache\huggingface\hub
-TMP / TEMP               E:\Desktop\ChongZu\cache\temp
-PYTHONPYCACHEPREFIX      E:\Desktop\ChongZu\cache\temp\pycache
+UV_CACHE_DIR             E:\Desktop\DongJian\cache\uv
+PIP_CACHE_DIR            E:\Desktop\DongJian\cache\pip
+HF_HOME                  E:\Desktop\DongJian\cache\huggingface
+HUGGINGFACE_HUB_CACHE    E:\Desktop\DongJian\cache\huggingface\hub
+TMP / TEMP               E:\Desktop\DongJian\cache\temp
+PYTHONPYCACHEPREFIX      E:\Desktop\DongJian\cache\temp\pycache
 PYTHONNOUSERSITE         1
-PYTHONPATH               E:\Desktop\ChongZu\src;E:\Desktop\ChongZu\runtime\packages
-CHONGZU_OCR_MODELS       E:\Desktop\ChongZu\runtime\models\ocr
-UV_PYTHON_INSTALL_DIR    E:\Desktop\ChongZu\runtime\python
-UV_PROJECT_ENVIRONMENT   E:\Desktop\ChongZu\runtime\venv
-PIP_CONFIG_FILE          E:\Desktop\ChongZu\cache\pip\pip.ini
+PYTHONPATH               E:\Desktop\DongJian\src;E:\Desktop\DongJian\runtime\packages
+DONGJIAN_OCR_MODELS       E:\Desktop\DongJian\runtime\models\ocr
+UV_PYTHON_INSTALL_DIR    E:\Desktop\DongJian\runtime\python
+UV_PROJECT_ENVIRONMENT   E:\Desktop\DongJian\runtime\venv
+PIP_CONFIG_FILE          E:\Desktop\DongJian\cache\pip\pip.ini
 ```
 
 `UV_NO_CONFIG=1`, `UV_LINK_MODE=copy`, `PIP_NO_INPUT=1`, and `PIP_DISABLE_PIP_VERSION_CHECK=1` are also set to reduce hidden host configuration and cache coupling. Heavy component cache/model variables will be added and verified only if a later benchmark selects the corresponding component. The Phase 4B candidate downloads no models and does not use OCR caches.
@@ -220,7 +220,7 @@ as a target into `runtime\packages` with the same pinned versions:
 
 | Package | Version | Role |
 | --- | --- | --- |
-| `chongzu` | `0.1.0.dev0` | Local editable project package |
+| `dongjian` | `0.1.0.dev0` | Local editable project package |
 | `duckdb` | `1.5.5` | Phase 2 local registry database |
 | `polars` | `1.44.1` | Phase 3 CSV/TSV and Parquet engine |
 | `polars-runtime-32` | `1.44.1` | Polars native Windows x64 runtime |
@@ -307,7 +307,7 @@ declared in `pyproject.toml`.
 
 `VERSION` currently contains `0.1.0`. `scripts\build_release.ps1` requires a
 clean Git tree and copies only the explicit production allowlist into
-`release\ChongZu-0.1.0-rc2-win-x64`, writes `release-manifest.json`,
+`release\DongJian-0.1.0-rc2-win-x64`, writes `release-manifest.json`,
 `THIRD_PARTY_NOTICES.txt`, `third-party-components.json`, and `licenses/`, and
 creates a ZIP and SHA-256 sidecar. The bundle
 contains the exact `runtime\python\cpython-3.11.15-windows-x86_64-none`,

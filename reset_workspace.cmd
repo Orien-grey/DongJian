@@ -1,5 +1,5 @@
 @echo off
 setlocal
-set "CHONGZU_RESET_ROOT=%~dp0"
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%CHONGZU_RESET_ROOT%scripts\reset_workspace.ps1" %*
+set "DONGJIAN_RESET_ROOT=%~dp0"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%DONGJIAN_RESET_ROOT%scripts\reset_workspace.ps1" %*
 exit /b %ERRORLEVEL%

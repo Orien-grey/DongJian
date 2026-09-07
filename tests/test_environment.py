@@ -2,15 +2,15 @@ import os
 import site
 from pathlib import Path
 
-from chongzu import paths
+from dongjian import paths
 
 
 def test_controlled_environment_is_project_local() -> None:
     for name in (
-        "CHONGZU_ROOT",
-        "CHONGZU_PYTHON",
-        "CHONGZU_PACKAGES",
-        "CHONGZU_SRC",
+        "DONGJIAN_ROOT",
+        "DONGJIAN_PYTHON",
+        "DONGJIAN_PACKAGES",
+        "DONGJIAN_SRC",
         "UV_CACHE_DIR",
         "PIP_CACHE_DIR",
         "HF_HOME",

@@ -42,7 +42,7 @@ Status: completed, verified, and committed 2026-09-01 as
 - Separated the development venv from the production runtime contract.
 - Installed the locked DuckDB runtime package in `runtime/packages/` beside
   standalone CPython.
-- Added root-derived `doctor.cmd` and `chongzu.cmd` launchers.
+- Added root-derived `doctor.cmd` and `dongjian.cmd` launchers.
 - Verified runtime/package/source/cache/registry relocation with a copied
   runnable subset.
 
@@ -153,7 +153,7 @@ provenance. OCR-to-table integration is implemented in Phase 5B.
 - Publish image/scanned-page tables through the shared `TableAsset` contract,
   apply only conservative mechanical quality signals, and retain weak table
   candidate hints as routing evidence rather than truth.
-- Provide `chongzu extract SOURCE`, one-scan orchestration, incremental reuse,
+- Provide `dongjian extract SOURCE`, one-scan orchestration, incremental reuse,
   per-file isolation, offline/network guards, and a unified summary.
 - Compare a small selection of Phase 4C rendered pages with the image route for
   count/shape/cell-overlap consistency only. Native candidate output is not

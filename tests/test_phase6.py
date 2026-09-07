@@ -9,8 +9,8 @@ import socket
 import polars as pl
 from PIL import Image
 
-from chongzu.clean import process_source
-from chongzu.registry import Registry
+from dongjian.clean import process_source
+from dongjian.registry import Registry
 
 from .pdf_factory import write_pdf
 from .xlsx_factory import write_xlsx
@@ -187,7 +187,7 @@ def test_cleaner_version_bump_reuses_extraction_only(tmp_path: Path, monkeypatch
     extraction_count = _query(_registry(tmp_path), "SELECT COUNT(*) FROM extraction_runs")[0][0]
     cleaning_count = _query(_registry(tmp_path), "SELECT COUNT(*) FROM cleaning_runs")[0][0]
 
-    monkeypatch.setattr("chongzu.paths.TABLE_CLEANER_VERSION", "table-clean-v2")
+    monkeypatch.setattr("dongjian.paths.TABLE_CLEANER_VERSION", "table-clean-v2")
     second = process_source(
         source,
         workers=1,
@@ -229,7 +229,7 @@ def test_catalog_view_keeps_unsupported_and_isolates_cleaning_failure(tmp_path: 
     )
     bad_raw_path = _workspace(tmp_path) / raw_assets["bad.csv"]
 
-    import chongzu.clean.table_cleaner as table_cleaner
+    import dongjian.clean.table_cleaner as table_cleaner
 
     original_read = table_cleaner.pl.read_parquet
 
@@ -276,8 +276,8 @@ def test_catalog_cli_summary_list_and_show(tmp_path: Path, monkeypatch, capsys) 
         workspace_root=_workspace(tmp_path),
     )
 
-    import chongzu.__main__ as cli
-    from chongzu import paths
+    import dongjian.__main__ as cli
+    from dongjian import paths
 
     monkeypatch.setattr(paths, "REGISTRY_PATH", _registry(tmp_path))
     monkeypatch.setattr(paths, "WORKSPACE_ROOT", _workspace(tmp_path))

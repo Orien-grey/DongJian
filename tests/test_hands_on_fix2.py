@@ -10,17 +10,17 @@ import zipfile
 
 import pytest
 
-from chongzu.api.app import ApiError, BackendApp
-from chongzu.assets import AssetQualityStatus, SourceKind
-from chongzu.clean import process_source
-from chongzu.extract.models import StructuredSource
-from chongzu.extract.ocr.img2table_adapter import filter_image_table_candidates, publish_image_table
-from chongzu.extract.ocr.rapidocr_engine import OCRBlock
-from chongzu.registry import Registry
-from chongzu.semantic.models import SemanticResponse
-from chongzu.semantic.provider import SemanticProviderError
-from chongzu.semantic.settings import ProjectAIConfigStore
-from chongzu.services.catalog import CatalogService
+from dongjian.api.app import ApiError, BackendApp
+from dongjian.assets import AssetQualityStatus, SourceKind
+from dongjian.clean import process_source
+from dongjian.extract.models import StructuredSource
+from dongjian.extract.ocr.img2table_adapter import filter_image_table_candidates, publish_image_table
+from dongjian.extract.ocr.rapidocr_engine import OCRBlock
+from dongjian.registry import Registry
+from dongjian.semantic.models import SemanticResponse
+from dongjian.semantic.provider import SemanticProviderError
+from dongjian.semantic.settings import ProjectAIConfigStore
+from dongjian.services.catalog import CatalogService
 from tests.pdf_factory import write_pdf
 from tests.test_phase5b import _image
 from tests.xlsx_factory import write_xlsx
@@ -332,7 +332,7 @@ def test_connection_tests_draft_without_persisting_or_echoing_key(tmp_path: Path
     assert "draft-secret" not in json.dumps(response.payload)
     assert saved.api_key == "persisted-key"
     assert provider.requests and provider.requests[0].structured_output_required is False
-    assert provider.requests[0].reference_data == {"test": "ChongZu connection check"}
+    assert provider.requests[0].reference_data == {"test": "DongJian connection check"}
 
 
 def test_connection_failure_preserves_draft_and_sanitizes_diagnostic(tmp_path: Path) -> None:
@@ -367,7 +367,7 @@ def test_connection_probe_uses_one_attempt_and_bounded_timeout(tmp_path: Path, m
         captured["config"] = config
         return provider
 
-    monkeypatch.setattr("chongzu.api.app.provider_for_name", factory)
+    monkeypatch.setattr("dongjian.api.app.provider_for_name", factory)
     app = BackendApp(project_root=project)
     try:
         app.handle_api("POST", "/api/v1/settings/ai/test", {}, b"{}")

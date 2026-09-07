@@ -3,7 +3,7 @@
 The expert extraction entry point is:
 
 ```text
-.\chongzu.cmd extract "D:\Research Data\Project" [--workers 1..2] [--force]
+.\dongjian.cmd extract "D:\Research Data\Project" [--workers 1..2] [--force]
 ```
 
 `extract SOURCE` performs one Registry scan and then invokes the applicable
@@ -14,7 +14,7 @@ focused benchmarks.
 The formal end-user workflow after Phase 6 is:
 
 ```text
-.\chongzu.cmd process "D:\Research Data\Project" [--workers 1..4] [--force]
+.\dongjian.cmd process "D:\Research Data\Project" [--workers 1..4] [--force]
 ```
 
 It runs the same incremental extraction coordinator, then deterministic
@@ -144,12 +144,12 @@ uncertain. `semantic_status` is `pending` until the explicit semantic command;
 `process` itself never invokes semantic enrichment.
 
 ```text
-.\chongzu.cmd catalog summary
-.\chongzu.cmd catalog list --type table --quality needs_review --limit 20
-.\chongzu.cmd catalog show <asset-id> --rows 20 --chars 2000
-.\chongzu.cmd benchmark cleaning "D:\Research Data\Project"
-.\chongzu.cmd semantic status
-.\chongzu.cmd semantic enrich --provider fake --asset <asset-id>
+.\dongjian.cmd catalog summary
+.\dongjian.cmd catalog list --type table --quality needs_review --limit 20
+.\dongjian.cmd catalog show <asset-id> --rows 20 --chars 2000
+.\dongjian.cmd benchmark cleaning "D:\Research Data\Project"
+.\dongjian.cmd semantic status
+.\dongjian.cmd semantic enrich --provider fake --asset <asset-id>
 ```
 
 ## Quality signals
@@ -178,8 +178,8 @@ first/reuse timings. Native output is explicitly treated as a weak reference,
 not human ground truth:
 
 ```text
-.\chongzu.cmd benchmark pdf-consistency
-.\chongzu.cmd benchmark pdf-consistency "D:\review" --max-pages 12
+.\dongjian.cmd benchmark pdf-consistency
+.\dongjian.cmd benchmark pdf-consistency "D:\review" --max-pages 12
 ```
 
 This benchmark does not call an LLM, embedding service, public endpoint, or

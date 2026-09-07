@@ -69,13 +69,13 @@ remove the raw path.
 ## CLI
 
 ```text
-.\chongzu.cmd catalog summary
-.\chongzu.cmd catalog summary --source "D:\Research Data\Project"
-.\chongzu.cmd catalog list --type table --quality needs_review --format pdf --limit 20
-.\chongzu.cmd catalog list --type text --format png --limit 20
-.\chongzu.cmd catalog show <asset-id> --rows 20 --chars 2000
-.\chongzu.cmd semantic status
-.\chongzu.cmd semantic enrich --provider fake --asset <asset-id>
+.\dongjian.cmd catalog summary
+.\dongjian.cmd catalog summary --source "D:\Research Data\Project"
+.\dongjian.cmd catalog list --type table --quality needs_review --format pdf --limit 20
+.\dongjian.cmd catalog list --type text --format png --limit 20
+.\dongjian.cmd catalog show <asset-id> --rows 20 --chars 2000
+.\dongjian.cmd semantic status
+.\dongjian.cmd semantic enrich --provider fake --asset <asset-id>
 ```
 
 `summary` reports files, TableAssets, TextAssets, TextChunks, ready/review/

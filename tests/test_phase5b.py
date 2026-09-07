@@ -7,9 +7,9 @@ import socket
 
 from PIL import Image, ImageDraw, ImageFont
 
-from chongzu.extract.ocr import OCRBlock, extract_ocr, ocr_data_from_blocks
-from chongzu.extract.unified import extract_unified
-from chongzu.registry import Registry
+from dongjian.extract.ocr import OCRBlock, extract_ocr, ocr_data_from_blocks
+from dongjian.extract.unified import extract_unified
+from dongjian.registry import Registry
 
 from .pdf_factory import write_pdf
 from .xlsx_factory import write_xlsx

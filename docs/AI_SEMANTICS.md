@@ -9,12 +9,12 @@ artifact, or complete large table.
 The layer is provider/model neutral. DeepSeek may be used for a future
 explicitly authorized development test, and the company deployment may use
 `Qwen3.6-35B-A3B`, but neither name appears in business routing or contract
-logic. ChongZu does not select a public endpoint, fallback server, vision
+logic. DongJian does not select a public endpoint, fallback server, vision
 endpoint, or embedding endpoint.
 
 ## Phase 7A/7B/7C boundary
 
-The current package is `src/chongzu/semantic/`:
+The current package is `src/dongjian/semantic/`:
 
 | Module | Responsibility |
 | --- | --- |
@@ -206,9 +206,9 @@ statuses intact.
 ## Commands and scope
 
 ```text
-.\chongzu.cmd semantic status
-.\chongzu.cmd semantic enrich --provider fake --asset <asset-id>
-.\chongzu.cmd semantic enrich --provider fake --type table --limit 10
+.\dongjian.cmd semantic status
+.\dongjian.cmd semantic enrich --provider fake --asset <asset-id>
+.\dongjian.cmd semantic enrich --provider fake --type table --limit 10
 ```
 
 `process SOURCE` does not invoke semantic enrichment. No vision, embedding,

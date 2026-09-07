@@ -1,7 +1,7 @@
 # Registry and embedded catalog
 
 The source of truth is the embedded DuckDB file
-`workspace/state/registry.duckdb`. ChongZu does not use MySQL and does not need
+`workspace/state/registry.duckdb`. DongJian does not use MySQL and does not need
 a database service process. Scans write only below `workspace/state/` and
 `workspace/logs/`; source directories are read-only.
 

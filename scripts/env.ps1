@@ -1,4 +1,4 @@
-# ChongZu project-local process environment (Windows PowerShell 5.1).
+# DongJian project-local process environment (Windows PowerShell 5.1).
 # Dot-source this file; it changes only the current PowerShell process.
 
 $scriptRoot = (Resolve-Path -LiteralPath $PSScriptRoot).Path
@@ -6,7 +6,7 @@ $projectRoot = (Resolve-Path -LiteralPath (Join-Path -Path $scriptRoot -ChildPat
 
 if (-not (Test-Path -LiteralPath (Join-Path -Path $projectRoot -ChildPath 'runtime') -PathType Container) -or
     -not (Test-Path -LiteralPath (Join-Path -Path $projectRoot -ChildPath 'src') -PathType Container)) {
-    throw "Unable to locate ChongZu project root from $PSScriptRoot"
+    throw "Unable to locate DongJian project root from $PSScriptRoot"
 }
 
 $runtimeRoot = Join-Path -Path $projectRoot -ChildPath 'runtime'
@@ -40,21 +40,21 @@ if (-not (Test-Path -LiteralPath $pipConfig -PathType Leaf)) {
     New-Item -ItemType File -Path $pipConfig -Force | Out-Null
 }
 
-$env:CHONGZU_PROJECT_ROOT = $projectRoot
-$env:CHONGZU_ROOT = $projectRoot
-$env:CHONGZU_RUNTIME_ROOT = $runtimeRoot
+$env:DONGJIAN_PROJECT_ROOT = $projectRoot
+$env:DONGJIAN_ROOT = $projectRoot
+$env:DONGJIAN_RUNTIME_ROOT = $runtimeRoot
 # Production commands always use the standalone interpreter plus the target
 # package directory.  The venv remains available only for development tools
 # such as pytest and uv sync.
-$env:CHONGZU_PYTHON = $pythonExe
-$env:CHONGZU_RUNTIME_PYTHON = $pythonExe
-$env:CHONGZU_PACKAGES = $packagesRoot
-$env:CHONGZU_SRC = Join-Path -Path $projectRoot -ChildPath 'src'
-$env:CHONGZU_DEV_PYTHON = $venvPython
-$env:CHONGZU_PROJECT_PYTHON = $pythonExe
-$env:CHONGZU_PROJECT_UV = $uvExe
-$env:CHONGZU_CACHE_TEMP = $tempRoot
-$env:CHONGZU_OCR_MODELS = Join-Path -Path $runtimeRoot -ChildPath 'models\ocr'
+$env:DONGJIAN_PYTHON = $pythonExe
+$env:DONGJIAN_RUNTIME_PYTHON = $pythonExe
+$env:DONGJIAN_PACKAGES = $packagesRoot
+$env:DONGJIAN_SRC = Join-Path -Path $projectRoot -ChildPath 'src'
+$env:DONGJIAN_DEV_PYTHON = $venvPython
+$env:DONGJIAN_PROJECT_PYTHON = $pythonExe
+$env:DONGJIAN_PROJECT_UV = $uvExe
+$env:DONGJIAN_CACHE_TEMP = $tempRoot
+$env:DONGJIAN_OCR_MODELS = Join-Path -Path $runtimeRoot -ChildPath 'models\ocr'
 
 $env:UV_CACHE_DIR = $uvCache
 $env:UV_PYTHON_INSTALL_DIR = $pythonRuntimeRoot

@@ -24,9 +24,9 @@ before a `TableAsset` is published.
 ## Operator commands
 
 ```text
-.\chongzu.cmd extract pdf-table "D:\Research Project" [--workers 1..4] [--force]
-.\chongzu.cmd benchmark pdf-table "D:\Research Project" [--workers 1..4] [--force]
-.\chongzu.cmd benchmark pdf-table "D:\Synthetic PDFs" --ground-truth reference.json
+.\dongjian.cmd extract pdf-table "D:\Research Project" [--workers 1..4] [--force]
+.\dongjian.cmd benchmark pdf-table "D:\Research Project" [--workers 1..4] [--force]
+.\dongjian.cmd benchmark pdf-table "D:\Synthetic PDFs" --ground-truth reference.json
 ```
 
 The command performs an incremental scan automatically. `--force` applies only

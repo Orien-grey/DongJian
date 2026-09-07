@@ -90,7 +90,7 @@ if ($OutputRoot) {
 }
 $outputRootPath = [System.IO.Path]::GetFullPath($outputRootPath)
 New-Item -ItemType Directory -Path $outputRootPath -Force | Out-Null
-$bundleName = "ChongZu-$Version-$ArtifactSuffix-win-x64"
+$bundleName = "DongJian-$Version-$ArtifactSuffix-win-x64"
 $bundlePath = Resolve-ContainedPath -Base $outputRootPath -Candidate (Join-Path $outputRootPath $bundleName)
 $zipPath = Resolve-ContainedPath -Base $outputRootPath -Candidate (Join-Path $outputRootPath "$bundleName.zip")
 
@@ -112,7 +112,7 @@ New-Item -ItemType Directory -Path $bundlePath -Force | Out-Null
 $rootFiles = @(
     'start.cmd',
     'stop.cmd',
-    'chongzu.cmd',
+    'dongjian.cmd',
     'doctor.cmd',
     '.env.example',
     'README.md',
@@ -132,7 +132,7 @@ $directoryCopies = @(
     @{ Source = 'runtime\models'; Destination = 'runtime\models' },
     @{ Source = 'config\llm.example.json'; Destination = 'config\llm.example.json' },
     @{ Source = 'scripts\env.ps1'; Destination = 'scripts\env.ps1' },
-    @{ Source = 'scripts\chongzu.ps1'; Destination = 'scripts\chongzu.ps1' },
+    @{ Source = 'scripts\dongjian.ps1'; Destination = 'scripts\dongjian.ps1' },
     @{ Source = 'scripts\doctor.ps1'; Destination = 'scripts\doctor.ps1' },
     @{ Source = 'docs'; Destination = 'docs' },
     @{ Source = 'licenses'; Destination = 'licenses' }

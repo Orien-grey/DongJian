@@ -65,7 +65,7 @@ measured benefit justifies its portability and maintenance cost.
 
 ## Current ground-truth machinery
 
-`chongzu benchmark pdf-table <SOURCE> --ground-truth reference.json` reports
+`dongjian benchmark pdf-table <SOURCE> --ground-truth reference.json` reports
 separate fields for expected/detected tables, true positives, false negatives,
 obvious false positives, exact shape, row-count/column-count matches, exact and
 Unicode-normalized cell matches, missing cells, and extra cells. The sidecar is

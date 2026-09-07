@@ -1,7 +1,7 @@
 import pytest
 
-from chongzu import paths
-from chongzu.semantic import LLMConfig
+from dongjian import paths
+from dongjian.semantic import LLMConfig
 
 
 def test_example_llm_config_is_provider_neutral_and_inactive() -> None:

@@ -14,7 +14,7 @@ import time
 from typing import Any
 import zipfile
 
-from chongzu.semantic.models import SemanticRequest, SemanticResponse
+from dongjian.semantic.models import SemanticRequest, SemanticResponse
 
 from tests.pdf_factory import write_pdf
 

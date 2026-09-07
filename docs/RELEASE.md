@@ -12,9 +12,9 @@ It reads `VERSION`, copies an explicit allowlist, writes
 `third-party-components.json`, and `licenses/`, and produces:
 
 ```text
-release/ChongZu-<version>-<suffix>-win-x64/
-release/ChongZu-<version>-<suffix>-win-x64.zip
-release/ChongZu-<version>-<suffix>-win-x64.zip.sha256.txt
+release/DongJian-<version>-<suffix>-win-x64/
+release/DongJian-<version>-<suffix>-win-x64.zip
+release/DongJian-<version>-<suffix>-win-x64.zip.sha256.txt
 ```
 
 The builder checks `git status --porcelain` before assembly and requires a

@@ -13,20 +13,20 @@ import pytest
 import pymupdf
 from PIL import Image
 
-from chongzu.api.app import ApiError, BackendApp
-from chongzu.clean import process_source
-from chongzu.registry import Registry
-from chongzu.semantic.config import SemanticConfig
-from chongzu.semantic.models import SemanticRequest, SemanticResponse
-from chongzu.semantic.provider import SemanticProviderError
-from chongzu.services.analysis import (
+from dongjian.api.app import ApiError, BackendApp
+from dongjian.clean import process_source
+from dongjian.registry import Registry
+from dongjian.semantic.config import SemanticConfig
+from dongjian.semantic.models import SemanticRequest, SemanticResponse
+from dongjian.semantic.provider import SemanticProviderError
+from dongjian.services.analysis import (
     AnalysisExecutionError,
     AnalysisOrchestrator,
     AnalysisRunStore,
     AnalysisService,
     MAX_ANALYSIS_STEPS,
 )
-from chongzu.vision.models import VisionCapabilities, VisionRequest, VisionResponse
+from dongjian.vision.models import VisionCapabilities, VisionRequest, VisionResponse
 from tests.pdf_factory import write_pdf
 from tests.xlsx_factory import write_xlsx
 

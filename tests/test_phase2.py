@@ -7,11 +7,11 @@ from pathlib import Path
 import duckdb
 import pytest
 
-from chongzu.detection import detect_file
-from chongzu.discovery import discover
-from chongzu.fingerprint import hash_file
-from chongzu.registry import Registry, RegistryError, canonical_source_root, utc_now
-from chongzu.scan import MAX_WORKERS, normalize_workers, scan_source
+from dongjian.detection import detect_file
+from dongjian.discovery import discover
+from dongjian.fingerprint import hash_file
+from dongjian.registry import Registry, RegistryError, canonical_source_root, utc_now
+from dongjian.scan import MAX_WORKERS, normalize_workers, scan_source
 
 
 def _registry(tmp_path: Path) -> Path:
@@ -306,7 +306,7 @@ def test_changed_during_hash_is_rejected(tmp_path: Path) -> None:
         if calls["count"] == 2:
             path.write_bytes(b"b" * (2 * 1024 * 1024))
             result = original_stat()
-        from chongzu.types import FileStat
+        from dongjian.types import FileStat
 
         return FileStat(result.st_size, result.st_mtime_ns)
 

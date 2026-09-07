@@ -6,13 +6,13 @@ from pathlib import Path
 
 import polars as pl
 
-from chongzu.extract.pdf.table_quality import DetectedTable, ExpectedTable, score_tables
-from chongzu.extract.pdf.table_runner import (
+from dongjian.extract.pdf.table_quality import DetectedTable, ExpectedTable, score_tables
+from dongjian.extract.pdf.table_runner import (
     MAX_PDF_TABLE_WORKERS,
     extract_pdf_tables,
     normalize_pdf_table_workers,
 )
-from chongzu.registry import Registry
+from dongjian.registry import Registry
 
 from .pdf_factory import write_pdf
 
@@ -227,8 +227,8 @@ def test_pdf_table_reuse_force_and_independent_text_cache(tmp_path: Path, monkey
     assert _query(tmp_path, "SELECT COUNT(*) FROM extraction_runs WHERE attempted_route='pdf_native_text'")[0][0] == 1
     assert _query(tmp_path, "SELECT COUNT(*) FROM extraction_runs WHERE attempted_route='pdf_table_candidate'")[0][0] == 1
 
-    import chongzu.extract.pdf.img2table_extractor as candidate
-    import chongzu.extract.pdf.table_runner as table_runner
+    import dongjian.extract.pdf.img2table_extractor as candidate
+    import dongjian.extract.pdf.table_runner as table_runner
 
     monkeypatch.setattr(candidate, "EXTRACTOR_VERSION", "test-img2table-version")
     monkeypatch.setattr(table_runner, "EXTRACTOR_VERSION", "test-img2table-version")

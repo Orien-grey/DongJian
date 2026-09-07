@@ -7,7 +7,7 @@ $ErrorActionPreference = "Stop"
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot ".." )).Path
 
 # This command is intentionally narrower than a generic cleanup command.  It
-# can only remove generated data rooted directly below this ChongZu project.
+# can only remove generated data rooted directly below this DongJian project.
 $required = @("src", "runtime", "models", "config", "workspace", "cache")
 foreach ($name in $required) {
     $path = Join-Path $repoRoot $name
@@ -75,7 +75,7 @@ foreach ($root in $dataRoots) {
 }
 
 if (-not $Force) {
-    Write-Host "WARNING: this removes ChongZu-generated data under:" -ForegroundColor Yellow
+    Write-Host "WARNING: this removes DongJian-generated data under:" -ForegroundColor Yellow
     $dataRoots | ForEach-Object { Write-Host "  $_" -ForegroundColor Yellow }
     Write-Host "It does not delete source directories, runtime, models, frontend, config, or release files." -ForegroundColor Yellow
     $confirmation = Read-Host "Type RESET to continue"
@@ -93,7 +93,7 @@ if (-not (Test-Path -LiteralPath $bundledPython -PathType Leaf)) {
 }
 $env:PYTHONPATH = "$(Join-Path $repoRoot 'src')$([IO.Path]::PathSeparator)$(Join-Path $repoRoot 'runtime\packages')"
 $env:PYTHONNOUSERSITE = "1"
-& $bundledPython -m chongzu.api.reset_helper --project-root $repoRoot --request-id ("manual_" + [guid]::NewGuid().ToString("N"))
+& $bundledPython -m dongjian.api.reset_helper --project-root $repoRoot --request-id ("manual_" + [guid]::NewGuid().ToString("N"))
 exit $LASTEXITCODE
 
 foreach ($root in $dataRoots) {
@@ -104,7 +104,7 @@ foreach ($root in $dataRoots) {
         if (-not (Test-ChildOf $entry.FullName $rootFull)) {
             throw "Refusing to remove path outside reset root: $($entry.FullName)"
         }
-        if ($PSCmdlet.ShouldProcess($entry.FullName, "Remove generated ChongZu data")) {
+        if ($PSCmdlet.ShouldProcess($entry.FullName, "Remove generated DongJian data")) {
             Remove-Item -LiteralPath $entry.FullName -Force
         }
     }
@@ -131,4 +131,4 @@ foreach ($root in $dataRoots) {
     }
 }
 
-Write-Host "ChongZu generated workspace/cache data reset. Source directories were not touched."
+Write-Host "DongJian generated workspace/cache data reset. Source directories were not touched."

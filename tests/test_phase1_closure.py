@@ -6,14 +6,14 @@ from pathlib import Path
 import threading
 import time
 
-import chongzu.services.process as process_module
-import chongzu.services.reset as reset_module
-from chongzu.api.app import BackendApp
-from chongzu.cancellation import CancellationRequested
-from chongzu.clean import process_source
-from chongzu.registry import Registry
-from chongzu.services.file_insight import FileInsightError
-from chongzu.services.reset import WorkspaceResetJournal, WorkspaceResetService
+import dongjian.services.process as process_module
+import dongjian.services.reset as reset_module
+from dongjian.api.app import BackendApp
+from dongjian.cancellation import CancellationRequested
+from dongjian.clean import process_source
+from dongjian.registry import Registry
+from dongjian.services.file_insight import FileInsightError
+from dongjian.services.reset import WorkspaceResetJournal, WorkspaceResetService
 from tests.fixtures.stability_factory import write_unsupported_layout_docx
 
 

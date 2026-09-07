@@ -8,12 +8,12 @@ from types import SimpleNamespace
 
 import pytest
 
-from chongzu.api.app import ApiError, BackendApp
-from chongzu.clean import process_source
-from chongzu.registry import Registry
-from chongzu.semantic.config import SemanticConfig
-from chongzu.semantic.settings import ProjectAIConfigStore, load_runtime_ai_settings
-from chongzu.services.process import ProcessTask, ProcessTaskManager
+from dongjian.api.app import ApiError, BackendApp
+from dongjian.clean import process_source
+from dongjian.registry import Registry
+from dongjian.semantic.config import SemanticConfig
+from dongjian.semantic.settings import ProjectAIConfigStore, load_runtime_ai_settings
+from dongjian.services.process import ProcessTask, ProcessTaskManager
 
 
 def _project(tmp_path: Path) -> Path:

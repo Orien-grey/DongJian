@@ -7,12 +7,12 @@ from urllib.error import HTTPError, URLError
 
 import pytest
 
-from chongzu.semantic.config import SemanticConfig
-from chongzu.semantic.models import SemanticRequest
-from chongzu.semantic.openai_compatible import OpenAICompatibleProvider, normalize_chat_completions_endpoint
-from chongzu.semantic.prompts import TEXT_PROMPT_VERSION
-from chongzu.semantic.provider import SemanticProviderError
-from chongzu.semantic.runner import RealSemanticProviderDisabled, provider_for_name
+from dongjian.semantic.config import SemanticConfig
+from dongjian.semantic.models import SemanticRequest
+from dongjian.semantic.openai_compatible import OpenAICompatibleProvider, normalize_chat_completions_endpoint
+from dongjian.semantic.prompts import TEXT_PROMPT_VERSION
+from dongjian.semantic.provider import SemanticProviderError
+from dongjian.semantic.runner import RealSemanticProviderDisabled, provider_for_name
 
 
 def _request(*, model: str = "configured-model", reference: str = "synthetic reference") -> SemanticRequest:
@@ -104,7 +104,7 @@ def test_request_uses_standard_json_response_format_and_safe_instrumentation(mon
         captured.append((url_request, timeout))
         return _Response(_envelope('{"display_name":"synthetic"}'))
 
-    import chongzu.semantic.openai_compatible as module
+    import dongjian.semantic.openai_compatible as module
 
     monkeypatch.setattr(module.urllib_request, "urlopen", stub)
     response = provider.generate(request)
@@ -131,7 +131,7 @@ def test_request_uses_standard_json_response_format_and_safe_instrumentation(mon
 )
 def test_provider_rejects_non_pure_json_content(monkeypatch: pytest.MonkeyPatch, content: str) -> None:
     provider = _provider()
-    import chongzu.semantic.openai_compatible as module
+    import dongjian.semantic.openai_compatible as module
 
     monkeypatch.setattr(module.urllib_request, "urlopen", lambda request, timeout: _Response(_envelope(content)))
     with pytest.raises(SemanticProviderError) as caught:
@@ -148,7 +148,7 @@ def test_http_failure_retries_are_bounded_and_have_no_fallback(monkeypatch: pyte
         calls.append(url_request.full_url)
         raise HTTPError(url_request.full_url, 503, "unavailable", {}, BytesIO(b"failure"))
 
-    import chongzu.semantic.openai_compatible as module
+    import dongjian.semantic.openai_compatible as module
 
     monkeypatch.setattr(module.urllib_request, "urlopen", fail)
     with pytest.raises(SemanticProviderError) as caught:
@@ -167,7 +167,7 @@ def test_invalid_api_key_http_failure_is_safe_and_not_retried(monkeypatch: pytes
         calls.append(url_request.full_url)
         raise HTTPError(url_request.full_url, 401, "unauthorized", {}, BytesIO(b"invalid key"))
 
-    import chongzu.semantic.openai_compatible as module
+    import dongjian.semantic.openai_compatible as module
 
     monkeypatch.setattr(module.urllib_request, "urlopen", fail)
     with pytest.raises(SemanticProviderError) as caught:
@@ -185,7 +185,7 @@ def test_timeout_wrapped_in_urlerror_maps_to_timeout(monkeypatch: pytest.MonkeyP
     def fail(url_request, timeout):
         raise URLError(socket.timeout("synthetic timeout"))
 
-    import chongzu.semantic.openai_compatible as module
+    import dongjian.semantic.openai_compatible as module
 
     monkeypatch.setattr(module.urllib_request, "urlopen", fail)
     with pytest.raises(SemanticProviderError) as caught:

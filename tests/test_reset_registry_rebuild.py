@@ -5,9 +5,9 @@ from pathlib import Path
 
 import pytest
 
-from chongzu.registry import Registry
-import chongzu.services.reset as reset_module
-from chongzu.services.reset import WorkspaceResetError, WorkspaceResetService
+from dongjian.registry import Registry
+import dongjian.services.reset as reset_module
+from dongjian.services.reset import WorkspaceResetError, WorkspaceResetService
 
 
 def test_reset_recreates_registry_and_removes_all_registry_companions(tmp_path: Path) -> None:

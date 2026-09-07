@@ -62,7 +62,7 @@ give `LLM_STATUS=NOT_CONFIGURED`, mean fully offline, and do not fail doctor.
 Vision only after the user explicitly selects an AI Vision process.
 
 ```text
-.\chongzu.cmd semantic status
+.\dongjian.cmd semantic status
 ```
 
 `semantic status` reports configuration without making a network call. The
@@ -74,7 +74,7 @@ returns HTTP 409 with `SEMANTIC_NOT_CONFIGURED` and makes no provider call.
 The CLI fake route is:
 
 ```text
-.\chongzu.cmd semantic enrich --provider fake --asset <asset-id>
+.\dongjian.cmd semantic enrich --provider fake --asset <asset-id>
 ```
 
 ## Input and prompt contract
@@ -133,7 +133,7 @@ The UI shows `尚未配置 AI 模型` when the provider is absent. When configur
 Asset Detail → AI语义 offers `AI 整理`, first showing an explicit confirmation
 that only a bounded summary/sample is sent. Success refreshes the current
 asset detail; a matching result is shown as `已使用现有 AI 整理结果` without a
-second provider call. `chongzu process SOURCE` and the local API process task
+second provider call. `dongjian process SOURCE` and the local API process task
 never invoke this layer. There is no bulk enrichment, vision upload,
 embedding route, chat surface, or public fallback.
 

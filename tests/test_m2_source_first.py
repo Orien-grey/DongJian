@@ -7,12 +7,12 @@ from pathlib import Path
 import time
 import xml.etree.ElementTree as ET
 
-from chongzu.api.app import ApiError, BackendApp
-from chongzu.discovery import discover
-from chongzu.extract.docx import _table_presentation
-from chongzu.clean import process_source
-from chongzu.search import SearchQuery, SearchService
-from chongzu.services.catalog import CatalogService
+from dongjian.api.app import ApiError, BackendApp
+from dongjian.discovery import discover
+from dongjian.extract.docx import _table_presentation
+from dongjian.clean import process_source
+from dongjian.search import SearchQuery, SearchService
+from dongjian.services.catalog import CatalogService
 
 
 def _process(source: Path, workspace: Path) -> CatalogService:

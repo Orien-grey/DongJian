@@ -480,7 +480,7 @@ def _summary(components: list[dict[str, Any]]) -> dict[str, int]:
 
 def _render_notices(components: list[dict[str, Any]], summary: dict[str, int], *, version: str) -> str:
     lines = [
-        f"ChongZu {version} third-party notices",
+        f"DongJian {version} third-party notices",
         "",
         "Engineering audit record for the actual production payload and the",
         "frontend production bundle. This file records local evidence only; it",

@@ -7,14 +7,14 @@ import socket
 
 import pytest
 
-from chongzu.clean import process_source
-from chongzu.semantic.fake_provider import FakeSemanticProvider
-from chongzu.semantic.input_builder import SemanticInputLimits, build_semantic_request
-from chongzu.semantic.models import SemanticRequest, SemanticResponse
-from chongzu.semantic.prompts import TABLE_PROMPT_VERSION, TEXT_PROMPT_VERSION
-from chongzu.semantic.runner import SemanticRunner, semantic_identity
-from chongzu.semantic.validator import validate_semantic_payload, validate_semantic_response
-from chongzu.registry import Registry
+from dongjian.clean import process_source
+from dongjian.semantic.fake_provider import FakeSemanticProvider
+from dongjian.semantic.input_builder import SemanticInputLimits, build_semantic_request
+from dongjian.semantic.models import SemanticRequest, SemanticResponse
+from dongjian.semantic.prompts import TABLE_PROMPT_VERSION, TEXT_PROMPT_VERSION
+from dongjian.semantic.runner import SemanticRunner, semantic_identity
+from dongjian.semantic.validator import validate_semantic_payload, validate_semantic_response
+from dongjian.registry import Registry
 
 
 def _workspace(tmp_path: Path) -> Path:
@@ -344,8 +344,8 @@ def test_fake_provider_network_guard_and_cache_identity_are_local(tmp_path: Path
 
 
 def test_no_configuration_is_safe_and_env_example_has_no_secret(tmp_path: Path) -> None:
-    from chongzu.semantic.config import SemanticConfig, load_semantic_config
-    from chongzu.semantic.runner import semantic_status
+    from dongjian.semantic.config import SemanticConfig, load_semantic_config
+    from dongjian.semantic.runner import semantic_status
 
     config = load_semantic_config(tmp_path)
     assert config.status == "NOT_CONFIGURED"
@@ -361,8 +361,8 @@ def test_no_configuration_is_safe_and_env_example_has_no_secret(tmp_path: Path) 
 
 
 def test_real_provider_is_hard_disabled_even_with_explicit_test_config() -> None:
-    from chongzu.semantic.config import SemanticConfig
-    from chongzu.semantic.runner import RealSemanticProviderDisabled, provider_for_name
+    from dongjian.semantic.config import SemanticConfig
+    from dongjian.semantic.runner import RealSemanticProviderDisabled, provider_for_name
 
     configured = SemanticConfig(
         base_url="http://127.0.0.1:9000/v1",
@@ -379,7 +379,7 @@ def test_process_does_not_invoke_semantic_layer(tmp_path: Path, monkeypatch: pyt
     def fail_if_called(*args: object, **kwargs: object) -> None:
         raise AssertionError("process must not invoke semantic enrichment")
 
-    monkeypatch.setattr("chongzu.semantic.runner.enrich_catalog", fail_if_called)
+    monkeypatch.setattr("dongjian.semantic.runner.enrich_catalog", fail_if_called)
     summary = process_source(
         source,
         workers=1,
@@ -390,8 +390,8 @@ def test_process_does_not_invoke_semantic_layer(tmp_path: Path, monkeypatch: pyt
 
 
 def test_openai_compatible_adapter_is_stdlib_only_and_unit_stub_never_networks(monkeypatch: pytest.MonkeyPatch) -> None:
-    from chongzu.semantic.config import SemanticConfig
-    from chongzu.semantic.openai_compatible import OpenAICompatibleProvider
+    from dongjian.semantic.config import SemanticConfig
+    from dongjian.semantic.openai_compatible import OpenAICompatibleProvider
 
     request = SemanticRequest(
         asset_id="txt_test",
@@ -418,7 +418,7 @@ def test_openai_compatible_adapter_is_stdlib_only_and_unit_stub_never_networks(m
         def read(self, size: int = -1) -> bytes:
             return b'{"choices":[{"message":{"content":"{\\"ok\\": true}"}}]}'
 
-    import chongzu.semantic.openai_compatible as module
+    import dongjian.semantic.openai_compatible as module
 
     called = []
     monkeypatch.setattr(module.urllib_request, "urlopen", lambda request, timeout: called.append((request, timeout)) or StubResponse())

@@ -9,19 +9,19 @@ $projectRoot = (Resolve-Path -LiteralPath (Join-Path -Path $scriptRoot -ChildPat
 
 . (Join-Path -Path $scriptRoot -ChildPath 'env.ps1')
 
-if (-not (Test-Path -LiteralPath $env:CHONGZU_PROJECT_UV -PathType Leaf)) {
-    throw "Project-local uv is missing: $env:CHONGZU_PROJECT_UV. Refusing to fall back to PATH uv."
+if (-not (Test-Path -LiteralPath $env:DONGJIAN_PROJECT_UV -PathType Leaf)) {
+    throw "Project-local uv is missing: $env:DONGJIAN_PROJECT_UV. Refusing to fall back to PATH uv."
 }
 
 $architecture = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()
 if ($architecture -ne 'X64') {
-    throw "Unsupported process architecture: $architecture; ChongZu requires Windows x64."
+    throw "Unsupported process architecture: $architecture; DongJian requires Windows x64."
 }
 
-$pythonRuntime = $env:CHONGZU_RUNTIME_PYTHON
+$pythonRuntime = $env:DONGJIAN_RUNTIME_PYTHON
 if (-not $SkipPythonInstall) {
-    & $env:CHONGZU_PROJECT_UV python install 3.11.15 `
-        --install-dir (Join-Path -Path $env:CHONGZU_RUNTIME_ROOT -ChildPath 'python') `
+    & $env:DONGJIAN_PROJECT_UV python install 3.11.15 `
+        --install-dir (Join-Path -Path $env:DONGJIAN_RUNTIME_ROOT -ChildPath 'python') `
         --no-bin --no-registry
     if ($LASTEXITCODE -ne 0) {
         throw "Project-local CPython installation failed with exit code $LASTEXITCODE"
@@ -32,23 +32,23 @@ if (-not (Test-Path -LiteralPath $pythonRuntime -PathType Leaf)) {
     throw "Pinned project CPython was not found: $pythonRuntime"
 }
 
-$venvRoot = Join-Path -Path $env:CHONGZU_RUNTIME_ROOT -ChildPath 'venv'
+$venvRoot = Join-Path -Path $env:DONGJIAN_RUNTIME_ROOT -ChildPath 'venv'
 $venvPython = Join-Path -Path (Join-Path -Path $venvRoot -ChildPath 'Scripts') -ChildPath 'python.exe'
 if (Test-Path -LiteralPath $venvPython -PathType Leaf) {
     Write-Output "Reusing existing project virtual environment: $venvPython"
 } else {
-    & $env:CHONGZU_PROJECT_UV venv $venvRoot --python $pythonRuntime --no-project
+    & $env:DONGJIAN_PROJECT_UV venv $venvRoot --python $pythonRuntime --no-project
     if ($LASTEXITCODE -ne 0) {
         throw "Project virtual environment creation failed with exit code $LASTEXITCODE"
     }
 }
 
-& $env:CHONGZU_PROJECT_UV sync --locked --directory $env:CHONGZU_PROJECT_ROOT
+& $env:DONGJIAN_PROJECT_UV sync --locked --directory $env:DONGJIAN_PROJECT_ROOT
 if ($LASTEXITCODE -ne 0) {
     throw "Locked dependency synchronization failed with exit code $LASTEXITCODE"
 }
 
-$packagesRoot = $env:CHONGZU_PACKAGES
+$packagesRoot = $env:DONGJIAN_PACKAGES
 New-Item -ItemType Directory -Path $packagesRoot -Force | Out-Null
 $runtimeRequirements = @(
     'duckdb==1.5.5'
@@ -67,7 +67,7 @@ $runtimeRequirements = @(
 # project-local uv install into it and publish only its site-packages payload.
 # This avoids both target-directory lock races and uv's optional trampoline
 # resource rewrite while retaining uv as the dependency installer.
-$stagingRoot = Join-Path -Path $env:CHONGZU_CACHE_TEMP -ChildPath 'runtime-provision-staging'
+$stagingRoot = Join-Path -Path $env:DONGJIAN_CACHE_TEMP -ChildPath 'runtime-provision-staging'
 if (Test-Path -LiteralPath $stagingRoot) {
     Remove-Item -LiteralPath $stagingRoot -Recurse -Force -ErrorAction SilentlyContinue
 }
@@ -76,7 +76,7 @@ if ($LASTEXITCODE -ne 0) {
     throw "Portable staging environment creation failed with exit code $LASTEXITCODE"
 }
 $stagingPython = Join-Path -Path (Join-Path -Path $stagingRoot -ChildPath 'Scripts') -ChildPath 'python.exe'
-& $env:CHONGZU_PROJECT_UV pip install `
+& $env:DONGJIAN_PROJECT_UV pip install `
     --python $stagingPython `
     --only-binary=:all: `
     --exact `
@@ -88,7 +88,7 @@ if ($LASTEXITCODE -ne 0) {
 # opencv-contrib-python.  Both publish the same ``cv2`` import; publish the
 # contrib payload last so the table candidate retains ximgproc and other
 # contrib APIs instead of whichever wheel happened to be installed last.
-& $env:CHONGZU_PROJECT_UV pip install `
+& $env:DONGJIAN_PROJECT_UV pip install `
     --python $stagingPython `
     --only-binary=:all: `
     --no-deps `
@@ -124,7 +124,7 @@ if (Test-Path -LiteralPath $bundledRapidOcrModels) {
     Remove-Item -LiteralPath $bundledRapidOcrModels -Recurse -Force
 }
 
-$ocrModelRoot = Join-Path -Path $env:CHONGZU_RUNTIME_ROOT -ChildPath 'models\ocr'
+$ocrModelRoot = Join-Path -Path $env:DONGJIAN_RUNTIME_ROOT -ChildPath 'models\ocr'
 New-Item -ItemType Directory -Path $ocrModelRoot -Force | Out-Null
 $stagingModelRoot = Join-Path -Path $stagingSite -ChildPath 'rapidocr\models'
 foreach ($model in (Get-ChildItem -LiteralPath $stagingModelRoot -Filter '*.onnx' -File)) {
@@ -154,7 +154,7 @@ if (Test-Path -LiteralPath $stagingRoot) {
     Remove-Item -LiteralPath $stagingRoot -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-Write-Output "Bootstrap complete. Development venv Python: $env:CHONGZU_DEV_PYTHON"
-Write-Output "Production standalone Python: $env:CHONGZU_PYTHON"
-Write-Output "Production packages: $env:CHONGZU_PACKAGES ($($runtimeRequirements -join ', '))"
+Write-Output "Bootstrap complete. Development venv Python: $env:DONGJIAN_DEV_PYTHON"
+Write-Output "Production standalone Python: $env:DONGJIAN_PYTHON"
+Write-Output "Production packages: $env:DONGJIAN_PACKAGES ($($runtimeRequirements -join ', '))"
 Write-Output "RapidOCR and ONNX Runtime are provisioned as a wheel-only offline OCR foundation; models are copied to $ocrModelRoot and runtime downloads are disabled. Java, Tika, Docling, Torch, and OCR cloud services remain excluded."
