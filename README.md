@@ -1,5 +1,8 @@
 # DongJian
 
+**DongJian（洞见）** 是一款面向科研资料整理与分析的 Windows 本地离线工作台，支持从 CSV、Excel、PDF、图片和 DOCX 等多源文件中提取文本与表格，并完成确定性清洗、质量检查、数据目录构建、本地检索与安全 SQL 查询。系统以 DuckDB 与 Parquet 作为本地数据底座，在不依赖大模型的情况下即可完成核心处理，同时支持用户按需接入 OpenAI-compatible AI 服务进行语义整理、视觉理解与辅助分析，强调数据可追溯、原始资料只读以及可搬迁的离线运行能力。
+
+
 DongJian is a fully relocatable, Windows x64 local research-data organization
 workbench. It inventories one scientific project directory, independently
 extracts tables and text, deterministically cleans/profiles the derived assets,
