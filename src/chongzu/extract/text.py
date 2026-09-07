@@ -303,7 +303,10 @@ def extract_text(
     force: bool = False,
     registry_path: Path | str | None = None,
     workspace_root: Path | str | None = None,
+    registry: Registry | None = None,
     _scan_summary=None,
+    file_ids: set[str] | None = None,
+    _skip_recovery: bool = False,
     progress_callback: Callable[..., None] | None = None,
     cancel_event=None,
 ) -> TextExtractionSummary:
@@ -328,10 +331,14 @@ def extract_text(
         scan_summary = _scan_summary
     source_root = canonical_source_root(source, require_directory=True)
     summary = TextExtractionSummary(source_root=source_root, discovery_scan_ms=scan_summary.elapsed_ms)
-    registry = Registry.open(registry_file, initialize=False)
+    owns_registry = registry is None
+    registry = registry or Registry.open(registry_file, initialize=False)
     try:
-        registry.recover_incomplete_extractions(source_root)
+        if not _skip_recovery:
+            registry.recover_incomplete_extractions(source_root)
         rows = registry.text_candidates(source_root)
+        if file_ids is not None:
+            rows = [row for row in rows if str(row.get("file_id") or "") in file_ids]
         summary.files_considered = registry.count_present_files(source_root)
         summary.text_files = len(rows)
         completed = 0
@@ -433,6 +440,7 @@ def extract_text(
         else:
             executor.shutdown(wait=True)
     finally:
-        registry.close()
+        if owns_registry:
+            registry.close()
     summary.wall_time_ms = (time.perf_counter_ns() - wall_started) / 1_000_000
     return summary

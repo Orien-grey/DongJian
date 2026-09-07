@@ -186,10 +186,26 @@ def test_live_server_reset_preserves_runtime_controls_and_restart_config(tmp_pat
             method="POST",
             payload={"confirmation": "清空"},
         )
-        assert status == 200, reset
-        assert reset["reset"] is True
-        assert reset["phases"]["finalize"] == "completed"
+        assert status == 202, reset
+        assert reset["accepted"] is True
+        assert reset["restarting"] is True
+        assert reset["requestId"]
         assert _wait_for_health(f"http://127.0.0.1:{port}")["registry"]["status"] == "ready"
+        reset_result = None
+        for _ in range(40):
+            try:
+                status, candidate = _json_request(f"http://127.0.0.1:{port}", reset["statusUrl"])
+            except (URLError, ValueError):
+                time.sleep(0.25)
+                continue
+            assert status == 200
+            reset_result = candidate
+            if candidate["result"] in {"succeeded", "failed"}:
+                break
+            time.sleep(0.25)
+        assert reset_result is not None
+        assert reset_result["phase"] == "completed"
+        assert reset_result["result"] == "succeeded"
         assert state.is_file() and lock.is_file() and start_lock.is_file() and log.is_file()
         assert not (project / "workspace" / "artifacts" / "old").exists()
         assert not (project / "workspace" / "output" / "old").exists()
@@ -237,8 +253,22 @@ def test_live_server_reset_preserves_runtime_controls_and_restart_config(tmp_pat
             method="POST",
             payload={"confirmation": "清空"},
         )
-        assert status == 200, second_reset
+        assert status == 202, second_reset
+        assert second_reset["accepted"] is True
         assert _wait_for_health(f"http://127.0.0.1:{port}")["server"]["pid"]
+        second_result = None
+        for _ in range(40):
+            try:
+                status, candidate = _json_request(f"http://127.0.0.1:{port}", second_reset["statusUrl"])
+            except (URLError, ValueError):
+                time.sleep(0.25)
+                continue
+            assert status == 200
+            second_result = candidate
+            if candidate["result"] in {"succeeded", "failed"}:
+                break
+            time.sleep(0.25)
+        assert second_result is not None and second_result["result"] == "succeeded"
         assert config.is_file()
     finally:
         if running:
@@ -302,7 +332,7 @@ def test_fix4_frontend_presentation_settings_and_runtime_contracts() -> None:
     assert "FileContentTableBlock" in app
     assert "继续加载" in app
     assert "sourcePreview" in app and "source-page-preview" in app
-    assert app.count("高级文本详情") == 1
+    assert app.count("文本技术详情") == 1
     assert "查看文本资产详情" not in app
     assert "method: \"PUT\"" in api
     assert "catalogRequestGeneration" in app

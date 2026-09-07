@@ -18,6 +18,7 @@ import polars as pl
 from chongzu import paths
 from chongzu.extract.artifacts import artifact_absolute
 from chongzu.registry import Registry
+from .table_trust import is_table_trusted_for_analysis
 
 
 SQL_SANDBOX_VERSION = "duckdb-memory-external-access-disabled-v1"
@@ -381,7 +382,8 @@ class SqlQueryService:
             cursor = registry.connection.execute(
                 f"""
                 SELECT c.asset_id, c.effective_display_name, c.source_file, c.source_format,
-                       c.rows, c.normalized_artifact_path, t.columns_json
+                       c.rows, c.normalized_artifact_path, c.quality_status,
+                       c.source_kind, c.extractor, t.columns_json
                 FROM catalog_assets c
                 JOIN table_assets t ON t.table_id=c.asset_id AND t.is_current=TRUE
                 WHERE c.asset_type='table' AND c.asset_id IN ({placeholders})
@@ -395,7 +397,10 @@ class SqlQueryService:
         missing = [asset_id for asset_id in normalized_ids if asset_id not in found]
         if missing:
             raise SqlAssetError("table_asset_not_found", "one or more selected table assets were not found")
-        return [found[asset_id] for asset_id in normalized_ids]
+        selected = [found[asset_id] for asset_id in normalized_ids]
+        if any(not is_table_trusted_for_analysis(row) for row in selected):
+            raise SqlAssetError("table_asset_not_trusted", "selected table asset is not a confirmed structured table")
+        return selected
 
     @staticmethod
     def _columns(row: Mapping[str, Any], path: Path) -> tuple[Mapping[str, Any], ...]:

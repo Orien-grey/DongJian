@@ -50,6 +50,11 @@ from .rapidocr_engine import OCRBlock, OCREngineError, RapidOCREngine
 
 
 MAX_OCR_WORKERS = 2
+# A 200-DPI A4 page is roughly 8.3M pixels.  This guard keeps an accidental
+# poster/scan at a bounded working-set cost instead of multiplying it by the
+# number of OCR workers.
+MAX_OCR_PAGE_PIXELS = 40_000_000
+MAX_OCR_IN_FLIGHT_PER_WORKER = 1
 
 
 class OCRExtractionError(RuntimeError):
@@ -179,6 +184,14 @@ def normalize_ocr_workers(workers: int | None) -> int:
     if value < 1 or value > MAX_OCR_WORKERS:
         raise ValueError(f"OCR workers must be between 1 and {MAX_OCR_WORKERS}")
     return value
+
+
+def _guard_page_pixels(width: int, height: int) -> None:
+    pixels = max(0, int(width)) * max(0, int(height))
+    if pixels > MAX_OCR_PAGE_PIXELS:
+        raise OCREngineError(
+            f"OCR page exceeds the local memory guard ({pixels} pixels > {MAX_OCR_PAGE_PIXELS})"
+        )
 
 
 def _source_from_row(row: dict[str, Any], workspace_root: Path) -> StructuredSource:
@@ -567,6 +580,7 @@ def _extract_one(source: StructuredSource, run_id: str, identity: str, targets: 
             image_document = load_image_document(source.path)
             image = image_document.images[0]
             image_height, image_width = int(image.shape[0]), int(image.shape[1])
+            _guard_page_pixels(image_width, image_height)
             process_target(
                 target=target,
                 image_document=image_document,
@@ -575,6 +589,7 @@ def _extract_one(source: StructuredSource, run_id: str, identity: str, targets: 
                 image_height=image_height,
                 page_bbox=BoundingBox(0.0, 0.0, float(image_width), float(image_height)),
             )
+            del image, image_document
         else:
             import pymupdf  # type: ignore[import-not-found]
 
@@ -590,6 +605,7 @@ def _extract_one(source: StructuredSource, run_id: str, identity: str, targets: 
                     image_document = load_image_document(pixmap.tobytes("png"))
                     image = image_document.images[0]
                     image_height, image_width = int(image.shape[0]), int(image.shape[1])
+                    _guard_page_pixels(image_width, image_height)
                     scale_x = float(page.rect.width) / max(1, image_width)
                     scale_y = float(page.rect.height) / max(1, image_height)
                     process_target(
@@ -602,6 +618,7 @@ def _extract_one(source: StructuredSource, run_id: str, identity: str, targets: 
                         page_rotation=int(page.rotation or 0),
                         pdf_scale=(scale_x, scale_y),
                     )
+                    del image, image_document, pixmap
         after = source.path.stat()
         if (after.st_size, after.st_mtime_ns) != (before.st_size, before.st_mtime_ns):
             raise OCREngineError("source size or mtime changed during OCR")
@@ -657,8 +674,10 @@ def extract_ocr(
     workspace_root: Path | str | None = None,
     _scan_summary: Any | None = None,
     selected_relative_paths: set[str] | None = None,
+    file_ids: set[str] | None = None,
     include_images: bool = True,
     include_pdfs: bool = True,
+    _skip_recovery: bool = False,
     progress_callback: Callable[..., None] | None = None,
     cancel_event=None,
 ) -> OCRExtractionSummary:
@@ -696,7 +715,10 @@ def extract_ocr(
     try:
         # Profiles are the sole PDF routing facts.  Establish them through the
         # existing Phase 4A route, which reuses unchanged native results.
-        has_pdf = any(row.get("business_format") == "pdf" for row in probe_registry.ocr_candidates(source_root))
+        probe_rows = probe_registry.ocr_candidates(source_root)
+        if file_ids is not None:
+            probe_rows = [row for row in probe_rows if str(row.get("file_id") or "") in file_ids]
+        has_pdf = any(row.get("business_format") == "pdf" for row in probe_rows)
     finally:
         probe_registry.close()
     if has_pdf:
@@ -709,13 +731,18 @@ def extract_ocr(
             registry_path=registry_file,
             workspace_root=workspace,
             _scan_summary=scan_summary,
+            file_ids=file_ids,
+            _skip_recovery=_skip_recovery,
             progress_callback=progress_callback,
             cancel_event=cancel_event,
         )
     registry = Registry.open(registry_file, initialize=False)
     try:
-        registry.recover_incomplete_extractions(source_root)
+        if not _skip_recovery:
+            registry.recover_incomplete_extractions(source_root)
         rows = registry.ocr_candidates(source_root)
+        if file_ids is not None:
+            rows = [row for row in rows if str(row.get("file_id") or "") in file_ids]
         if not include_images:
             rows = [row for row in rows if row.get("business_format") != "jpeg" and row.get("business_format") != "png"]
         if not include_pdfs:
@@ -747,7 +774,7 @@ def extract_ocr(
         summary.files_attempted = len(pending)
         completed = 0
 
-        def emit(file_name: str | None, substage: str) -> None:
+        def emit(file_name: str | None, substage: str, *, current_page: int | None = None, total_pages: int | None = None) -> None:
             if progress_callback is None:
                 return
             progress = 0.60 + (0.12 * completed / max(1, len(rows)))
@@ -758,6 +785,8 @@ def extract_ocr(
                     current_file=file_name,
                     completed=completed,
                     total=len(rows),
+                    current_page=current_page,
+                    total_pages=total_pages,
                     current_substage=substage,
                 )
             except TypeError:
@@ -767,7 +796,10 @@ def extract_ocr(
             nonlocal completed
             check_cancel(cancel_event)
             source_item, targets, route_reason = item
-            emit(source_item.relative_path, "准备 OCR")
+            first_page = next((target.page_number for target in targets if target.page_number is not None), None)
+            target_pages = [target.page_number for target in targets if target.page_number is not None]
+            total_pages = max(target_pages, default=None)
+            emit(source_item.relative_path, "准备 OCR", current_page=first_page, total_pages=total_pages)
             identity = ocr_extraction_identity(source_item, targets)
             reusable = None if force else registry.reusable_ocr_extraction(identity)
             if reusable is not None and _artifacts_exist(reusable, workspace):
@@ -777,7 +809,7 @@ def extract_ocr(
                 summary.text_assets_produced += int(reusable.get("text_asset_count") or len(reusable.get("text_assets") or []))
                 summary.table_assets_produced += int(reusable.get("table_count") or 0)
                 completed += 1
-                emit(source_item.relative_path, "复用已有 OCR 结果")
+                emit(source_item.relative_path, "复用已有 OCR 结果", current_page=targets[-1].page_number if targets else None, total_pages=total_pages)
                 return None
             run_id = f"xrun_{uuid4().hex}"
             started_at = registry_now()
@@ -800,7 +832,11 @@ def extract_ocr(
             tuple[datetime, StructuredSource, str, list[OCRTarget], str, str],
         ] = {}
         try:
-            for item in pending:
+            pending_index = 0
+            max_in_flight = max(1, worker_count * MAX_OCR_IN_FLIGHT_PER_WORKER)
+            while pending_index < len(pending) and len(pending_futures) < max_in_flight:
+                item = pending[pending_index]
+                pending_index += 1
                 submitted = submit(executor, item)
                 if submitted is None:
                     continue
@@ -826,7 +862,16 @@ def extract_ocr(
                         )
                     _record(registry, summary, result, started_at, force)
                     completed += 1
-                    emit(source_item.relative_path, "OCR 完成")
+                    last_page = next((target.page_number for target in reversed(targets) if target.page_number is not None), None)
+                    emit(source_item.relative_path, "OCR 完成", current_page=last_page, total_pages=max((target.page_number for target in targets if target.page_number is not None), default=None))
+                while pending_index < len(pending) and len(pending_futures) < max_in_flight:
+                    item = pending[pending_index]
+                    pending_index += 1
+                    submitted = submit(executor, item)
+                    if submitted is None:
+                        continue
+                    future, started_at, run_id, identity = submitted
+                    pending_futures[future] = (started_at, item[0], item[2], item[1], run_id, identity)
         except BaseException:
             for future in pending_futures:
                 future.cancel()

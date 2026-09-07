@@ -106,12 +106,17 @@ def _catalog_rows(tmp_path: Path) -> list[tuple[Any, ...]]:
         registry.close()
 
 
-def test_scanned_pdf_one_page_renders_and_publishes_existing_assets(tmp_path: Path) -> None:
+def test_scanned_pdf_one_page_renders_and_publishes_existing_assets(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     source = tmp_path / "source"
     pdf = _pdf(source / "scan.pdf", ["scanned"])
     before = _sha(pdf)
     provider = SequenceVisionProvider([_mixed_payload()])
     substages: list[str] = []
+
+    def local_route_must_not_run(*_args: Any, **_kwargs: Any) -> None:
+        raise AssertionError("local OCR route entered in ai_vision mode")
+
+    monkeypatch.setattr("chongzu.extract.unified.extract_ocr", local_route_must_not_run)
 
     def progress(_stage: str, _value: float, **kwargs: Any) -> None:
         if kwargs.get("current_substage"):
@@ -131,6 +136,7 @@ def test_scanned_pdf_one_page_renders_and_publishes_existing_assets(tmp_path: Pa
     assert summary.vision_pdf_summary is not None
     assert summary.vision_pdf_summary.pages_attempted == 1
     assert summary.vision_pdf_summary.pages_succeeded == 1
+    assert summary.ocr_summary is None
     assert provider.calls == 1
     assert _sha(pdf) == before
     assert {
@@ -219,6 +225,7 @@ def test_native_pdf_does_not_call_vision_and_local_mode_keeps_pdf_fallback(monke
         workspace_root=_workspace(tmp_path),
     )
     assert native.vision_pdf_summary is not None
+    assert native.pdf_table_summary is not None
     assert native.vision_pdf_summary.pages_considered == 0
     assert provider.calls == 0
 

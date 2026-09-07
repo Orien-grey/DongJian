@@ -19,6 +19,7 @@ import unicodedata
 from typing import Any, Iterable, Mapping, Protocol, Sequence
 
 from chongzu import paths
+from chongzu.extract.artifacts import artifact_absolute
 from chongzu.registry import Registry
 
 
@@ -31,6 +32,27 @@ MAX_SNIPPET_CHARS = 500
 MAX_METADATA_VALUE_CHARS = 2_000
 MAX_METADATA_ITEMS = 100
 MAX_RESULTS_PER_ASSET = 3
+
+
+def _table_trust_level(asset: Mapping[str, Any]) -> str:
+    # Import lazily because services.analysis imports this module for its
+    # SearchService; importing the services package at module load time would
+    # create a circular import.
+    from chongzu.services.table_trust import table_trust_level
+
+    return table_trust_level(asset)
+
+
+def _table_is_trusted(asset: Mapping[str, Any]) -> bool:
+    from chongzu.services.table_trust import is_table_trusted_for_analysis
+
+    return is_table_trusted_for_analysis(asset)
+
+
+def _table_is_candidate(asset: Mapping[str, Any]) -> bool:
+    from chongzu.services.table_trust import CANDIDATE_ONLY
+
+    return _table_trust_level(asset) == CANDIDATE_ONLY
 
 # Ranking is intentionally centralized and documented.  These are local
 # ordinal scores, not semantic relevance probabilities.
@@ -58,6 +80,7 @@ class SearchValidationError(ValueError):
 @dataclass(frozen=True)
 class SearchQuery:
     query: str
+    file_id: str | None = None
     asset_type: str = "all"
     source_format: str | None = None
     quality_status: str | None = None
@@ -73,6 +96,8 @@ class SearchQuery:
             raise SearchValidationError("query contains an invalid control character")
         if self.asset_type not in {"all", "table", "text"}:
             raise SearchValidationError("type must be all, table, or text")
+        if self.file_id is not None and (not isinstance(self.file_id, str) or not self.file_id.strip() or len(self.file_id) > 160):
+            raise SearchValidationError("file_id is invalid")
         if self.quality_status not in {None, "ready", "needs_review", "unusable"}:
             raise SearchValidationError("quality must be ready, needs_review, or unusable")
         source_format = self.source_format.strip().casefold() if self.source_format else None
@@ -86,6 +111,7 @@ class SearchQuery:
             raise SearchValidationError(f"offset must be between 0 and {MAX_SEARCH_OFFSET}")
         return SearchQuery(
             query=value,
+            file_id=self.file_id.strip() if isinstance(self.file_id, str) else None,
             asset_type=self.asset_type,
             source_format=source_format,
             quality_status=self.quality_status,
@@ -112,11 +138,14 @@ class SearchResult:
     quality_status: str
     provenance: Mapping[str, Any]
     match_offsets: tuple[tuple[int, int], ...] = ()
+    locator: Mapping[str, Any] | None = None
 
     def as_dict(self) -> dict[str, Any]:
+        nested = self.provenance.get("provenance") if isinstance(self.provenance.get("provenance"), Mapping) else {}
         return {
             "resultId": self.result_id,
             "assetId": self.asset_id,
+            "fileId": self.provenance.get("fileId"),
             "assetType": self.asset_type,
             "chunkId": self.chunk_id,
             "displayName": self.display_name,
@@ -124,11 +153,13 @@ class SearchResult:
             "sourceFormat": self.source_format,
             "pageNumber": self.page_number,
             "sheetName": self.sheet_name,
+            "bbox": self.provenance.get("bbox") or nested.get("bbox"),
             "matchKind": self.match_kind,
             "snippet": self.snippet,
             "score": round(float(self.score), 4),
             "qualityStatus": self.quality_status,
             "matchOffsets": [[int(start), int(end)] for start, end in self.match_offsets],
+            "locator": _json_value(dict(self.locator)) if self.locator is not None else None,
             "provenance": _json_value(dict(self.provenance)),
         }
 
@@ -152,6 +183,70 @@ class SearchResponse:
             "results": [result.as_dict() for result in self.results],
             "backend": self.backend,
             "indexVersion": self.index_version,
+        }
+
+
+@dataclass(frozen=True)
+class SearchOccurrence:
+    occurrence_id: str
+    file_id: str
+    asset_id: str
+    chunk_id: str | None
+    page: int | None
+    section: str | None
+    sheet: str | None
+    start_offset: int
+    end_offset: int
+    bbox: Any
+    snippet: str
+    match_offsets: tuple[tuple[int, int], ...] = ()
+    row: int | None = None
+    column: int | None = None
+    cell_value: str | None = None
+    locator: Mapping[str, Any] | None = None
+
+    def as_dict(self) -> dict[str, Any]:
+        return _json_value(
+            {
+                "occurrenceId": self.occurrence_id,
+                "fileId": self.file_id,
+                "assetId": self.asset_id,
+                "chunkId": self.chunk_id,
+                "page": self.page,
+                "section": self.section,
+                "sheet": self.sheet,
+                "startOffset": self.start_offset,
+                "endOffset": self.end_offset,
+                "bbox": self.bbox,
+                "snippet": self.snippet,
+                "matchOffsets": [[start, end] for start, end in self.match_offsets],
+                "row": self.row,
+                "column": self.column,
+                "cellValue": self.cell_value,
+                "locator": _json_value(dict(self.locator)) if self.locator is not None else None,
+            }
+        )
+
+
+@dataclass(frozen=True)
+class FileSearchResponse:
+    query: str
+    total_occurrences: int
+    matched_pages: tuple[int, ...]
+    matched_sections: tuple[str, ...]
+    limit: int
+    offset: int
+    results: tuple[SearchOccurrence, ...]
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "query": self.query,
+            "totalOccurrences": self.total_occurrences,
+            "matchedPages": list(self.matched_pages),
+            "matchedSections": list(self.matched_sections),
+            "limit": self.limit,
+            "offset": self.offset,
+            "results": [item.as_dict() for item in self.results],
         }
 
 
@@ -295,6 +390,38 @@ def _find_spans(text: str, query: str, mode: str) -> tuple[tuple[int, int], ...]
     return tuple(sorted(set(spans)))
 
 
+def _all_spans(text: str, query: str, mode: str) -> tuple[tuple[int, int], ...]:
+    """Return every local occurrence without the ranked-search asset cap."""
+
+    if not text or not query:
+        return ()
+    folded_text = _fold(text)
+    terms = [_fold(query)] if mode == "phrase" else [_fold(token) for token in query.split() if token]
+    if not terms or any(not term for term in terms):
+        return ()
+    spans: list[tuple[int, int]] = []
+    for term in terms:
+        position = folded_text.find(term)
+        if position < 0:
+            return ()
+        while position >= 0:
+            spans.append((position, position + len(term)))
+            position = folded_text.find(term, position + 1)
+    return tuple(sorted(set(spans)))
+
+
+def _occurrence_snippet(text: str, start: int, end: int) -> tuple[str, tuple[tuple[int, int], ...]]:
+    if len(text) <= MAX_SNIPPET_CHARS:
+        return text, ((start, end),)
+    window_start = max(0, start - MAX_SNIPPET_CHARS // 3)
+    window_end = min(len(text), window_start + MAX_SNIPPET_CHARS)
+    window_start = max(0, window_end - MAX_SNIPPET_CHARS)
+    prefix = "…" if window_start else ""
+    suffix = "…" if window_end < len(text) else ""
+    snippet = prefix + text[window_start:window_end] + suffix
+    return snippet, ((start - window_start + len(prefix), end - window_start + len(prefix)),)
+
+
 def _match(text: str, query: str, mode: str) -> _TextMatch | None:
     if not text or not query:
         return None
@@ -433,6 +560,8 @@ def _provenance(row: Mapping[str, Any], *, chunk_id: str | None = None, chunk_pr
         "pageNumber": row.get("page_number") or provenance.get("page_number"),
         "sheetName": row.get("sheet_name") or provenance.get("section"),
         "chunkId": chunk_id,
+        "charStart": row.get("char_start"),
+        "charEnd": row.get("char_end"),
         "extractor": row.get("extractor"),
         "extractorVersion": row.get("extractor_version"),
         "extractionRunId": row.get("extraction_run_id"),
@@ -521,6 +650,17 @@ def _chunk_candidate(row: Mapping[str, Any], query: SearchQuery) -> _Candidate |
         quality_status=str(row.get("quality_status") or "needs_review"),
         provenance={},
         match_offsets=offsets,
+        locator={
+            "kind": "text",
+            "assetId": asset_id,
+            "chunkId": chunk_id,
+            "offset": int(row.get("char_start") or 0),
+            "length": max(0, int(row.get("char_end") or 0) - int(row.get("char_start") or 0)),
+            "matchOffsets": [
+                [int(row.get("char_start") or 0) + int(start), int(row.get("char_start") or 0) + int(end)]
+                for start, end in offsets
+            ],
+        },
     )
     return _Candidate(
         result=result,
@@ -546,18 +686,34 @@ class SearchService:
         if query.asset_type != "all":
             clauses.append("asset_type=?")
             params.append(query.asset_type)
+        if query.file_id:
+            clauses.append("file_id=?")
+            params.append(query.file_id)
         if query.source_format:
             clauses.append("LOWER(source_format)=?")
             params.append(query.source_format)
         if query.quality_status:
             clauses.append("quality_status=?")
             params.append(query.quality_status)
+        elif query.asset_type in {"all", "table"}:
+            clauses.append(
+                "(asset_type <> 'table' OR (quality_status='ready' "
+                "AND COALESCE(source_kind, '') NOT IN ('page', 'image') "
+                "AND LOWER(COALESCE(extractor, '')) NOT LIKE '%img2table%'))"
+            )
         cursor = registry.connection.execute(
             f"SELECT * FROM catalog_assets WHERE {' AND '.join(clauses)} ORDER BY source_file, asset_type, asset_id",
             params,
         )
         columns = [item[0] for item in cursor.description]
-        return [dict(zip(columns, row)) for row in cursor.fetchall()]
+        rows = [dict(zip(columns, row)) for row in cursor.fetchall()]
+        # A caller may explicitly ask for a quality state.  That must not
+        # re-admit image/PDF candidate tables into the ordinary search index.
+        return [
+            row
+            for row in rows
+            if row.get("asset_type") != "table" or not _table_is_candidate(row)
+        ]
 
     @staticmethod
     def _add_search_metadata(registry: Registry, rows: list[dict[str, Any]]) -> None:
@@ -616,6 +772,9 @@ class SearchService:
             return []
         clauses = ["c.asset_type='text'"]
         params: list[Any] = []
+        if query.file_id:
+            clauses.append("c.file_id=?")
+            params.append(query.file_id)
         if query.source_format:
             clauses.append("LOWER(c.source_format)=?")
             params.append(query.source_format)
@@ -639,7 +798,7 @@ class SearchService:
                    c.sheet_name, c.effective_display_name, c.fallback_display_name,
                    c.quality_status, c.extractor, c.extractor_version,
                    c.extraction_run_id, tc.chunk_id, tc.text AS chunk_text,
-                   tc.provenance_json
+                   tc.char_start, tc.char_end, tc.provenance_json
             FROM catalog_assets c
             JOIN text_chunks tc ON tc.text_asset_id=c.asset_id
             WHERE {' AND '.join(clauses)}
@@ -649,6 +808,92 @@ class SearchService:
         )
         columns = [item[0] for item in cursor.description]
         return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+    def _table_occurrences(self, registry: Registry, query: SearchQuery) -> list[SearchOccurrence]:
+        if query.asset_type == "text":
+            return []
+        clauses = ["c.asset_type='table'", "c.file_id=?"]
+        params: list[Any] = [query.file_id]
+        if query.source_format:
+            clauses.append("LOWER(c.source_format)=?")
+            params.append(query.source_format)
+        if query.quality_status:
+            clauses.append("c.quality_status=?")
+            params.append(query.quality_status)
+        cursor = registry.connection.execute(
+            f"""
+            SELECT c.asset_id, c.file_id, c.source_file, c.source_format,
+                   c.source_kind, c.extractor, c.quality_status, c.sheet_name,
+                   c.normalized_artifact_path
+            FROM catalog_assets c
+            WHERE {' AND '.join(clauses)}
+            ORDER BY c.source_file, c.sheet_name NULLS FIRST, c.asset_id
+            """,
+            params,
+        )
+        columns = [item[0] for item in cursor.description]
+        rows = [dict(zip(columns, row)) for row in cursor.fetchall()]
+        occurrences: list[SearchOccurrence] = []
+        workspace_root = self.registry_path.parent.parent
+        for asset in rows:
+            if not _table_is_trusted(asset):
+                continue
+            path_value = asset.get("normalized_artifact_path")
+            if not path_value:
+                continue
+            path = artifact_absolute(str(path_value), workspace_root)
+            if not path.is_file():
+                continue
+            try:
+                import polars as pl
+
+                frame = pl.read_parquet(path)
+            except (OSError, ValueError, RuntimeError):
+                continue
+            asset_id = str(asset.get("asset_id") or "")
+            file_value = str(asset.get("file_id") or query.file_id or "")
+            sheet = str(asset.get("sheet_name") or "") or None
+            for row_index, row in enumerate(frame.iter_rows(named=True)):
+                for column_index, column_name in enumerate(frame.columns):
+                    value = row.get(column_name)
+                    if value is None:
+                        continue
+                    cell_text = unicodedata.normalize("NFC", str(value))
+                    exact_query = unicodedata.normalize("NFC", query.query)
+                    start = cell_text.find(exact_query)
+                    while start >= 0:
+                        end = start + len(exact_query)
+                        occurrence_id = f"occ_{file_value}_{asset_id}_cell_{row_index}_{column_index}_{start}_{end}"
+                        occurrences.append(
+                            SearchOccurrence(
+                                occurrence_id=occurrence_id,
+                                file_id=file_value,
+                                asset_id=asset_id,
+                                chunk_id=None,
+                                page=None,
+                                section=sheet,
+                                sheet=sheet,
+                                start_offset=start,
+                                end_offset=end,
+                                bbox=None,
+                                snippet=f"{column_name}: {cell_text}",
+                                match_offsets=((len(str(column_name)) + 2 + start, len(str(column_name)) + 2 + end),),
+                                row=row_index,
+                                column=column_index,
+                                cell_value=cell_text,
+                                locator={
+                                    "kind": "table_cell",
+                                    "assetId": asset_id,
+                                    "sheet": sheet,
+                                    "row": row_index,
+                                    "column": column_index,
+                                    "matchStart": start,
+                                    "matchEnd": end,
+                                },
+                            )
+                        )
+                        start = cell_text.find(exact_query, end)
+        return occurrences
 
     def search(self, request: SearchQuery) -> SearchResponse:
         query = request.validated()
@@ -691,6 +936,109 @@ class SearchService:
             for candidate in bounded[query.offset : query.offset + query.limit]
         )
         return SearchResponse(query=query.query, total=len(bounded), limit=query.limit, offset=query.offset, results=page)
+
+    def search_file_occurrences(
+        self,
+        file_id: str,
+        request: SearchQuery,
+    ) -> FileSearchResponse:
+        """Search one file as occurrence-level evidence for the reader UI."""
+
+        query = replace(request, file_id=file_id, match="phrase").validated()
+        if not query.query:
+            return FileSearchResponse("", 0, (), (), query.limit, query.offset, ())
+        registry = self._open()
+        occurrences: list[SearchOccurrence] = []
+        try:
+            # File-local search must use the same presentation blocks that
+            # the reader renders.  TextChunk offsets describe extraction
+            # storage and are not valid after page/document presentation
+            # reordering or normalization.
+            from chongzu.services.catalog import CatalogService
+
+            content = CatalogService(
+                registry_path=self.registry_path,
+                workspace_root=self.registry_path.parent.parent,
+            ).file_content(file_id)
+            exact_query = unicodedata.normalize("NFC", query.query)
+            if isinstance(content, Mapping):
+                sections = content.get("sections")
+                if isinstance(sections, list):
+                    for section_index, section_value in enumerate(sections):
+                        if not isinstance(section_value, Mapping):
+                            continue
+                        section_label = section_value.get("label") or section_value.get("sectionId")
+                        section = str(section_label) if section_label else None
+                        page_value = section_value.get("pageNumber")
+                        try:
+                            page = int(page_value) if page_value is not None else None
+                        except (TypeError, ValueError):
+                            page = None
+                        sheet_value = section_value.get("sheetName")
+                        sheet = str(sheet_value) if sheet_value else None
+                        blocks = section_value.get("blocks")
+                        if not isinstance(blocks, list):
+                            continue
+                        for block_index, block in enumerate(blocks):
+                            if not isinstance(block, Mapping) or block.get("type") != "text":
+                                continue
+                            text = unicodedata.normalize("NFC", str(block.get("text") or ""))
+                            position = text.find(exact_query)
+                            while position >= 0:
+                                end = position + len(exact_query)
+                                snippet, snippet_offsets = _occurrence_snippet(text, position, end)
+                                asset_id = str(block.get("assetId") or "")
+                                occurrence_id = f"occ_{file_id}_{asset_id}_presentation_{section_index}_{block_index}_{position}_{end}"
+                                occurrences.append(
+                                    SearchOccurrence(
+                                        occurrence_id=occurrence_id,
+                                        file_id=file_id,
+                                        asset_id=asset_id,
+                                        chunk_id=None,
+                                        page=page,
+                                        section=section,
+                                        sheet=sheet,
+                                        start_offset=position,
+                                        end_offset=end,
+                                        bbox=None,
+                                        snippet=snippet,
+                                        match_offsets=snippet_offsets,
+                                        locator={
+                                            "kind": "presentation_text",
+                                            "assetId": asset_id,
+                                            "sectionId": section_value.get("sectionId"),
+                                            "blockIndex": block_index,
+                                            "matchStart": position,
+                                            "matchEnd": end,
+                                        },
+                                    )
+                                )
+                                position = text.find(exact_query, end)
+            occurrences.extend(self._table_occurrences(registry, query))
+        finally:
+            registry.close()
+        occurrences.sort(key=lambda item: (item.page is None, item.page or 0, item.start_offset, item.asset_id, item.occurrence_id))
+        asset_occurrence_index: dict[str, int] = {}
+        indexed_occurrences: list[SearchOccurrence] = []
+        for item in occurrences:
+            index = asset_occurrence_index.get(item.asset_id, 0)
+            asset_occurrence_index[item.asset_id] = index + 1
+            indexed_occurrences.append(
+                replace(item, locator={**dict(item.locator or {}), "occurrenceIndex": index})
+            )
+        occurrences = indexed_occurrences
+        pages = tuple(sorted({item.page for item in occurrences if item.page is not None}))
+        sections = tuple(sorted({item.section for item in occurrences if item.section}))
+        page = tuple(occurrences[query.offset : query.offset + query.limit])
+        return FileSearchResponse(
+            query=query.query,
+            total_occurrences=len(occurrences),
+            matched_pages=pages,
+            matched_sections=sections,
+            limit=query.limit,
+            offset=query.offset,
+            results=page,
+        )
 
     def retrieve(
         self,

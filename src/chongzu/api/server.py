@@ -57,28 +57,70 @@ class ChongZuHTTPServer(ThreadingHTTPServer):
         class Handler(BaseHTTPRequestHandler):
             server_version = "ChongZuLocal/1"
 
-            def _send_json(self, status: int, payload: dict[str, Any]) -> None:
+            def finish(self) -> None:  # noqa: D401
+                """Close the response stream before handing off lifecycle work."""
+
+                callback = getattr(self, "_deferred_response_callback", None)
+                try:
+                    super().finish()
+                finally:
+                    if callable(callback):
+                        callback()
+
+            def _send_json(
+                self,
+                status: int,
+                payload: dict[str, Any],
+                *,
+                after_response: Any = None,
+                on_response_failure: Any = None,
+            ) -> None:
                 encoded = json.dumps(payload, ensure_ascii=False, default=_json_default, separators=(",", ":")).encode("utf-8")
-                self.send_response(status)
-                self.send_header("Content-Type", "application/json; charset=utf-8")
-                self.send_header("Content-Length", str(len(encoded)))
-                self.send_header("Cache-Control", "no-store")
-                self.end_headers()
-                if self.command != "HEAD":
-                    self.wfile.write(encoded)
+                sent = False
+                try:
+                    self._deferred_response_callback = None
+                    self.send_response(status)
+                    self.send_header("Content-Type", "application/json; charset=utf-8")
+                    self.send_header("Content-Length", str(len(encoded)))
+                    self.send_header("Cache-Control", "no-store")
+                    if callable(after_response) or callable(on_response_failure):
+                        self.send_header("Connection", "close")
+                    self.end_headers()
+                    if self.command != "HEAD":
+                        self.wfile.write(encoded)
+                    self.wfile.flush()
+                    sent = True
+                finally:
+                    self._deferred_response_callback = after_response if sent else on_response_failure
 
             def _send_response(self, response: Any) -> None:
                 if getattr(response, "raw_body", None) is None:
-                    self._send_json(response.status, response.payload)
+                    self._send_json(
+                        response.status,
+                        response.payload,
+                        after_response=getattr(response, "after_response", None),
+                        on_response_failure=getattr(response, "on_response_failure", None),
+                    )
                     return
                 encoded = response.raw_body
-                self.send_response(response.status)
-                self.send_header("Content-Type", response.content_type)
-                self.send_header("Content-Length", str(len(encoded)))
-                self.send_header("Cache-Control", "no-store")
-                self.end_headers()
-                if self.command != "HEAD":
-                    self.wfile.write(encoded)
+                sent = False
+                try:
+                    self._deferred_response_callback = None
+                    self.send_response(response.status)
+                    self.send_header("Content-Type", response.content_type)
+                    self.send_header("Content-Length", str(len(encoded)))
+                    self.send_header("Cache-Control", "no-store")
+                    if callable(getattr(response, "after_response", None)) or callable(getattr(response, "on_response_failure", None)):
+                        self.send_header("Connection", "close")
+                    for name, value in getattr(response, "headers", {}).items():
+                        self.send_header(str(name), str(value))
+                    self.end_headers()
+                    if self.command != "HEAD":
+                        self.wfile.write(encoded)
+                    self.wfile.flush()
+                    sent = True
+                finally:
+                    self._deferred_response_callback = getattr(response, "after_response", None) if sent else getattr(response, "on_response_failure", None)
 
             def _send_error(self, error: ApiError) -> None:
                 request_id = self._ensure_request_id()
@@ -142,7 +184,7 @@ class ChongZuHTTPServer(ThreadingHTTPServer):
                         if not app_server_token_matches(self.server, self.headers.get("X-ChongZu-Control")):
                             self._send_error(ApiError("not_found", "resource was not found", 404))
                             return
-                        app.request_shutdown()
+                        app.request_shutdown(reset=self.headers.get("X-ChongZu-Shutdown-Reason") == "reset")
                         self._send_json(202, {"status": "shutting_down"})
                         threading.Thread(target=self.server.shutdown, name="chongzu-shutdown", daemon=True).start()
                         return
@@ -153,6 +195,7 @@ class ChongZuHTTPServer(ThreadingHTTPServer):
                             parse_qs(parsed.query),
                             body,
                             request_id=self.request_id,
+                            request_headers=dict(self.headers),
                         )
                         self._send_response(response)
                     except ApiError as exc:

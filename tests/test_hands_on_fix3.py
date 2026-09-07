@@ -241,7 +241,7 @@ def test_fix3_frontend_uses_one_advanced_text_link_and_settings_layout() -> None
     app = (root / "frontend/src/App.tsx").read_text(encoding="utf-8")
     styles = (root / "frontend/src/styles.css").read_text(encoding="utf-8")
     assert "查看文本资产详情" not in app
-    assert app.count("高级文本详情") == 1
+    assert app.count("文本技术详情") == 1
     assert "settings-layout" in app
     assert ".settings-layout" in styles
     assert "position: sticky" in styles and "top: 0" in styles

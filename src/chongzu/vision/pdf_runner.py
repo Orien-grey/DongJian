@@ -229,6 +229,8 @@ def extract_vision_pdf(
     registry_path: Path | str | None = None,
     workspace_root: Path | str | None = None,
     _scan_summary: Any | None = None,
+    file_ids: set[str] | None = None,
+    _skip_recovery: bool = False,
     progress_callback: Callable[..., None] | None = None,
     cancel_event: Event | None = None,
 ) -> VisionExtractionSummary:
@@ -253,6 +255,8 @@ def extract_vision_pdf(
         # Direct callers may use this route without the unified coordinator;
         # create the canonical native profile before selecting pages.
         rows = probe_registry.pdf_candidates(source_root)
+        if file_ids is not None:
+            rows = [row for row in rows if str(row.get("file_id") or "") in file_ids]
         needs_profile = rows and any(
             probe_registry.current_pdf_profile(str(row["file_id"]), str(row["sha256"])) is None
             for row in rows
@@ -267,11 +271,14 @@ def extract_vision_pdf(
             registry_path=registry_file,
             workspace_root=workspace,
             _scan_summary=scan_summary,
+            file_ids=file_ids,
             cancel_event=cancel_event,
         )
     registry = Registry.open(registry_file, initialize=False)
     try:
         rows = registry.pdf_candidates(source_root)
+        if file_ids is not None:
+            rows = [row for row in rows if str(row.get("file_id") or "") in file_ids]
 
         selected: list[tuple[dict[str, Any], list[int], dict[str, Any]]] = []
         for row in rows:

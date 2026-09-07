@@ -12,6 +12,7 @@ import html
 import re
 import socket
 from collections.abc import Mapping
+from threading import Event
 from typing import Any
 from urllib import error as urllib_error
 from urllib import request as urllib_request
@@ -134,7 +135,7 @@ class OpenAICompatibleProvider:
             result[str(key)] = item
         return result or None
 
-    def generate(self, request: SemanticRequest) -> SemanticResponse:
+    def generate(self, request: SemanticRequest, *, cancel_event: Event | None = None) -> SemanticResponse:
         payload = self._request_body(request)
         http_request = urllib_request.Request(
             self.endpoint,
@@ -149,12 +150,17 @@ class OpenAICompatibleProvider:
         attempts = self.config.max_retries + 1
         last_error: SemanticProviderError | None = None
         for attempt in range(attempts):
+            if cancel_event is not None and cancel_event.is_set():
+                raise SemanticProviderError("semantic request was cancelled", code="cancelled", retryable=False)
             self.call_count += 1
             self.request_payload_bytes += len(payload)
             self.request_payload_bytes_history.append(len(payload))
             self.last_endpoint = self.endpoint
             try:
                 with urllib_request.urlopen(http_request, timeout=self.config.timeout_seconds) as response:
+                    if cancel_event is not None and cancel_event.is_set():
+                        response.close()
+                        raise SemanticProviderError("semantic request was cancelled", code="cancelled", retryable=False)
                     status_value = getattr(response, "status", None)
                     status = int(status_value if status_value is not None else response.getcode())
                     if status >= 400:
@@ -178,6 +184,8 @@ class OpenAICompatibleProvider:
                                 code="response_too_large",
                             )
                     raw = response.read(self.max_response_bytes + 1)
+                    if cancel_event is not None and cancel_event.is_set():
+                        raise SemanticProviderError("semantic request was cancelled", code="cancelled", retryable=False)
                     if len(raw) > self.max_response_bytes:
                         raise SemanticProviderError(
                             "semantic response exceeds the configured size limit",
@@ -255,3 +263,8 @@ class OpenAICompatibleProvider:
                 if attempt + 1 >= attempts:
                     raise last_error from exc
         raise last_error or SemanticProviderError("semantic provider failed", code="provider_error")
+
+    def generate_cancellable(self, request: SemanticRequest, cancel_event: Event) -> SemanticResponse:
+        """Bind report cancellation to the urllib response lifecycle."""
+
+        return self.generate(request, cancel_event=cancel_event)

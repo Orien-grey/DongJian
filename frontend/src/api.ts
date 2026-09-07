@@ -11,6 +11,10 @@ import type {
   CatalogResponse,
   FileDetail,
   FileContentResponse,
+  FileSearchResponse,
+  FileInsight,
+  FileInsightBulkResponse,
+  FileInsightQueueSummary,
   FileCatalogResponse,
   HealthResponse,
   Overview,
@@ -22,6 +26,7 @@ import type {
   TablePreview,
   Task,
   TasksResponse,
+  WorkspaceSnapshot,
   TextPreview,
 } from "./types";
 
@@ -76,7 +81,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export const api = {
   health: () => request<HealthResponse>("/api/v1/health"),
   aiSettings: () => request<AISettingsResponse>("/api/v1/settings/ai"),
-  saveAiSettings: (value: { baseUrl: string; apiKey?: string; clearApiKey?: boolean; model: string; timeout: number; visionEnabled: boolean }) =>
+  saveAiSettings: (value: { baseUrl: string; apiKey?: string; clearApiKey?: boolean; model: string; timeout: number; visionEnabled: boolean; fileInsightEnabled?: boolean }) =>
     request<AISettingsResponse & { saved: boolean }>("/api/v1/settings/ai", {
       method: "PUT",
       body: JSON.stringify(value),
@@ -87,17 +92,31 @@ export const api = {
       body: JSON.stringify(value),
     }),
   overview: () => request<Overview>("/api/v1/overview"),
+  workspaceSnapshot: () => request<WorkspaceSnapshot>("/api/v1/workspace/snapshot"),
   catalog: (params: URLSearchParams) => request<CatalogResponse>(`/api/v1/catalog?${params.toString()}`),
   files: (params: URLSearchParams) => request<FileCatalogResponse>(`/api/v1/catalog?${params.toString()}`),
   search: (params: URLSearchParams) => request<SearchResponse>(`/api/v1/search?${params.toString()}`),
   asset: (assetId: string) => request<AssetDetail>(`/api/v1/assets/${encodeURIComponent(assetId)}`),
   file: (fileId: string, signal?: AbortSignal) => request<FileDetail>(`/api/v1/files/${encodeURIComponent(fileId)}`, { signal }),
-  fileContent: (fileId: string, signal?: AbortSignal) => request<FileContentResponse>(`/api/v1/files/${encodeURIComponent(fileId)}/content`, { signal }),
+  fileContent: (fileId: string, locator: { page?: number; sheet?: string } = {}, signal?: AbortSignal) => {
+    const params = new URLSearchParams();
+    if (locator.page != null) params.set("page", String(locator.page));
+    if (locator.sheet) params.set("sheet", locator.sheet);
+    const suffix = params.toString() ? `?${params.toString()}` : "";
+    return request<FileContentResponse>(`/api/v1/files/${encodeURIComponent(fileId)}/content${suffix}`, { signal });
+  },
+  fileSearch: (fileId: string, query: string, signal?: AbortSignal, offset = 0) => request<FileSearchResponse>(`/api/v1/files/${encodeURIComponent(fileId)}/search?q=${encodeURIComponent(query)}&limit=100&offset=${offset}`, { signal }),
+  fileInsight: (fileId: string, signal?: AbortSignal) => request<FileInsight>(`/api/v1/files/${encodeURIComponent(fileId)}/insight`, { signal }),
+  queueFileInsight: (fileId: string, force = false) => request<{ fileId: string; taskId?: string; task?: Task; status?: string }>(`/api/v1/files/${encodeURIComponent(fileId)}/insight`, { method: "POST", body: JSON.stringify({ force }) }),
+  fileInsightQueue: () => request<FileInsightQueueSummary>("/api/v1/file-insights/queue"),
+  reprocessFile: (fileId: string) => request<{ fileId: string; taskId: string; task: Task }>(`/api/v1/files/${encodeURIComponent(fileId)}/reprocess`, { method: "POST", body: JSON.stringify({}) }),
+  bulkFileInsights: (confirmed = true) => request<FileInsightBulkResponse>("/api/v1/file-insights/bulk", { method: "POST", body: JSON.stringify({ confirmed }) }),
   resetWorkspace: (confirmation: string) =>
-    request<{ reset: boolean; phases?: Record<string, string>; removed: Record<string, unknown>; preserved: string[] }>("/api/v1/workspace/reset", {
+    request<{ accepted: boolean; restarting: boolean; requestId: string; statusUrl: string }>("/api/v1/workspace/reset", {
       method: "POST",
       body: JSON.stringify({ confirmation }),
     }),
+  resetStatus: (requestId: string) => request<{ request_id: string; phase: string; started_at: string; finished_at: string | null; result: "running" | "succeeded" | "failed"; safe_error: string | null; completed_phases?: string[] }>(`/api/v1/workspace/reset?requestId=${encodeURIComponent(requestId)}`),
   semanticEnrich: (assetId: string) =>
     request<SemanticEnrichmentResponse>(`/api/v1/assets/${encodeURIComponent(assetId)}/semantic-enrich`, {
       method: "POST",
@@ -117,10 +136,10 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify({ status }),
     }),
-  process: (source: string, visionMode: "local" | "ai_vision" = "local") =>
+  process: (source: string, visionMode: "local" | "ai_vision" = "local", autoFileInsight = false) =>
     request<{ taskId: string; task: Task }>("/api/v1/process", {
       method: "POST",
-      body: JSON.stringify({ source, visionMode }),
+      body: JSON.stringify({ source, visionMode, autoFileInsight }),
     }),
   tasks: () => request<TasksResponse>("/api/v1/tasks?limit=20"),
   task: (taskId: string) => request<Task>(`/api/v1/tasks/${encodeURIComponent(taskId)}`),
@@ -138,10 +157,10 @@ export const api = {
   analysisRun: (runId: string) => request<AnalysisRunResponse>(`/api/v1/analysis/runs/${encodeURIComponent(runId)}`),
   reports: (limit = 50) => request<ReportsResponse>(`/api/v1/reports?limit=${limit}`),
   report: (reportId: string) => request<ReportResponse>(`/api/v1/reports/${encodeURIComponent(reportId)}`),
-  reportStart: (analysisRunIds: string[], title: string, purpose: string) =>
+  reportStart: (fileIds: string[], title: string, purpose: string, reportType: "overview" | "analysis", selectAllCurrentFilter = false, filters: Record<string, string> = {}) =>
     request<ReportStartResponse>("/api/v1/reports", {
       method: "POST",
-      body: JSON.stringify({ analysisRunIds, title, purpose }),
+      body: JSON.stringify({ fileIds, title, purpose, reportType, selectAllCurrentFilter, filters }),
     }),
   reportExport: async (reportId: string, format: "markdown" | "html"): Promise<{ content: string; contentType: string }> => {
     const response = await fetch(`/api/v1/reports/${encodeURIComponent(reportId)}/export?format=${format}`);

@@ -16,6 +16,8 @@ from chongzu.vision.models import VisionCapabilities, VisionRequest, VisionRespo
 from chongzu.vision.provider import VisionProviderError
 from chongzu.vision.runner import extract_vision
 from chongzu.vision.validator import VisionContractError, validate_vision_payload
+from tests.fixtures.stability_factory import write_direct_docx
+from tests.xlsx_factory import write_xlsx
 
 
 def _workspace(tmp_path: Path) -> Path:
@@ -361,6 +363,75 @@ def test_local_mode_does_not_call_vision_and_keeps_ocr_route(monkeypatch: pytest
     )
     assert calls == [True]
     assert summary.vision_summary is None
+
+
+def test_ai_vision_image_owns_ocr_route(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    source = tmp_path / "images"
+    _image(source / "vision.png")
+    provider = FakeVisionProvider(
+        {
+            "page_type": "mixed",
+            "title": "Vision image",
+            "useful_text": [{"text": "visible text", "role": "body"}],
+            "tables": [{"title": "Values", "columns": ["A"], "rows": [[1]]}],
+        }
+    )
+
+    def local_route_must_not_run(*_args: Any, **_kwargs: Any) -> None:
+        raise AssertionError("local OCR/image-table route entered in ai_vision mode")
+
+    monkeypatch.setattr("chongzu.extract.unified.extract_ocr", local_route_must_not_run)
+    summary = extract_unified(
+        source,
+        workers=1,
+        force=True,
+        vision_mode="ai_vision",
+        vision_provider=provider,
+        registry_path=_registry(tmp_path),
+        workspace_root=_workspace(tmp_path),
+    )
+
+    assert provider.calls == 1
+    assert summary.ocr_summary is None
+    assert summary.vision_summary is not None
+    registry = Registry.open(_registry(tmp_path))
+    try:
+        extractors = {
+            str(row[0])
+            for row in registry.connection.execute(
+                "SELECT extractor FROM text_assets WHERE is_current=TRUE UNION ALL SELECT extractor FROM table_assets WHERE is_current=TRUE"
+            ).fetchall()
+        }
+    finally:
+        registry.close()
+    assert extractors == {"vision_llm"}
+
+
+def test_ai_vision_keeps_structured_text_and_docx_local(tmp_path: Path) -> None:
+    source = tmp_path / "deterministic"
+    (source / "data.csv").parent.mkdir(parents=True, exist_ok=True)
+    (source / "data.csv").write_text("name,value\nalpha,1\n", encoding="utf-8")
+    write_xlsx(source / "data.xlsx", [("Data", [["name", "value"], ["alpha", 1]], None)])
+    (source / "note.txt").write_text("local text", encoding="utf-8")
+    write_direct_docx(source / "note.docx")
+    provider = FakeVisionProvider()
+
+    summary = extract_unified(
+        source,
+        workers=1,
+        force=True,
+        vision_mode="ai_vision",
+        vision_provider=provider,
+        registry_path=_registry(tmp_path),
+        workspace_root=_workspace(tmp_path),
+    )
+
+    assert provider.calls == 0
+    assert summary.structured_files == 2
+    assert summary.docx_files == 1
+    assert summary.structured_summary is not None
+    assert summary.text_summary is not None
+    assert summary.docx_summary is not None
 
 
 def test_vision_provider_request_contains_image_not_registry_identity() -> None:

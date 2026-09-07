@@ -9,7 +9,7 @@ import os
 from pathlib import Path
 import time
 import unicodedata
-from typing import Any, Sequence
+from typing import Any, Mapping, Sequence
 from uuid import uuid4
 
 import polars as pl
@@ -179,8 +179,10 @@ def publish_matrix_region(
     sheet_name: str | None,
     sheet_index: int | None,
     full_sheet_artifact: str | None,
+    presentation: Mapping[str, Any] | None = None,
     known_header: Sequence[Any] | None = None,
     data_source_row_offset: int | None = None,
+    parser_validity: str | None = None,
 ) -> TableAsset:
     source_locator = (
         f"sheet:{sheet_index}:{sheet_name}:" if sheet_index is not None else "file:"
@@ -237,7 +239,7 @@ def publish_matrix_region(
     result.timings.normalization_ms += (time.perf_counter_ns() - normalization_started) / 1_000_000
     result.timings.parquet_write_ms += write_parquet_atomic(normalized_frame, normalized_path)
 
-    quality_status = AssetQualityStatus.REVIEW if warnings else AssetQualityStatus.PASS
+    quality_status = AssetQualityStatus.REVIEW if warnings or parser_validity else AssetQualityStatus.PASS
     metadata = {
         "contract_version": paths.STRUCTURED_CONFIG_VERSION,
         "table_id": table_id,
@@ -262,10 +264,12 @@ def publish_matrix_region(
         "raw_columns": positional_names(width),
         "normalized_columns": names,
         "full_sheet_raw_artifact": full_sheet_artifact,
+        "presentation": dict(presentation or {}),
         "extractor": result.extractor,
         "extractor_version": result.extractor_version,
         "extraction_run_id": result.extraction_run_id,
         "quality_warnings": sorted(warnings),
+        "parser_validity": parser_validity,
         "layers": {"raw": "raw.parquet", "normalized": "normalized.parquet", "semantic": None},
     }
     write_json_atomic(metadata_path, metadata)

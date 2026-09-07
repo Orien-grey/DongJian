@@ -39,10 +39,14 @@ def normalize_workers(workers: int | None) -> int:
     return workers
 
 
+CSV_EXTRACTOR_VERSION = version("polars")
+EXCEL_EXTRACTOR_VERSION = version("python-calamine")
+
+
 def _extractor(format_name: str) -> tuple[str, str]:
     if format_name in {"csv", "tsv"}:
-        return CSV_EXTRACTOR, version("polars")
-    return EXCEL_EXTRACTOR, version("python-calamine")
+        return CSV_EXTRACTOR, CSV_EXTRACTOR_VERSION
+    return EXCEL_EXTRACTOR, EXCEL_EXTRACTOR_VERSION
 
 
 def extraction_identity(source: StructuredSource, extractor: str, extractor_version: str) -> str:
@@ -117,7 +121,10 @@ def extract_structured(
     force: bool = False,
     registry_path: Path | str | None = None,
     workspace_root: Path | str | None = None,
+    registry: Registry | None = None,
     _scan_summary=None,
+    file_ids: set[str] | None = None,
+    _skip_recovery: bool = False,
     progress_callback: Callable[..., None] | None = None,
     cancel_event=None,
 ) -> StructuredExtractionSummary:
@@ -142,10 +149,14 @@ def extract_structured(
         scan_summary = _scan_summary
     source_root = canonical_source_root(source, require_directory=True)
     summary = StructuredExtractionSummary(source_root=source_root, discovery_scan_ms=scan_summary.elapsed_ms)
-    registry = Registry.open(registry_file, initialize=False)
+    owns_registry = registry is None
+    registry = registry or Registry.open(registry_file, initialize=False)
     try:
-        registry.recover_incomplete_extractions(source_root)
+        if not _skip_recovery:
+            registry.recover_incomplete_extractions(source_root)
         rows = registry.structured_candidates(source_root)
+        if file_ids is not None:
+            rows = [row for row in rows if str(row.get("file_id") or "") in file_ids]
         summary.files_considered = registry.count_present_files(source_root)
         summary.structured_supported = len(rows)
         summary.total_bytes = sum(int(row["size_bytes"] or 0) for row in rows)
@@ -253,6 +264,7 @@ def extract_structured(
         else:
             executor.shutdown(wait=True)
     finally:
-        registry.close()
+        if owns_registry:
+            registry.close()
     summary.wall_time_ms = (time.perf_counter_ns() - wall_started) / 1_000_000
     return summary

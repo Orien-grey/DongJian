@@ -80,6 +80,7 @@ class CleaningSummary:
     duckdb_write_ms: float = 0.0
     cleaning_wall_time_ms: float = 0.0
     wall_time_ms: float = 0.0
+    scan_metrics: dict[str, Any] = field(default_factory=dict)
 
     def benchmark_metrics(self) -> dict[str, float | int | str]:
         seconds = self.wall_time_ms / 1000.0 if self.wall_time_ms else 0.0

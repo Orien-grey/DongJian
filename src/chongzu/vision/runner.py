@@ -669,6 +669,8 @@ def extract_vision(
     registry_path: Path | str | None = None,
     workspace_root: Path | str | None = None,
     _scan_summary: Any | None = None,
+    file_ids: set[str] | None = None,
+    _skip_recovery: bool = False,
     progress_callback: Callable[..., None] | None = None,
     cancel_event: Event | None = None,
 ) -> VisionExtractionSummary:
@@ -692,8 +694,11 @@ def extract_vision(
         raise VisionExtractionError("configured provider does not declare Vision image capability")
     registry = Registry.open(registry_file, initialize=False)
     try:
-        registry.recover_incomplete_extractions(source_root)
+        if not _skip_recovery:
+            registry.recover_incomplete_extractions(source_root)
         rows = registry.vision_candidates(source_root)
+        if file_ids is not None:
+            rows = [row for row in rows if str(row.get("file_id") or "") in file_ids]
         summary.files_considered = len(rows)
         summary.files_attempted = len(rows)
         total = len(rows)

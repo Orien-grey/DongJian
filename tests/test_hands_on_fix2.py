@@ -394,7 +394,7 @@ def test_connection_diagnostic_categories_are_provider_neutral(tmp_path: Path, p
     assert raised.value.category == category
 
 
-def test_project_reset_rejects_active_task_then_clears_generated_state_and_preserves_sources(tmp_path: Path) -> None:
+def test_project_reset_cancels_active_task_then_clears_generated_state_and_preserves_sources(tmp_path: Path) -> None:
     project = tmp_path / "project"
     workspace = project / "workspace"
     source = workspace / "input" / "source.txt"
@@ -412,13 +412,10 @@ def test_project_reset_rejects_active_task_then_clears_generated_state_and_prese
     (project / "cache" / "temp" / "cache.bin").write_bytes(b"generated")
     app = BackendApp(project_root=project, registry_path=workspace / "state" / "registry.duckdb", workspace_root=workspace)
     try:
-        app.tasks.list = lambda limit=50: [SimpleNamespace(task_id="active", status="running")]
-        with pytest.raises(ApiError) as raised:
-            app.handle_api("POST", "/api/v1/workspace/reset", {}, json.dumps({"confirmation": "清空"}).encode())
-        assert raised.value.code == "ACTIVE_TASKS"
-        assert source.is_file()
-        app.tasks.list = lambda limit=50: []
+        app.tasks.list = lambda limit=50: [SimpleNamespace(task_id="active", status="running", task_type="process")]
         response = app.handle_api("POST", "/api/v1/workspace/reset", {}, json.dumps({"confirmation": "清空"}).encode())
+        assert response.status == 200
+        assert source.is_file()
     finally:
         app.close(timeout=5)
     assert response.payload["reset"] is True

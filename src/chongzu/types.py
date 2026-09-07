@@ -64,6 +64,7 @@ class ExistingFile:
     sha256: str | None
     current_presence_state: str
     first_seen_run: str
+    last_seen_run: str
     last_changed_run: str | None
 
 
@@ -101,16 +102,25 @@ class ScanSummary:
     missing_count: int = 0
     failed_count: int = 0
     discovery_error_count: int = 0
+    discovery_ignored_count: int = 0
     total_bytes: int = 0
     exact_duplicate_paths: int = 0
     elapsed_ms: float = 0.0
     hashing_ms: float = 0.0
     detection_ms: float = 0.0
     registry_write_ms: float = 0.0
+    registry_batch_size: int = 32
+    initial_registry_batch_size: int = 16
+    registry_batch_count: int = 0
+    registry_file_mutation_count: int = 0
+    registry_fallback_count: int = 0
+    candidate_queue_max: int = 0
+    time_to_first_discovered_ms: float | None = None
+    time_to_first_registered_ms: float | None = None
+    scan_complete_ms: float | None = None
 
     def as_dict(self) -> dict[str, Any]:
         values = asdict(self)
         values["started_at"] = self.started_at.isoformat()
         values["finished_at"] = self.finished_at.isoformat()
         return values
-

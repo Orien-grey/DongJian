@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import time
@@ -36,6 +37,7 @@ REGISTRY_BUSY_MARKERS = (
 )
 REGISTRY_CONNECTION_RETRY_SECONDS = 5.0
 REGISTRY_CONNECTION_RETRY_INTERVAL_SECONDS = 0.05
+_MISSING_EXISTING = object()
 
 
 def is_registry_busy_error(error: BaseException | str) -> bool:
@@ -65,6 +67,39 @@ def _connect_registry(path: Path, *, read_only: bool) -> duckdb.DuckDBPyConnecti
 
 def utc_now() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+class _UnsafeSQLLiteral(ValueError):
+    """A Registry value must use the parameter-binding fallback."""
+
+
+def _sql_literal(value: Any) -> str:
+    """Encode one internal Registry value for a bounded VALUES statement.
+
+    Scan observations are assembled by ChongZu before reaching this helper;
+    this is not a general SQL-expression formatter. Strings are still quoted
+    and escaped, and values that DuckDB cannot safely represent as a literal
+    use the parameter-binding fallback in the caller.
+    """
+
+    if value is None:
+        return "NULL"
+    if isinstance(value, bool):
+        return "TRUE" if value else "FALSE"
+    if isinstance(value, datetime):
+        return "TIMESTAMP '" + value.isoformat(sep=" ", timespec="microseconds").replace("'", "''") + "'"
+    if isinstance(value, int):
+        return repr(value)
+    if isinstance(value, float):
+        if math.isnan(value):
+            return "CAST('nan' AS DOUBLE)"
+        if math.isinf(value):
+            return "CAST('" + ("-inf" if value < 0 else "inf") + "' AS DOUBLE)"
+        return repr(value)
+    text = str(value)
+    if "\x00" in text:
+        raise _UnsafeSQLLiteral("NUL cannot be represented in a DuckDB string literal")
+    return "'" + text.replace("'", "''") + "'"
 
 
 def canonical_source_root(path: Path | str, *, require_directory: bool = False) -> str:
@@ -991,7 +1026,7 @@ class Registry:
         rows = self.connection.execute(
             """
             SELECT file_id, relative_path, size_bytes, mtime_ns, sha256,
-                   current_presence_state, first_seen_run, last_changed_run
+                   current_presence_state, first_seen_run, last_seen_run, last_changed_run
             FROM files WHERE source_root = ?
             """,
             [source_root],
@@ -1005,7 +1040,8 @@ class Registry:
                 sha256=row[4],
                 current_presence_state=row[5],
                 first_seen_run=row[6],
-                last_changed_run=row[7],
+                last_seen_run=row[7],
+                last_changed_run=row[8],
             )
             for row in rows
         }
@@ -3156,7 +3192,14 @@ class Registry:
             [run_id, path, error_code, message, utc_now()],
         )
 
-    def record_file_outcome(self, run_id: str, outcome: FileOutcome) -> None:
+    def record_file_outcome(
+        self,
+        run_id: str,
+        outcome: FileOutcome,
+        *,
+        _transaction_open: bool = False,
+        _existing: tuple[Any, ...] | None | object = _MISSING_EXISTING,
+    ) -> None:
         connection = self.connection
         plan = _processing_plan(
             file_id=outcome.file_id,
@@ -3165,10 +3208,13 @@ class Registry:
             observed_extension=outcome.observed_extension,
             routing_class=outcome.detection.routing_class,
         )
-        existing = connection.execute(
-            "SELECT first_seen_run, sha256, last_changed_run FROM files WHERE file_id = ?",
-            [outcome.file_id],
-        ).fetchone()
+        if _existing is _MISSING_EXISTING:
+            existing = connection.execute(
+                "SELECT first_seen_run, sha256, last_changed_run FROM files WHERE file_id = ?",
+                [outcome.file_id],
+            ).fetchone()
+        else:
+            existing = _existing
         first_seen_run = existing[0] if existing else run_id
         previous_sha = existing[1] if existing else None
         last_changed_run = existing[2] if existing else None
@@ -3190,7 +3236,8 @@ class Registry:
         presence = "present" if (outcome.fingerprint.before or outcome.fingerprint.after) else "failed"
         updated_at = utc_now()
 
-        connection.execute("BEGIN TRANSACTION")
+        if not _transaction_open:
+            connection.execute("BEGIN TRANSACTION")
         try:
             if existing:
                 connection.execute(
@@ -3282,20 +3329,20 @@ class Registry:
                 )
 
             if outcome.fingerprint.stable and outcome.fingerprint.sha256:
-                content = connection.execute(
-                    "SELECT sha256 FROM contents WHERE sha256 = ?",
-                    [outcome.fingerprint.sha256],
-                ).fetchone()
-                if content:
-                    connection.execute(
-                        "UPDATE contents SET size_bytes=?, last_seen_run=? WHERE sha256=?",
-                        [size_bytes, run_id, outcome.fingerprint.sha256],
-                    )
-                else:
-                    connection.execute(
-                        "INSERT INTO contents VALUES (?, ?, ?, ?)",
-                        [outcome.fingerprint.sha256, size_bytes, run_id, run_id],
-                    )
+                # The unique content key makes this a single write per
+                # observation.  The previous SELECT+UPDATE/INSERT pair was
+                # particularly expensive when a registry batch contained many
+                # small files with new hashes.
+                connection.execute(
+                    """
+                    INSERT INTO contents(sha256, size_bytes, first_seen_run, last_seen_run)
+                    VALUES (?, ?, ?, ?)
+                    ON CONFLICT(sha256) DO UPDATE SET
+                        size_bytes=excluded.size_bytes,
+                        last_seen_run=excluded.last_seen_run
+                    """,
+                    [outcome.fingerprint.sha256, size_bytes, run_id, run_id],
+                )
 
             connection.execute(
                 """
@@ -3325,6 +3372,245 @@ class Registry:
                     outcome.started_at,
                     outcome.finished_at,
                 ],
+            )
+            if not _transaction_open:
+                connection.execute("COMMIT")
+        except Exception:
+            if not _transaction_open:
+                connection.execute("ROLLBACK")
+            raise
+
+    def record_file_outcomes(self, run_id: str, outcomes: Iterable[FileOutcome]) -> None:
+        """Persist a bounded scan batch in one transaction.
+
+        Existing file identities are prefetched once for the batch.  The
+        three observation tables are then written with bounded multi-row
+        statements. This preserves the established row and provenance
+        contracts without preparing several statements for every file.
+        """
+
+        values = list(outcomes)
+        if not values:
+            return
+        connection = self.connection
+        connection.execute("BEGIN TRANSACTION")
+        try:
+            file_ids = list(dict.fromkeys(outcome.file_id for outcome in values if outcome.file_id))
+            existing_by_id: dict[str, tuple[Any, ...]] = {}
+            if file_ids:
+                placeholders = ", ".join("?" for _ in file_ids)
+                rows = connection.execute(
+                    f"SELECT file_id, first_seen_run, sha256, last_changed_run "
+                    f"FROM files WHERE file_id IN ({placeholders})",
+                    file_ids,
+                ).fetchall()
+                existing_by_id = {
+                    str(row[0]): (row[1], row[2], row[3])
+                    for row in rows
+                }
+
+            new_file_rows: list[list[Any]] = []
+            existing_file_rows: list[list[Any]] = []
+            attempt_rows: list[list[Any]] = []
+            content_rows: dict[str, list[Any]] = {}
+            for outcome in values:
+                plan = _processing_plan(
+                    file_id=outcome.file_id,
+                    detected_type=outcome.detection.detected_type,
+                    mime_like_type=outcome.detection.mime_like_type,
+                    observed_extension=outcome.observed_extension,
+                    routing_class=outcome.detection.routing_class,
+                )
+
+                existing = existing_by_id.get(outcome.file_id)
+                first_seen_run = existing[0] if existing else run_id
+                previous_sha = existing[1] if existing else None
+                last_changed_run = existing[2] if existing else None
+                accepted_sha = outcome.fingerprint.sha256 if outcome.fingerprint.stable else previous_sha
+                stat_after = outcome.fingerprint.after or outcome.fingerprint.before
+                size_bytes = stat_after.size_bytes if stat_after else None
+                mtime_ns = stat_after.mtime_ns if stat_after else None
+                if outcome.classification in {"new", "changed"} and (
+                    outcome.fingerprint.before or outcome.fingerprint.after
+                ):
+                    last_changed_run = run_id
+                error_code = outcome.error_code or outcome.detection.error_code
+                error_message = outcome.error_message or outcome.detection.error_message
+                presence = "present" if (outcome.fingerprint.before or outcome.fingerprint.after) else "failed"
+                updated_at = utc_now()
+                file_row = [
+                    outcome.file_id,
+                    outcome.source_root,
+                    outcome.relative_path,
+                    outcome.filename,
+                    outcome.observed_extension,
+                    size_bytes,
+                    mtime_ns,
+                    accepted_sha,
+                    outcome.detection.detected_type,
+                    outcome.detection.mime_like_type,
+                    outcome.detection.method,
+                    outcome.detection.confidence,
+                    outcome.detection.routing_class,
+                    plan.support_status.value,
+                    plan.business_format.value if plan.business_format else None,
+                    plan.attempt_table_extraction,
+                    plan.attempt_text_extraction,
+                    plan.may_require_ocr,
+                    plan.may_require_visual_processing,
+                    plan.reason_code,
+                    presence,
+                    first_seen_run,
+                    run_id,
+                    last_changed_run,
+                    error_code,
+                    error_message,
+                    outcome.fingerprint.elapsed_ms,
+                    outcome.detection_ms,
+                    updated_at,
+                ]
+                if existing is None:
+                    new_file_rows.append(file_row)
+                else:
+                    existing_file_rows.append(file_row)
+                if outcome.fingerprint.stable and outcome.fingerprint.sha256:
+                    content_rows[outcome.fingerprint.sha256] = [
+                        outcome.fingerprint.sha256,
+                        size_bytes,
+                        run_id,
+                        run_id,
+                    ]
+                attempt_rows.append(
+                    [
+                        run_id,
+                        outcome.file_id,
+                        outcome.source_root,
+                        outcome.relative_path,
+                        outcome.status,
+                        outcome.fingerprint.reused,
+                        outcome.fingerprint.before.size_bytes if outcome.fingerprint.before else None,
+                        outcome.fingerprint.after.size_bytes if outcome.fingerprint.after else None,
+                        outcome.fingerprint.before.mtime_ns if outcome.fingerprint.before else None,
+                        outcome.fingerprint.after.mtime_ns if outcome.fingerprint.after else None,
+                        outcome.fingerprint.sha256 if outcome.fingerprint.stable else None,
+                        outcome.detection.detected_type,
+                        outcome.detection.mime_like_type,
+                        outcome.detection.method,
+                        outcome.detection.confidence,
+                        outcome.detection.routing_class,
+                        error_code,
+                        error_message,
+                        outcome.fingerprint.elapsed_ms,
+                        outcome.detection_ms,
+                        outcome.started_at,
+                        outcome.finished_at,
+                    ]
+                )
+
+            def execute_multirow(statement: str, rows: list[list[Any]]) -> None:
+                if not rows:
+                    return
+                row_placeholders = "(" + ", ".join("?" for _ in rows[0]) + ")"
+                try:
+                    literal_rows = ", ".join(
+                        "(" + ", ".join(_sql_literal(item) for item in row) + ")"
+                        for row in rows
+                    )
+                except _UnsafeSQLLiteral:
+                    sql = statement.replace("__VALUES__", ", ".join(row_placeholders for _ in rows), 1)
+                    parameters = [item for row in rows for item in row]
+                    connection.execute(sql, parameters)
+                    return
+                connection.execute(statement.replace("__VALUES__", literal_rows, 1))
+
+            file_insert = """
+                INSERT INTO files(
+                    file_id, source_root, relative_path, filename, observed_extension,
+                    size_bytes, mtime_ns, sha256, detected_type, mime_like_type,
+                    detection_method, detection_confidence, routing_class, support_status,
+                    business_format, table_candidate, text_candidate, may_require_ocr,
+                    may_require_visual_processing, policy_reason, current_presence_state,
+                    first_seen_run, last_seen_run, last_changed_run, latest_error_code,
+                    latest_error_message, last_fingerprint_ms, last_detection_ms, updated_at
+                ) VALUES __VALUES__
+                """
+            execute_multirow(file_insert, new_file_rows)
+            execute_multirow(
+                file_insert
+                + """
+                ON CONFLICT(file_id) DO UPDATE SET
+                    source_root=excluded.source_root,
+                    relative_path=excluded.relative_path,
+                    filename=excluded.filename,
+                    observed_extension=excluded.observed_extension,
+                    size_bytes=excluded.size_bytes,
+                    mtime_ns=excluded.mtime_ns,
+                    sha256=excluded.sha256,
+                    detected_type=excluded.detected_type,
+                    mime_like_type=excluded.mime_like_type,
+                    detection_method=excluded.detection_method,
+                    detection_confidence=excluded.detection_confidence,
+                    routing_class=excluded.routing_class,
+                    support_status=excluded.support_status,
+                    business_format=excluded.business_format,
+                    table_candidate=excluded.table_candidate,
+                    text_candidate=excluded.text_candidate,
+                    may_require_ocr=excluded.may_require_ocr,
+                    may_require_visual_processing=excluded.may_require_visual_processing,
+                    policy_reason=excluded.policy_reason,
+                    current_presence_state=excluded.current_presence_state,
+                    first_seen_run=excluded.first_seen_run,
+                    last_seen_run=excluded.last_seen_run,
+                    last_changed_run=excluded.last_changed_run,
+                    latest_error_code=excluded.latest_error_code,
+                    latest_error_message=excluded.latest_error_message,
+                    last_fingerprint_ms=excluded.last_fingerprint_ms,
+                    last_detection_ms=excluded.last_detection_ms,
+                    updated_at=excluded.updated_at
+                """,
+                existing_file_rows,
+            )
+            content_values = list(content_rows.values())
+            existing_content_hashes: set[str] = set()
+            if content_values:
+                content_placeholders = ", ".join("?" for _ in content_values)
+                existing_content_hashes = {
+                    str(row[0])
+                    for row in connection.execute(
+                        f"SELECT sha256 FROM contents WHERE sha256 IN ({content_placeholders})",
+                        [row[0] for row in content_values],
+                    ).fetchall()
+                }
+            new_content_rows = [row for row in content_values if row[0] not in existing_content_hashes]
+            existing_content_rows = [row for row in content_values if row[0] in existing_content_hashes]
+            execute_multirow(
+                """
+                INSERT INTO contents(sha256, size_bytes, first_seen_run, last_seen_run)
+                VALUES __VALUES__
+                """,
+                new_content_rows,
+            )
+            execute_multirow(
+                """
+                INSERT INTO contents(sha256, size_bytes, first_seen_run, last_seen_run)
+                VALUES __VALUES__
+                ON CONFLICT(sha256) DO UPDATE SET
+                    size_bytes=excluded.size_bytes,
+                    last_seen_run=excluded.last_seen_run
+                """,
+                existing_content_rows,
+            )
+            execute_multirow(
+                """
+                INSERT INTO file_attempts(
+                    run_id, file_id, source_root, relative_path, status, hash_reused,
+                    size_before_bytes, size_after_bytes, mtime_before_ns, mtime_after_ns,
+                    sha256, detected_type, mime_like_type, detection_method,
+                    detection_confidence, routing_class, error_code, error_message,
+                    fingerprint_ms, detection_ms, started_at, finished_at
+                ) VALUES __VALUES__
+                """,
+                attempt_rows,
             )
             connection.execute("COMMIT")
         except Exception:
@@ -3564,8 +3850,15 @@ class Registry:
                 SELECT
                     COUNT(*) FILTER (WHERE q.status IN ('open','accepted')) AS quality_issues,
                     COUNT(*) FILTER (WHERE q.status='open') AS open_quality_issues
-                FROM quality_issues q
-                WHERE q.issue_type <> 'possible_table_candidate'
+                FROM (
+                    SELECT q.*, ROW_NUMBER() OVER (
+                        PARTITION BY q.asset_id, q.issue_type
+                        ORDER BY q.created_at DESC NULLS LAST, q.issue_id
+                    ) AS issue_rank
+                    FROM quality_issues q
+                    WHERE q.issue_type <> 'possible_table_candidate'
+                ) q
+                WHERE q.issue_rank=1
                   AND EXISTS (
                       SELECT 1 FROM catalog c
                       WHERE c.asset_id=q.asset_id
@@ -3690,9 +3983,15 @@ class Registry:
                    q.detected_by, q.suggested_action, q.status, q.created_at,
                    c.asset_type, c.effective_display_name, c.fallback_display_name,
                    c.source_file, c.source_format, c.file_id
-            FROM quality_issues q
+            FROM (
+                SELECT q.*, ROW_NUMBER() OVER (
+                    PARTITION BY q.asset_id, q.issue_type
+                    ORDER BY q.created_at DESC NULLS LAST, q.issue_id
+                ) AS issue_rank
+                FROM quality_issues q
+            ) q
             LEFT JOIN catalog_assets c ON c.asset_id=q.asset_id
-            WHERE {' AND '.join(clauses)}
+            WHERE q.issue_rank=1 AND {' AND '.join(clauses)}
             ORDER BY q.created_at DESC, q.issue_id
             LIMIT ? OFFSET ?
             """,
@@ -3727,7 +4026,17 @@ class Registry:
                 clauses.append(f"{column}=?")
                 params.append(value)
         row = self.connection.execute(
-            f"SELECT COUNT(*) FROM quality_issues WHERE {' AND '.join(clauses)}",
+            f"""
+            SELECT COUNT(*)
+            FROM (
+                SELECT q.*, ROW_NUMBER() OVER (
+                    PARTITION BY q.asset_id, q.issue_type
+                    ORDER BY q.created_at DESC NULLS LAST, q.issue_id
+                ) AS issue_rank
+                FROM quality_issues q
+            ) q
+            WHERE q.issue_rank=1 AND {' AND '.join(clauses)}
+            """,
             params,
         ).fetchone()
         return int(row[0] or 0)
@@ -3757,8 +4066,15 @@ class Registry:
             WITH selected(asset_id, cleaning_run_id) AS (VALUES {values})
             SELECT selected.asset_id, COUNT(q.issue_id) AS issue_count
             FROM selected
-            LEFT JOIN quality_issues q
+            LEFT JOIN (
+                SELECT q.*, ROW_NUMBER() OVER (
+                    PARTITION BY q.asset_id, q.issue_type
+                    ORDER BY q.created_at DESC NULLS LAST, q.issue_id
+                ) AS issue_rank
+                FROM quality_issues q
+            ) q
               ON q.asset_id=selected.asset_id
+             AND q.issue_rank=1
              AND q.issue_type <> 'possible_table_candidate'
              AND q.status IN ('open', 'accepted')
              AND (q.cleaning_run_id IS NULL OR q.cleaning_run_id=selected.cleaning_run_id)
@@ -3812,8 +4128,14 @@ class Registry:
             SELECT issue_id, extraction_run_id, cleaning_run_id, semantic_run_id, asset_id, severity,
                    issue_type, description, evidence_json, detected_by,
                    suggested_action, status, created_at
-            FROM quality_issues
-            WHERE asset_id=? AND issue_type <> 'possible_table_candidate'
+            FROM (
+                SELECT q.*, ROW_NUMBER() OVER (
+                    PARTITION BY q.asset_id, q.issue_type
+                    ORDER BY q.created_at DESC NULLS LAST, q.issue_id
+                ) AS issue_rank
+                FROM quality_issues q
+            ) q
+            WHERE q.issue_rank=1 AND asset_id=? AND issue_type <> 'possible_table_candidate'
               AND status IN ('open', 'accepted')
               AND (cleaning_run_id IS NULL OR cleaning_run_id=?)
             ORDER BY created_at, issue_id

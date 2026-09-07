@@ -85,6 +85,17 @@ if (-not $Force) {
     }
 }
 
+# The live server cannot safely remove its own runtime handles.  Delegate the
+# controlled STOP -> RESET -> RESTART lifecycle to the bundled interpreter.
+$bundledPython = Join-Path $repoRoot "runtime\python\cpython-3.11.15-windows-x86_64-none\python.exe"
+if (-not (Test-Path -LiteralPath $bundledPython -PathType Leaf)) {
+    throw "Refusing to reset: bundled Python is missing: $bundledPython"
+}
+$env:PYTHONPATH = "$(Join-Path $repoRoot 'src')$([IO.Path]::PathSeparator)$(Join-Path $repoRoot 'runtime\packages')"
+$env:PYTHONNOUSERSITE = "1"
+& $bundledPython -m chongzu.api.reset_helper --project-root $repoRoot --request-id ("manual_" + [guid]::NewGuid().ToString("N"))
+exit $LASTEXITCODE
+
 foreach ($root in $dataRoots) {
     $rootFull = [IO.Path]::GetFullPath($root)
     $files = @(Get-ChildItem -LiteralPath $rootFull -Force -Recurse -File -ErrorAction SilentlyContinue |

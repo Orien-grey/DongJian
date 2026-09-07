@@ -15,12 +15,15 @@ import hashlib
 import json
 from pathlib import Path
 import time
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 from uuid import uuid4
 import zipfile
 import xml.etree.ElementTree as ET
 
 from chongzu import paths
+
+W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+
 from chongzu.assets import (
     AssetQualityStatus,
     ChunkProvenance,
@@ -142,6 +145,114 @@ def _table_rows(element: ET.Element) -> list[list[str]]:
     return rows
 
 
+def _table_presentation(element: ET.Element) -> dict[str, Any]:
+    """Recover OOXML occupancy without padding the source into a matrix."""
+
+    def attr(item: ET.Element, name: str) -> str | None:
+        return item.get(f"{{{W_NS}}}{name}", item.get(name))
+
+    cells: list[dict[str, Any]] = []
+    occupancy: list[list[int | None]] = []
+    open_vertical: dict[int, int] = {}
+    row_count = 0
+    max_column = 0
+    grid_widths: list[int] = []
+    tbl_grid = next((item for item in element if _local(item.tag) == "tblGrid"), None)
+    if tbl_grid is not None:
+        for grid_column in [item for item in tbl_grid if _local(item.tag) == "gridCol"]:
+            width = attr(grid_column, "w")
+            if str(width or "").isdigit():
+                grid_widths.append(int(width))
+
+    rows = [item for item in element if _local(item.tag) == "tr"]
+    for tr in rows:
+        row_number = row_count
+        row_cells: list[int | None] = []
+        cursor = 0
+        previous_origins = set(open_vertical.values())
+        continued_origins: set[int] = set()
+
+        def mark(start: int, span: int, cell_index: int) -> None:
+            end = start + span
+            if len(row_cells) < end:
+                row_cells.extend([None] * (end - len(row_cells)))
+            for index in range(start, end):
+                row_cells[index] = cell_index
+
+        for tc in [item for item in tr if _local(item.tag) == "tc"]:
+            properties = next((item for item in tc if _local(item.tag) == "tcPr"), None)
+            grid_span = 1
+            width: str | None = None
+            vertical = ""
+            if properties is not None:
+                grid = next((item for item in properties if _local(item.tag) == "gridSpan"), None)
+                if grid is not None:
+                    try:
+                        grid_span = max(1, int(attr(grid, "val") or "1"))
+                    except (TypeError, ValueError):
+                        grid_span = 1
+                cell_width = next((item for item in properties if _local(item.tag) == "tcW"), None)
+                if cell_width is not None:
+                    width = attr(cell_width, "w")
+                merge = next((item for item in properties if _local(item.tag) == "vMerge"), None)
+                if merge is not None:
+                    vertical = str(attr(merge, "val") or "continue")
+
+            if vertical == "continue":
+                candidate_columns = [index for index in open_vertical if index >= cursor]
+                if candidate_columns:
+                    start = min(candidate_columns)
+                    cell_index = open_vertical[start]
+                    origin = cells[cell_index]
+                    span = int(origin["column_span"])
+                    origin["row_span"] = int(origin.get("row_span", 1)) + 1
+                    mark(start, span, cell_index)
+                    continued_origins.add(cell_index)
+                    cursor = start + span
+                    continue
+
+            while vertical != "restart" and any(index in open_vertical for index in range(cursor, cursor + grid_span)):
+                cursor = max(index + 1 for index in range(cursor, cursor + grid_span) if index in open_vertical)
+            start = cursor
+            grid_width = sum(grid_widths[start : start + grid_span]) if start < len(grid_widths) else None
+            cell = {
+                "row": row_number,
+                "column": start,
+                "row_span": 1,
+                "column_span": grid_span,
+                "text": _text(tc),
+                "width_twips": int(width) if str(width or "").isdigit() else None,
+                "grid_width_twips": grid_width,
+            }
+            cells.append(cell)
+            cell_index = len(cells) - 1
+            mark(start, grid_span, cell_index)
+            if vertical == "restart":
+                for index in range(start, start + grid_span):
+                    open_vertical[index] = cell_index
+            cursor = start + grid_span
+
+        for origin in previous_origins - continued_origins:
+            for index, cell_index in list(open_vertical.items()):
+                if cell_index == origin:
+                    del open_vertical[index]
+        max_column = max(max_column, len(row_cells))
+        occupancy.append(row_cells)
+        row_count += 1
+
+    for row in occupancy:
+        row.extend([None] * (max_column - len(row)))
+    return {
+        "format": "docx-ooxml-presentation-v1",
+        "row_count": row_count,
+        "column_count": max_column,
+        "grid_widths_twips": grid_widths,
+        "occupancy": occupancy,
+        "cells": cells,
+        "form_like": any(int(item.get("row_span", 1)) > 1 or int(item.get("column_span", 1)) > 1 for item in cells),
+    }
+
+
 def extraction_identity(source: StructuredSource) -> str:
     payload = {
         "file_id": source.file_id,
@@ -178,12 +289,14 @@ def _write_table(
     table_index: int,
     *,
     document_order: int | None = None,
+    presentation: Mapping[str, Any] | None = None,
 ) -> TableAsset | None:
     if not rows:
         return None
     width = max(len(row) for row in rows)
     padded = [row[:width] + [""] * max(0, width - len(row)) for row in rows]
-    header = padded[0] if len(padded) > 1 and sum(bool(value.strip()) for value in padded[0]) >= 2 else None
+    form_like = bool((presentation or {}).get("form_like"))
+    header = padded[0] if not form_like and len(padded) > 1 and sum(bool(value.strip()) for value in padded[0]) >= 2 else None
     data_rows = padded[1:] if header is not None else padded
     names, _mapping, duplicate = normalize_column_names(header or (), width)
     if header is None:
@@ -227,6 +340,7 @@ def _write_table(
         "extraction_run_id": result.extraction_run_id,
         "extractor": EXTRACTOR_NAME,
         "extractor_version": EXTRACTOR_VERSION,
+        "presentation": dict(presentation or {}),
     }
     write_json_atomic(metadata_path, metadata)
     return TableAsset(
@@ -277,6 +391,7 @@ def _extract_one(source: StructuredSource, run_id: str, identity: str) -> DocxEx
             raise ValueError("DOCX document body is missing")
         paragraphs: list[dict[str, Any]] = []
         table_rows: list[list[list[str]]] = []
+        table_presentations: list[dict[str, Any]] = []
         table_orders: list[int] = []
         paragraph_ordinal = 0
         body_order = 0
@@ -290,6 +405,7 @@ def _extract_one(source: StructuredSource, run_id: str, identity: str) -> DocxEx
                 body_order += 1
             elif name == "tbl":
                 table_rows.append(_table_rows(child))
+                table_presentations.append(_table_presentation(child))
                 table_orders.append(body_order)
                 body_order += 1
         result.timings.xml_parse_ms = (time.perf_counter_ns() - started) / 1_000_000
@@ -389,6 +505,7 @@ def _extract_one(source: StructuredSource, run_id: str, identity: str) -> DocxEx
                 rows,
                 index,
                 document_order=table_orders[index] if index < len(table_orders) else None,
+                presentation=table_presentations[index] if index < len(table_presentations) else None,
             )
             if asset is None:
                 result.warnings.append({"table_index": index, "warning": "empty_embedded_table"})
@@ -429,7 +546,10 @@ def extract_docx(
     force: bool = False,
     registry_path: Path | str | None = None,
     workspace_root: Path | str | None = None,
+    registry: Registry | None = None,
     _scan_summary=None,
+    file_ids: set[str] | None = None,
+    _skip_recovery: bool = False,
     progress_callback: Callable[..., None] | None = None,
     cancel_event=None,
 ) -> DocxExtractionSummary:
@@ -446,10 +566,14 @@ def extract_docx(
         scan_summary = _scan_summary
     source_root = canonical_source_root(source, require_directory=True)
     summary = DocxExtractionSummary(source_root=source_root, files_considered=0, wall_time_ms=0.0)
-    registry = Registry.open(registry_file, initialize=False)
+    owns_registry = registry is None
+    registry = registry or Registry.open(registry_file, initialize=False)
     try:
-        registry.recover_incomplete_extractions(source_root)
+        if not _skip_recovery:
+            registry.recover_incomplete_extractions(source_root)
         rows = registry.docx_candidates(source_root)
+        if file_ids is not None:
+            rows = [row for row in rows if str(row.get("file_id") or "") in file_ids]
         summary.files_considered = registry.count_present_files(source_root)
         summary.docx_files = len(rows)
         pending: dict[Future[DocxExtractionResult], tuple[StructuredSource, datetime, str]] = {}
@@ -495,6 +619,7 @@ def extract_docx(
         finally:
             executor.shutdown(wait=True, cancel_futures=True)
     finally:
-        registry.close()
+        if owns_registry:
+            registry.close()
     summary.wall_time_ms = (time.perf_counter_ns() - wall_started) / 1_000_000
     return summary

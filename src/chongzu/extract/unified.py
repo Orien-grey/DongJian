@@ -102,8 +102,11 @@ class UnifiedExtractionSummary:
         }
 
 
-def _rows(registry: Registry, source_root: str) -> list[dict[str, Any]]:
-    return registry.list_files(source_root, state="present", limit=100_000)
+def _rows(registry: Registry, source_root: str, file_ids: set[str] | None = None) -> list[dict[str, Any]]:
+    rows = registry.list_files(source_root, state="present", limit=100_000)
+    if file_ids is not None:
+        return [row for row in rows if str(row.get("file_id") or "") in file_ids]
+    return rows
 
 
 def _latest_route_statuses(registry: Registry, file_id: str, content_sha256: str) -> dict[str, str]:
@@ -134,7 +137,13 @@ def _processing_counts(registry: Registry, rows: list[dict[str, Any]]) -> tuple[
         return 0, 0, 0, 0
     source_roots = {str(row.get("source_root") or "") for row in rows}
     if len(source_roots) == 1:
-        return registry.processing_counts(next(iter(source_roots)))
+        source_root = next(iter(source_roots))
+        # A scoped per-file run must not receive the directory-wide count.
+        # Keep the registry's set-based aggregate for the normal full-source
+        # path, and use the existing row-local classification below for a
+        # deliberately filtered call.
+        if len(rows) == registry.count_present_files(source_root):
+            return registry.processing_counts(source_root)
     # This branch is retained for callers that intentionally pass a mixed
     # source list (the production coordinator passes one directory). It keeps
     # the original semantics without changing the public helper contract.
@@ -187,7 +196,31 @@ def _run_route(name: str, callback) -> tuple[Any, float]:
     return value, (time.perf_counter_ns() - started) / 1_000_000
 
 
-def extract_unified(
+def extract_unified(source: Path | str, **kwargs: Any) -> UnifiedExtractionSummary:
+    """Run unified extraction with one coordinator-owned Registry context.
+
+    Direct callers get a short-lived shared connection for the whole
+    coordinator.  Process-level callers may pass ``registry=`` to reuse their
+    already-open connection and keep the per-file completion boundary intact.
+    """
+
+    shared_registry = kwargs.pop("registry", None)
+    if shared_registry is not None:
+        return _extract_unified_impl(source, registry=shared_registry, **kwargs)
+    registry_file = Path(kwargs.get("registry_path") or paths.REGISTRY_PATH).resolve()
+    # Direct callers may provide a fresh path.  The process-level coordinator
+    # already owns an initialized connection, but the public standalone API
+    # must retain its historical self-initializing contract.
+    if not registry_file.is_file():
+        Registry.ensure_initialized(registry_file)
+    owned_registry = Registry.open(registry_file, initialize=False)
+    try:
+        return _extract_unified_impl(source, registry=owned_registry, **kwargs)
+    finally:
+        owned_registry.close()
+
+
+def _extract_unified_impl(
     source: Path | str,
     *,
     workers: int | None = None,
@@ -198,6 +231,11 @@ def extract_unified(
     progress_callback=None,
     vision_mode: str = "local",
     vision_provider: Any | None = None,
+    _scan_summary=None,
+    file_ids: set[str] | None = None,
+    _skip_catalog_summary: bool = False,
+    _skip_recovery: bool = False,
+    registry: Registry,
 ) -> UnifiedExtractionSummary:
     """Run all currently implemented deterministic extraction routes once."""
 
@@ -212,12 +250,15 @@ def extract_unified(
     workspace.mkdir(parents=True, exist_ok=True)
     check_cancel(cancel_event)
     try:
-        scan_summary = scan_source(
-            source,
-            workers=worker_count,
-            registry_path=registry_file,
-            cancel_event=cancel_event,
-        )
+        if _scan_summary is None:
+            scan_summary = scan_source(
+                source,
+                workers=worker_count,
+                registry_path=registry_file,
+                cancel_event=cancel_event,
+            )
+        else:
+            scan_summary = _scan_summary
     except ScanError as exc:
         raise UnifiedExtractionError(str(exc)) from exc
     source_root = canonical_source_root(source, require_directory=True)
@@ -229,11 +270,7 @@ def extract_unified(
         vision_mode=vision_mode,
     )
 
-    registry = Registry.open(registry_file, initialize=False)
-    try:
-        rows = _rows(registry, source_root)
-    finally:
-        registry.close()
+    rows = _rows(registry, source_root, file_ids)
     summary.supported = sum(1 for row in rows if row.get("support_status") == "supported")
     summary.unsupported = sum(1 for row in rows if row.get("support_status") != "supported")
     formats = {str(row.get("business_format") or "") for row in rows if row.get("support_status") == "supported"}
@@ -250,9 +287,12 @@ def extract_unified(
         "registry_path": registry_file,
         "workspace_root": workspace,
         "_scan_summary": scan_summary,
+        "file_ids": file_ids,
+        "_skip_recovery": _skip_recovery,
         "progress_callback": progress_callback,
         "cancel_event": cancel_event,
     }
+    light_route_kwargs = {**route_kwargs, "registry": registry}
     # PDF rendering, table reconstruction, and OCR all load native models or
     # large page buffers.  Keep those heavy routes to one process inside a
     # single product task; structured/cleaning concurrency remains separately
@@ -263,7 +303,7 @@ def extract_unified(
     if formats & {"csv", "tsv", "xls", "xlsx"}:
         check_cancel(cancel_event)
         summary.structured_summary, elapsed = _run_route(
-            "structured", lambda: extract_structured(source, **route_kwargs)
+            "structured", lambda: extract_structured(source, **light_route_kwargs)
         )
         summary.route_timings["structured"] = elapsed
     if "pdf" in formats:
@@ -278,15 +318,18 @@ def extract_unified(
             "pdf_table", lambda: extract_pdf_tables(source, **heavy_route_kwargs)
         )
         summary.route_timings["pdf_table"] = elapsed
-    if formats & {"pdf", "jpeg", "png"}:
+    # Local OCR/image-table extraction is a mutually exclusive route with
+    # explicit Vision mode.  Vision PDF still uses the native PDF profile
+    # above to select scanned pages, so it does not need this OCR route.
+    if vision_mode == "local" and formats & {"pdf", "jpeg", "png"}:
         check_cancel(cancel_event)
         summary.ocr_summary, elapsed = _run_route(
             "ocr",
             lambda: extract_ocr(
                 source,
                 **heavy_route_kwargs,
-                include_images=vision_mode != "ai_vision",
-                include_pdfs=vision_mode != "ai_vision",
+                include_images=True,
+                include_pdfs=True,
             ),
         )
         summary.route_timings["ocr"] = elapsed
@@ -321,24 +364,20 @@ def extract_unified(
     if "txt" in formats:
         check_cancel(cancel_event)
         summary.text_summary, elapsed = _run_route(
-            "text", lambda: extract_text(source, **route_kwargs)
+            "text", lambda: extract_text(source, **light_route_kwargs)
         )
         summary.route_timings["text"] = elapsed
     if "docx" in formats:
         check_cancel(cancel_event)
         summary.docx_summary, elapsed = _run_route(
-            "docx", lambda: extract_docx(source, **route_kwargs)
+            "docx", lambda: extract_docx(source, **light_route_kwargs)
         )
         summary.route_timings["docx"] = elapsed
 
     check_cancel(cancel_event)
-    registry = Registry.open(registry_file, initialize=False)
-    try:
-        current_rows = _rows(registry, source_root)
-        processed, failed, deferred, _ = _processing_counts(registry, current_rows)
-        catalog = registry.catalog_summary(source_root)
-    finally:
-        registry.close()
+    current_rows = _rows(registry, source_root, file_ids)
+    processed, failed, deferred, _ = _processing_counts(registry, current_rows)
+    catalog = {} if _skip_catalog_summary else registry.catalog_summary(source_root)
     summary.processed = processed
     summary.failed = failed
     summary.deferred = deferred

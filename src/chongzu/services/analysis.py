@@ -31,6 +31,7 @@ from chongzu.semantic.provider import SemanticProviderError
 from .catalog import CatalogService
 from chongzu.search import SearchQuery, SearchService, SearchValidationError
 from .sql import SQL_MAX_QUERY_CHARS, SqlQueryService, SqlServiceError
+from .table_trust import CANDIDATE_ONLY, is_table_trusted_for_analysis, table_trust_level
 
 
 ANALYSIS_CONTRACT_VERSION = "analysis-context-v1"
@@ -203,6 +204,16 @@ class AnalysisService:
             "extractorMetadata": detail.get("extractorMetadata"),
         }
         if asset_type == "table":
+            trust_level = table_trust_level(detail)
+            if not is_table_trusted_for_analysis(detail):
+                context.update(
+                    {
+                        "trustLevel": trust_level,
+                        "candidateOnly": trust_level == CANDIDATE_ONLY,
+                        "candidateNote": "候选表格，需对照原始来源核验；未提供结构化行列数据。",
+                    }
+                )
+                return context
             try:
                 schema = self.sql_service.schema([asset_id])
             except SqlServiceError as exc:
@@ -787,6 +798,9 @@ class AnalysisOrchestrator:
             "dimensions": _safe_json_value(value.get("dimensions")),
             "source": _safe_source(value.get("source")),
             "provenance": _safe_provenance(value.get("provenance")),
+            "trustLevel": value.get("trustLevel"),
+            "candidateOnly": bool(value.get("candidateOnly", False)),
+            "candidateNote": value.get("candidateNote"),
         }
         asset_type = value.get("assetType")
         if asset_type == "table":
@@ -1041,12 +1055,14 @@ class AnalysisOrchestrator:
                 evidence_ids.append(evidence_id)
                 manifest[evidence_id] = {
                     "evidence_id": evidence_id,
-                    "kind": "table_context",
+                    "kind": "table_candidate" if projected.get("candidateOnly") else "table_context",
                     "asset_id": asset_id,
                     "asset_type": "table",
                     "display_name": projected.get("displayName"),
                     "source": projected.get("source"),
                     "provenance": projected.get("provenance"),
+                    "trust_level": projected.get("trustLevel"),
+                    "text": projected.get("candidateNote"),
                     "schema": projected.get("schema"),
                     "row_count": projected.get("rowCount"),
                     "sample_rows": projected.get("sampleRows", []),

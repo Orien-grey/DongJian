@@ -8,15 +8,16 @@ import time
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from pathlib import Path
 from threading import Event
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 from uuid import uuid4
 
 from . import paths
 from .cancellation import CancellationRequested, check_cancel
 from .detection import detect_file
-from .discovery import discover, is_under_issue, issue_prefixes
+from .discovery import discover_iter, is_under_issue, issue_prefixes
 from .fingerprint import hash_file, stat_file
 from .logging import get_logger
+from .locking import registry_write_mutex
 from .registry import Registry, file_id_for, utc_now
 from .types import (
     DetectionResult,
@@ -31,6 +32,8 @@ from .types import (
 
 DEFAULT_WORKERS = max(1, min(8, os.cpu_count() or 1))
 MAX_WORKERS = 32
+SCAN_REGISTRY_BATCH_SIZE = 32
+SCAN_REGISTRY_BATCH_SIZES = (16, 32, 64)
 LOGGER = get_logger("scan")
 
 
@@ -43,6 +46,15 @@ def normalize_workers(workers: int | None) -> int:
     if value < 1 or value > MAX_WORKERS:
         raise ValueError(f"workers must be between 1 and {MAX_WORKERS}")
     return value
+
+
+def normalize_registry_batch_size(value: int | None) -> int:
+    """Keep observation writes bounded while allowing benchmark comparison."""
+
+    batch_size = SCAN_REGISTRY_BATCH_SIZE if value is None else int(value)
+    if batch_size < 1 or batch_size > 256:
+        raise ValueError("registry batch size must be between 1 and 256")
+    return batch_size
 
 
 def _empty_detection() -> DetectionResult:
@@ -192,6 +204,9 @@ def scan_source(
     rehash: bool = False,
     registry_path: Path | str | None = None,
     cancel_event: Event | None = None,
+    outcome_callback: Callable[[FileOutcome, ScanSummary], None] | None = None,
+    discovery_callback: Callable[[ScanSummary], None] | None = None,
+    registry_batch_size: int | None = None,
 ) -> ScanSummary:
     """Scan *source* and update the project-local DuckDB registry.
 
@@ -200,9 +215,10 @@ def scan_source(
     """
 
     worker_count = normalize_workers(workers)
+    batch_size = normalize_registry_batch_size(registry_batch_size)
     check_cancel(cancel_event)
     try:
-        source_root, discovered, issues = discover(source)
+        source_root, discovered, issues = discover_iter(source)
     except (OSError, ValueError) as exc:
         raise ScanError(str(exc)) from exc
     check_cancel(cancel_event)
@@ -218,17 +234,29 @@ def scan_source(
     log_path: str | None = None
     try:
         LOGGER.debug("starting scan run_id=%s source_root=%s workers=%d rehash=%s", run_id, source_root, worker_count, rehash)
-        registry.recover_incomplete_runs(source_root)
-        registry.create_run(run_id, source_root, started_at, None)
-        for issue in issues:
-            if issue.is_error:
-                registry.record_run_error(run_id, issue.path, issue.code, issue.message)
-
+        # Keep the single-writer contract, but hold it only for the short
+        # startup mutation. Readers can use the registry while hashing and
+        # detection workers continue outside this critical section.
+        with registry_write_mutex(registry_file):
+            registry.recover_incomplete_runs(source_root)
+            registry.create_run(run_id, source_root, started_at, None)
         previous = registry.load_files(source_root)
-        summary = ScanSummary(run_id=run_id, source_root=source_root, started_at=started_at, finished_at=started_at, status="running")
-        summary.discovered_count = len(discovered)
-        summary.discovery_error_count = sum(1 for issue in issues if issue.is_error)
+        summary = ScanSummary(
+            run_id=run_id,
+            source_root=source_root,
+            started_at=started_at,
+            finished_at=started_at,
+            status="running",
+            registry_batch_size=batch_size,
+            initial_registry_batch_size=min(16, batch_size),
+            candidate_queue_max=worker_count * 2,
+        )
         summary.total_bytes = 0
+        # ``previous`` is a snapshot taken before this run.  Track only the
+        # stable path identity for observations seen during this run so the
+        # missing-file pass does not mistake the snapshot's old
+        # ``last_seen_run`` value for a current one.
+        seen_paths: set[str] = set()
 
         # Submit at most a small multiple of the worker count.  Completed
         # outcomes are written by this coordinator thread only.
@@ -237,6 +265,41 @@ def scan_source(
         hashing_ms = 0.0
         detection_ms = 0.0
         registry_write_ms = 0.0
+        outcome_batch: list[FileOutcome] = []
+        next_batch_size = min(16, batch_size)
+
+        def flush_outcome_batch() -> None:
+            nonlocal registry_write_ms
+            if not outcome_batch:
+                return
+            values = list(outcome_batch)
+            outcome_batch.clear()
+            write_started = time.perf_counter_ns()
+            try:
+                with registry_write_mutex(registry_file):
+                    registry.record_file_outcomes(run_id, values)
+            except Exception:
+                # A malformed single observation must not discard the other
+                # bounded batch members. Retry individually so one file's
+                # registry failure remains isolated and diagnosable.
+                for value in values:
+                    summary.registry_fallback_count += 1
+                    try:
+                        with registry_write_mutex(registry_file):
+                            registry.record_file_outcome(run_id, value)
+                    except Exception as exc:  # DB errors remain run-level.
+                        registry_errors.append({"path": value.relative_path, "error_code": "registry_write_error", "error_message": str(exc)})
+                        raise
+            summary.registry_batch_count += 1
+            summary.registry_file_mutation_count += len(values)
+            registry_write_ms += (time.perf_counter_ns() - write_started) / 1_000_000
+            if summary.time_to_first_registered_ms is None:
+                summary.time_to_first_registered_ms = (time.perf_counter_ns() - perf_started) / 1_000_000
+            if outcome_callback is not None:
+                summary.elapsed_ms = (time.perf_counter_ns() - perf_started) / 1_000_000
+                for value in values:
+                    outcome_callback(value, summary)
+
         executor = ThreadPoolExecutor(max_workers=worker_count, thread_name_prefix="chongzu-scan")
         try:
             exhausted = False
@@ -249,6 +312,11 @@ def scan_source(
                     except StopIteration:
                         exhausted = True
                         break
+                    summary.discovered_count += 1
+                    if summary.time_to_first_discovered_ms is None:
+                        summary.time_to_first_discovered_ms = (time.perf_counter_ns() - perf_started) / 1_000_000
+                    if discovery_callback is not None:
+                        discovery_callback(summary)
                     pending[executor.submit(_process_one, item, previous.get(item.relative_path), rehash)] = item
                 if not pending:
                     continue
@@ -277,6 +345,7 @@ def scan_source(
                             error_message=str(exc),
                         )
                     outcome = _outcome_with_identity(raw_outcome, source_root)
+                    seen_paths.add(outcome.relative_path)
                     summary.total_bytes += outcome.fingerprint.before.size_bytes if outcome.fingerprint.before else 0
                     if outcome.fingerprint.reused:
                         summary.reused_hash_count += 1
@@ -292,13 +361,10 @@ def scan_source(
                         summary.unchanged_count += 1
                     hashing_ms += outcome.fingerprint.elapsed_ms
                     detection_ms += outcome.detection_ms
-                    write_started = time.perf_counter_ns()
-                    try:
-                        registry.record_file_outcome(run_id, outcome)
-                    except Exception as exc:  # DB errors are run-level, but keep context
-                        registry_errors.append({"path": item.relative_path, "error_code": "registry_write_error", "error_message": str(exc)})
-                        raise
-                    registry_write_ms += (time.perf_counter_ns() - write_started) / 1_000_000
+                    outcome_batch.append(outcome)
+                    if len(outcome_batch) >= next_batch_size:
+                        flush_outcome_batch()
+                        next_batch_size = batch_size
         except BaseException:
             for future in pending:
                 future.cancel()
@@ -306,18 +372,25 @@ def scan_source(
             raise
         else:
             executor.shutdown(wait=True)
+            flush_outcome_batch()
 
         issue_prefix = issue_prefixes(issues)
-        discovered_paths = {current.relative_path for current in discovered}
+        with registry_write_mutex(registry_file):
+            for issue in issues:
+                if issue.is_error:
+                    registry.record_run_error(run_id, issue.path, issue.code, issue.message)
+        summary.discovery_error_count = sum(1 for issue in issues if issue.is_error)
+        summary.discovery_ignored_count = sum(1 for issue in issues if not issue.is_error)
         missing_candidates = [
             item
-            for relative, item in previous.items()
-            if relative not in discovered_paths
+            for item in previous.values()
+            if item.relative_path not in seen_paths
             and item.current_presence_state != "missing"
-            and not is_under_issue(relative, source_root, issue_prefix)
+            and not is_under_issue(item.relative_path, source_root, issue_prefix)
         ]
         missing_started = time.perf_counter_ns()
-        summary.missing_count = registry.mark_missing(run_id, source_root, missing_candidates)
+        with registry_write_mutex(registry_file):
+            summary.missing_count = registry.mark_missing(run_id, source_root, missing_candidates)
         registry_write_ms += (time.perf_counter_ns() - missing_started) / 1_000_000
         summary.exact_duplicate_paths = registry.exact_duplicate_paths(source_root)
         summary.hashing_ms = hashing_ms
@@ -325,9 +398,11 @@ def scan_source(
         summary.registry_write_ms = registry_write_ms
         summary.finished_at = utc_now()
         summary.elapsed_ms = (time.perf_counter_ns() - perf_started) / 1_000_000
+        summary.scan_complete_ms = summary.elapsed_ms
         summary.status = "complete" if not registry_errors else "failed"
         log_path = _write_log(summary, issues, registry_errors)
-        registry.finish_run(summary, log_path)
+        with registry_write_mutex(registry_file):
+            registry.finish_run(summary, log_path)
         LOGGER.info(
             "scan complete run_id=%s source_root=%s discovered=%d failed=%d elapsed_ms=%.2f",
             summary.run_id,
@@ -348,8 +423,9 @@ def scan_source(
                 started_at=started_at,
                 finished_at=utc_now(),
                 status="interrupted",
-                discovered_count=len(discovered),
+                discovered_count=summary.discovered_count if "summary" in locals() else 0,
                 discovery_error_count=sum(1 for issue in issues if issue.is_error),
+                discovery_ignored_count=sum(1 for issue in issues if not issue.is_error),
                 elapsed_ms=(time.perf_counter_ns() - perf_started) / 1_000_000,
             )
             log_path = _write_log(
@@ -357,7 +433,8 @@ def scan_source(
                 issues,
                 [{"error_code": "interrupted", "error_message": "processing was cancelled by the user"}],
             )
-            registry.finish_run(interrupted, log_path)
+            with registry_write_mutex(registry_file):
+                registry.finish_run(interrupted, log_path)
         except Exception:
             pass
         raise
@@ -371,12 +448,14 @@ def scan_source(
                 started_at=started_at,
                 finished_at=utc_now(),
                 status="failed",
-                discovered_count=len(discovered),
+                discovered_count=summary.discovered_count if "summary" in locals() else 0,
                 discovery_error_count=sum(1 for issue in issues if issue.is_error),
+                discovery_ignored_count=sum(1 for issue in issues if not issue.is_error),
                 elapsed_ms=(time.perf_counter_ns() - perf_started) / 1_000_000,
             )
             log_path = _write_log(failed, issues, [{"error_code": "run_error", "error_message": str(exc)}])
-            registry.finish_run(failed, log_path)
+            with registry_write_mutex(registry_file):
+                registry.finish_run(failed, log_path)
         except Exception:
             pass
         raise ScanError(str(exc)) from exc

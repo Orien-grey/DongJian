@@ -83,7 +83,7 @@ def _artifacts_exist(reusable: dict[str, object], workspace_root: Path) -> bool:
         return False
 
 
-def _extract_one(source: StructuredSource, run_id: str, identity: str) -> PdfExtractionResult:
+def _extract_one(source: StructuredSource, run_id: str, identity: str, progress_callback: Callable[[int, int], None] | None = None) -> PdfExtractionResult:
     try:
         before = source.path.stat()
     except OSError as exc:
@@ -104,7 +104,7 @@ def _extract_one(source: StructuredSource, run_id: str, identity: str) -> PdfExt
             error_category="source_changed_after_scan",
             error_message="source size or mtime changed after the automatic registry scan",
         )
-    result = extract_pdf_file(source, run_id, identity)
+    result = extract_pdf_file(source, run_id, identity, progress_callback=progress_callback)
     try:
         after = source.path.stat()
     except OSError as exc:
@@ -228,6 +228,8 @@ def extract_pdf(
     registry_path: Path | str | None = None,
     workspace_root: Path | str | None = None,
     _scan_summary=None,
+    file_ids: set[str] | None = None,
+    _skip_recovery: bool = False,
     progress_callback: Callable[..., None] | None = None,
     cancel_event=None,
 ) -> PDFExtractionSummary:
@@ -258,14 +260,17 @@ def extract_pdf(
     configure_hidden_worker_executable()
     registry = Registry.open(registry_file, initialize=False)
     try:
-        registry.recover_incomplete_extractions(source_root)
+        if not _skip_recovery:
+            registry.recover_incomplete_extractions(source_root)
         rows = registry.pdf_candidates(source_root)
+        if file_ids is not None:
+            rows = [row for row in rows if str(row.get("file_id") or "") in file_ids]
         summary.files_considered = registry.count_present_files(source_root)
         summary.pdf_files = len(rows)
         summary.total_bytes = sum(int(row["size_bytes"] or 0) for row in rows)
         completed = 0
 
-        def emit(file_name: str | None, substage: str) -> None:
+        def emit(file_name: str | None, substage: str, *, current_page: int | None = None, total_pages: int | None = None) -> None:
             if progress_callback is None:
                 return
             progress = 0.30 + (0.15 * completed / max(1, len(rows)))
@@ -276,7 +281,8 @@ def extract_pdf(
                     current_file=file_name,
                     completed=completed,
                     total=len(rows),
-                    current_substage=substage,
+                    current_page=current_page,
+                    current_substage=(f"{substage}（第 {current_page} / {total_pages} 页）" if current_page is not None and total_pages else substage),
                 )
             except TypeError:
                 progress_callback("extract", progress)
@@ -307,7 +313,17 @@ def extract_pdf(
                     force=force,
                 )
                 summary.registry_write_ms += (time.perf_counter_ns() - write_started) / 1_000_000
-                result = _extract_one(pdf_source, run_id, identity)
+                result = _extract_one(
+                    pdf_source,
+                    run_id,
+                    identity,
+                    progress_callback=lambda page, total: emit(
+                        pdf_source.relative_path,
+                        "读取 PDF 文本",
+                        current_page=page,
+                        total_pages=total,
+                    ),
+                )
                 _record_result(
                     registry=registry,
                     summary=summary,

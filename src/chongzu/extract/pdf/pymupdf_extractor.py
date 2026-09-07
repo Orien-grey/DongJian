@@ -9,7 +9,7 @@ from importlib.metadata import PackageNotFoundError, version
 import json
 from pathlib import Path
 import time
-from typing import Any
+from typing import Any, Callable
 
 try:
     import pymupdf
@@ -182,6 +182,7 @@ def extract_pdf_file(
     source: StructuredSource,
     extraction_run_id: str,
     extraction_identity: str,
+    progress_callback: Callable[[int, int], None] | None = None,
 ) -> PdfExtractionResult:
     result = PdfExtractionResult(
         source=source,
@@ -200,6 +201,8 @@ def extract_pdf_file(
             }
             for page_index in range(document.page_count):
                 page_number = page_index + 1
+                if progress_callback is not None:
+                    progress_callback(page_number, document.page_count)
                 page = document[page_index]
                 extraction_started = time.perf_counter_ns()
                 # TEXTFLAGS_TEXT avoids copying embedded image bytes into the

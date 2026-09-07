@@ -467,7 +467,9 @@ def extract_pdf_tables(
     ground_truth: dict[str, tuple[ExpectedTable, ...]] | None = None,
     config: PDFTableConfig | None = None,
     selected_relative_paths: set[str] | None = None,
+    file_ids: set[str] | None = None,
     _scan_summary=None,
+    _skip_recovery: bool = False,
     progress_callback: Callable[..., None] | None = None,
     cancel_event=None,
 ) -> PDFTableExtractionSummary:
@@ -493,6 +495,8 @@ def extract_pdf_tables(
             registry_path=registry_file,
             workspace_root=workspace,
             _scan_summary=_scan_summary,
+            file_ids=file_ids,
+            _skip_recovery=_skip_recovery,
             progress_callback=progress_callback,
             cancel_event=cancel_event,
         )
@@ -510,8 +514,11 @@ def extract_pdf_tables(
     configure_hidden_worker_executable()
     registry = Registry.open(registry_file, initialize=False)
     try:
-        registry.recover_incomplete_extractions(source_root)
+        if not _skip_recovery:
+            registry.recover_incomplete_extractions(source_root)
         rows = registry.pdf_candidates(source_root)
+        if file_ids is not None:
+            rows = [row for row in rows if str(row.get("file_id") or "") in file_ids]
         if selected_relative_paths is not None:
             rows = [row for row in rows if str(row["relative_path"]) in selected_relative_paths]
         summary.pdfs_considered = len(rows)

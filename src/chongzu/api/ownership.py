@@ -324,10 +324,15 @@ def descendant_processes(root_pid: int) -> list[dict[str, Any]]:
 def wait_for_descendants_exit(root_pid: int, known_pids: Iterable[int] = (), timeout: float = 5.0) -> bool:
     """Wait until a captured/current descendant set no longer has live PIDs."""
 
-    observed = {int(pid) for pid in known_pids if int(pid) > 0}
+    caller_pid = os.getpid()
+    observed = {int(pid) for pid in known_pids if int(pid) > 0 and int(pid) != caller_pid}
     deadline = time.monotonic() + max(0.0, timeout)
     while True:
-        observed.update(int(record["pid"]) for record in descendant_processes(root_pid))
+        observed.update(
+            int(record["pid"])
+            for record in descendant_processes(root_pid)
+            if int(record["pid"]) != caller_pid
+        )
         if not any(process_identity(pid) is not None for pid in observed):
             return True
         if time.monotonic() >= deadline:
@@ -338,10 +343,15 @@ def wait_for_descendants_exit(root_pid: int, known_pids: Iterable[int] = (), tim
 def wait_for_owned_tree_exit(root_pid: int, known_pids: Iterable[int] = (), timeout: float = 5.0) -> bool:
     """Wait for the server and a captured descendant set to disappear."""
 
-    observed = {int(pid) for pid in known_pids if int(pid) > 0}
+    caller_pid = os.getpid()
+    observed = {int(pid) for pid in known_pids if int(pid) > 0 and int(pid) != caller_pid}
     deadline = time.monotonic() + max(0.0, timeout)
     while True:
-        observed.update(int(record["pid"]) for record in descendant_processes(root_pid))
+        observed.update(
+            int(record["pid"])
+            for record in descendant_processes(root_pid)
+            if int(record["pid"]) != caller_pid
+        )
         root_alive = process_identity(root_pid) is not None
         descendants_alive = any(process_identity(pid) is not None for pid in observed)
         if not root_alive and not descendants_alive:

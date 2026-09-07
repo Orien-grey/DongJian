@@ -15,7 +15,8 @@ import os
 from pathlib import Path
 import re
 import tempfile
-from threading import Event
+import time
+from threading import BoundedSemaphore, Event, Thread
 from typing import Any
 from uuid import uuid4
 
@@ -28,7 +29,7 @@ from .analysis import AnalysisRunStore
 
 REPORT_SCHEMA_VERSION = "report-v1"
 REPORT_RENDER_VERSION = "report-render-v1"
-REPORT_PROMPT_VERSION = "report-composer-v1"
+REPORT_PROMPT_VERSION = "report-composer-v2"
 REPORT_ACTION_CONTRACT_VERSION = "report-json-v1"
 
 # All report size and composition limits live here.  The artifact and prompt
@@ -49,6 +50,7 @@ MAX_REPORT_PURPOSE_CHARS = 2_000
 MAX_REPORT_CONTENT_CHARS = 12_000
 MAX_REPORT_LIST_ITEM_CHARS = 2_000
 REPORT_ID_PATTERN = re.compile(r"^report_[A-Za-z0-9_-]{1,96}$")
+_REPORT_PROVIDER_SLOT = BoundedSemaphore(1)
 
 REPORT_OUTPUT_CONTRACT = """
 Return exactly one JSON object with these fields only:
@@ -75,6 +77,7 @@ knowledge, or infer facts that are absent from the selected runs.
 Only grounded findings from the selected runs may become key_findings.  A
 substantive finding must cite an evidence_id from the supplied manifest.  Put
 unverified or unsupported material in items_to_verify and state limitations.
+All user-visible report text must be written in Simplified Chinese.
 """.strip()
 
 
@@ -192,6 +195,30 @@ def _safe_evidence(evidence_id: str, value: object) -> dict[str, object]:
             result[key] = str(value.get(key) or "")[:MAX_REPORT_TEXT_CHARS]
     if isinstance(value.get("provenance"), Mapping):
         result["provenance"] = _bounded_json(value.get("provenance"), max_chars=1_000)
+    if isinstance(value.get("profile"), Mapping):
+        profile = value["profile"]
+        safe_profile: dict[str, object] = {
+            key: profile[key]
+            for key in ("row_count", "column_count", "null_count", "null_ratio", "exact_duplicate_row_count")
+            if key in profile
+        }
+        columns = profile.get("columns")
+        if isinstance(columns, list):
+            safe_columns: list[dict[str, object]] = []
+            for column in columns:
+                if not isinstance(column, Mapping):
+                    continue
+                safe_columns.append(
+                    {
+                        key: column[key]
+                        for key in ("name", "null_count", "null_ratio", "distinct_count", "min", "max", "mean", "median")
+                        if key in column
+                    }
+                )
+            if safe_columns:
+                safe_profile["columns"] = safe_columns
+        if safe_profile:
+            result["profile"] = _bounded_json(safe_profile, max_chars=4_000)
     columns = value.get("columns")
     if isinstance(columns, list):
         result["columns"] = [str(item)[:256] for item in columns[:MAX_REPORT_SQL_COLUMNS]]
@@ -378,6 +405,7 @@ class ReportRunStore:
                     "updated_at": value.get("updated_at"),
                     "title": value.get("title"),
                     "source_analysis_run_ids": value.get("source_analysis_run_ids", []),
+                    "report_type": value.get("report_type", "analysis"),
                     "generation_mode": value.get("generation_mode"),
                     "status": value.get("status", "completed"),
                     "executive_summary": structured.get("executive_summary", "")[:500] if isinstance(structured, Mapping) else "",
@@ -445,14 +473,15 @@ def render_report_markdown(record: Mapping[str, object]) -> str:
     return "\n".join(lines).strip() + "\n"
 
 
-def render_report_html(record: Mapping[str, object]) -> str:
+def _legacy_render_report_html(record: Mapping[str, object]) -> str:
     """Render a self-contained report; every dynamic value is escaped."""
 
     report = record.get("structured_report") if isinstance(record.get("structured_report"), Mapping) else {}
     evidence = _evidence_map(record)
 
     def esc(value: object) -> str:
-        return html.escape(str(value or ""), quote=True)
+        escaped = html.escape(str(value or ""), quote=True)
+        return re.sub(r"(?i)\bon[a-z]+\s*=", "", escaped)
 
     def source_list(ids: object) -> str:
         if not isinstance(ids, list):
@@ -494,6 +523,88 @@ def render_report_html(record: Mapping[str, object]) -> str:
     limits = [str(item) for item in list(report.get("limitations", [])) + list(report.get("items_to_verify", []))]
     body.append(f"<section><h2>局限与待核实事项</h2><ul>{''.join(f'<li>{esc(item)}</li>' for item in limits) or '<li>无额外说明。</li>'}</ul></section>")
     return "<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>" + esc(report.get("title") or record.get("title") or "Analysis report") + "</title><style>body{font-family:system-ui,-apple-system,Segoe UI,sans-serif;max-width:920px;margin:40px auto;padding:0 24px;color:#1f2937;line-height:1.65}h1{font-size:2rem;border-bottom:1px solid #d1d5db;padding-bottom:12px}h2{font-size:1.2rem;margin-top:28px;color:#374151}section{margin:20px 0}.sources{font-size:.9rem;color:#4b5563;background:#f3f4f6;padding:8px 12px;border-radius:6px}li{margin:10px 0}</style></head><body>" + "".join(body) + "</body></html>"
+
+
+def render_report_html(record: Mapping[str, object]) -> str:
+    """Render a single-file report with a compact, deduplicated evidence index."""
+
+    report = record.get("structured_report") if isinstance(record.get("structured_report"), Mapping) else {}
+    evidence = _evidence_map(record)
+
+    def esc(value: object) -> str:
+        escaped = html.escape(str(value or ""), quote=True)
+        return re.sub(r"(?i)\bon[a-z]+\s*=", "", escaped)
+
+    source_numbers: dict[str, int] = {}
+    source_values: list[Mapping[str, object]] = []
+
+    def citations(ids: object) -> str:
+        if not isinstance(ids, list):
+            return ""
+        labels: list[str] = []
+        for item in ids:
+            key = str(item)
+            value = evidence.get(key)
+            if value is None:
+                continue
+            if key not in source_numbers:
+                source_numbers[key] = len(source_values) + 1
+                source_values.append(value)
+            labels.append(f"来源 {source_numbers[key]}")
+        unique = list(dict.fromkeys(labels))
+        return f'<span class="citations">{"、".join(esc(item) for item in unique)}</span>' if unique else ""
+
+    title = esc(report.get("title") or record.get("title") or "ChongZu report")
+    body: list[str] = [
+        f"<h1>{title}</h1>",
+        f'<section id="summary"><h2>执行摘要</h2><p>{esc(report.get("executive_summary") or "")}</p></section>',
+    ]
+    findings = report.get("key_findings", [])
+    finding_items = []
+    if isinstance(findings, list):
+        for finding in findings:
+            if isinstance(finding, Mapping):
+                finding_items.append(f"<li>{esc(finding.get('statement'))} {citations(finding.get('evidence_ids'))}</li>")
+    body.append(f'<section id="findings"><h2>主要发现</h2><ul>{"".join(finding_items) or "<li>暂无已核验的主要发现。</li>"}</ul></section>')
+    sections = report.get("sections", [])
+    if isinstance(sections, list):
+        for index, section in enumerate(sections, start=1):
+            if not isinstance(section, Mapping):
+                continue
+            body.append(
+                f'<details id="section-{index}"><summary>{esc(section.get("heading"))}</summary>'
+                f'<p>{esc(section.get("content"))}</p>{citations(section.get("evidence_ids"))}</details>'
+            )
+    limits = [str(item) for item in list(report.get("limitations", [])) + list(report.get("items_to_verify", []))]
+    body.append(
+        f'<section id="limits"><h2>局限与待核验</h2><ul>{"".join(f"<li>{esc(item)}</li>" for item in limits) or "<li>暂无额外说明。</li>"}</ul></section>'
+    )
+    evidence_html: list[str] = []
+    for index, item in enumerate(source_values, start=1):
+        label = esc(_source_label(item))
+        detail = [f"<p>{label}</p>"]
+        if item.get("snippet") or item.get("text"):
+            detail.append(f"<p>{esc(item.get('snippet') or item.get('text'))}</p>")
+        columns = item.get("columns")
+        rows = item.get("rows")
+        if item.get("kind") == "sql_result" and isinstance(columns, list) and isinstance(rows, list):
+            header = "".join(f"<th>{esc(column)}</th>" for column in columns[:MAX_REPORT_SQL_COLUMNS])
+            table_rows = []
+            for row in rows[:MAX_REPORT_SQL_ROWS]:
+                if isinstance(row, Mapping):
+                    table_rows.append("<tr>" + "".join(f"<td>{esc(row.get(str(column)))}</td>" for column in columns[:MAX_REPORT_SQL_COLUMNS]) + "</tr>")
+            if table_rows:
+                detail.append(f'<table><thead><tr>{header}</tr></thead><tbody>{"".join(table_rows)}</tbody></table>')
+        evidence_html.append(f'<details id="source-{index}"><summary>来源 {index}</summary>{"".join(detail)}</details>')
+    navigation = ['<a href="#summary">执行摘要</a>', '<a href="#findings">主要发现</a>']
+    navigation.extend(f'<a href="#section-{index}">章节 {index}</a>' for index, item in enumerate(sections, start=1) if isinstance(item, Mapping))
+    navigation.extend(['<a href="#limits">局限</a>', '<a href="#sources">证据</a>'])
+    return (
+        '<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">'
+        '<meta name="viewport" content="width=device-width,initial-scale=1">'
+        f"<title>{title}</title><style>body{{font-family:system-ui,-apple-system,Segoe UI,sans-serif;max-width:920px;margin:32px auto;padding:0 24px;color:#1f2937;line-height:1.6}}nav{{display:flex;gap:12px;flex-wrap:wrap;background:#f3f4f6;padding:10px 12px;border-radius:8px}}nav a{{color:#1d4ed8}}section,details{{margin:20px 0}}summary{{cursor:pointer;font-weight:600}}.citations{{font-size:.85rem;color:#1d4ed8;margin-left:8px}}table{{border-collapse:collapse;max-width:100%;overflow:auto;display:block}}th,td{{border:1px solid #d1d5db;padding:4px 8px;text-align:left}}li{{margin:8px 0}}</style></head><body>"
+        f"<nav>{''.join(navigation)}</nav>{''.join(body)}<section id=\"sources\"><h2>证据</h2>{''.join(evidence_html) or '<p>暂无证据。</p>'}</section></body></html>"
+    )
 
 
 class ReportComposer:
@@ -586,6 +697,7 @@ class ReportComposer:
         *,
         title: str = "",
         purpose: str = "",
+        report_type: str = "analysis",
     ) -> dict[str, object]:
         runs: list[dict[str, object]] = []
         evidence_ids = {str(item["evidence_id"]) for item in snapshot}
@@ -617,6 +729,7 @@ class ReportComposer:
         result = {
             "report_title": title[:MAX_REPORT_TITLE_CHARS],
             "report_purpose": purpose[:MAX_REPORT_PURPOSE_CHARS],
+            "report_type": report_type,
             "runs": runs,
             "evidence": list(snapshot),
         }
@@ -632,13 +745,83 @@ class ReportComposer:
         return safe if isinstance(safe, dict) else {"runs": [], "evidence": []}
 
     @staticmethod
+    def _compact_model_context(context: Mapping[str, object]) -> dict[str, object]:
+        """Remove exact repetition from the provider view without changing IDs."""
+
+        compact = dict(context)
+        raw_evidence = context.get("evidence")
+        if isinstance(raw_evidence, list):
+            seen_sources: set[str] = set()
+            evidence: list[dict[str, object]] = []
+            for value in raw_evidence:
+                if not isinstance(value, Mapping):
+                    continue
+                item = dict(value)
+                source = item.get("source")
+                if isinstance(source, Mapping):
+                    source_key = canonical_json(source)
+                    if source_key in seen_sources:
+                        item["source"] = {
+                            key: source[key]
+                            for key in ("fileId", "pageNumber", "sheetName")
+                            if key in source
+                        }
+                    else:
+                        seen_sources.add(source_key)
+                if item.get("text") is not None and item.get("snippet") == item.get("text"):
+                    item.pop("snippet", None)
+                rows = item.get("rows")
+                if isinstance(rows, list):
+                    unique_rows: list[object] = []
+                    seen_rows: set[str] = set()
+                    for row in rows:
+                        row_key = canonical_json(row)
+                        if row_key in seen_rows:
+                            continue
+                        seen_rows.add(row_key)
+                        unique_rows.append(row)
+                    item["rows"] = unique_rows
+                evidence.append(item)
+            compact["evidence"] = evidence
+
+        raw_runs = context.get("runs")
+        if isinstance(raw_runs, list):
+            runs: list[dict[str, object]] = []
+            for value in raw_runs:
+                if not isinstance(value, Mapping):
+                    continue
+                item = dict(value)
+                sql_values = item.get("executed_safe_sql")
+                if isinstance(sql_values, list):
+                    unique_sql: list[object] = []
+                    seen_sql: set[str] = set()
+                    for sql_value in sql_values:
+                        sql_key = canonical_json(sql_value)
+                        if sql_key in seen_sql:
+                            continue
+                        seen_sql.add(sql_key)
+                        unique_sql.append(sql_value)
+                    item["executed_safe_sql"] = unique_sql
+                runs.append(item)
+            compact["runs"] = runs
+        return compact
+
+    @staticmethod
     def _deterministic_title(records: Sequence[Mapping[str, object]], title: str) -> str:
         if title.strip():
             return title.strip()[:MAX_REPORT_TITLE_CHARS]
         question = str(records[0].get("question") or "Analysis report").strip()
         return ("分析报告：" + question)[:MAX_REPORT_TITLE_CHARS]
 
-    def _deterministic(self, records: Sequence[Mapping[str, object]], snapshot: Sequence[Mapping[str, object]], *, title: str, purpose: str) -> dict[str, object]:
+    def _deterministic(
+        self,
+        records: Sequence[Mapping[str, object]],
+        snapshot: Sequence[Mapping[str, object]],
+        *,
+        title: str,
+        purpose: str,
+        report_type: str = "analysis",
+    ) -> dict[str, object]:
         evidence_ids = {str(item["evidence_id"]) for item in snapshot}
         findings: list[dict[str, object]] = []
         limitations: list[str] = []
@@ -682,19 +865,128 @@ class ReportComposer:
                 limitations.append("当前数据不足以支持该结论。")
         limitations = list(dict.fromkeys(limitations))[:MAX_REPORT_FINDINGS]
         verify = list(dict.fromkeys(verify))[:MAX_REPORT_FINDINGS]
+        table_lines: list[str] = []
+        table_findings: list[dict[str, object]] = []
+        for item in snapshot:
+            if item.get("kind") != "table" or item.get("asset_type") != "table":
+                continue
+            columns = item.get("columns")
+            if not isinstance(columns, list) or not columns:
+                continue
+            row_count = item.get("row_count")
+            if not isinstance(row_count, int):
+                rows = item.get("rows")
+                row_count = len(rows) if isinstance(rows, list) else 0
+            label = _source_label(item)
+            column_text = "、".join(str(column) for column in columns[:MAX_REPORT_SQL_COLUMNS])
+            statement = f"{label}包含 {row_count} 行、{len(columns)} 列；字段：{column_text}。"
+            evidence_id = str(item["evidence_id"])
+            table_lines.append(statement)
+            table_findings.append({"statement": statement, "evidence_ids": [evidence_id]})
+        profile_findings: list[dict[str, object]] = []
+        deterministic_lines: list[str] = []
+        table_sources: list[tuple[str, set[str], str, str]] = []
+        for item in snapshot:
+            if item.get("kind") != "analysis_context" or item.get("asset_type") != "table":
+                continue
+            evidence_id = str(item["evidence_id"])
+            label = _source_label(item)
+            profile = item.get("profile")
+            if isinstance(profile, Mapping):
+                null_count = profile.get("null_count")
+                null_ratio = profile.get("null_ratio")
+                if isinstance(null_count, int) and null_count > 0:
+                    ratio_text = f"（{float(null_ratio):.1%}）" if isinstance(null_ratio, (int, float)) else ""
+                    statement = f"{label}包含 {null_count} 个缺失值{ratio_text}。"
+                    deterministic_lines.append(statement)
+                    profile_findings.append({"statement": statement, "evidence_ids": [evidence_id]})
+                duplicate_count = profile.get("exact_duplicate_row_count")
+                if isinstance(duplicate_count, int) and duplicate_count > 0:
+                    statement = f"{label}检测到 {duplicate_count} 行完全重复记录。"
+                    deterministic_lines.append(statement)
+                    profile_findings.append({"statement": statement, "evidence_ids": [evidence_id]})
+                column_profiles = profile.get("columns")
+                if isinstance(column_profiles, list):
+                    names: set[str] = set()
+                    for column in column_profiles:
+                        if not isinstance(column, Mapping):
+                            continue
+                        name = str(column.get("name") or "").strip()
+                        if name:
+                            names.add(name)
+                        if name and "mean" in column:
+                            statement = (
+                                f"字段 {name} 的最小值为 {column.get('min')}，最大值为 {column.get('max')}，"
+                                f"平均值为 {column.get('mean')}。"
+                            )
+                            deterministic_lines.append(statement)
+                            profile_findings.append({"statement": statement, "evidence_ids": [evidence_id]})
+                            break
+                    source = item.get("source") if isinstance(item.get("source"), Mapping) else {}
+                    source_key = str(source.get("fileId") or item.get("display_name") or item.get("asset_id") or evidence_id)
+                    table_sources.append((source_key, names, evidence_id, label))
+        sql_findings: list[dict[str, object]] = []
+        for item in snapshot:
+            if item.get("kind") != "sql_result" or item.get("asset_type") != "table":
+                continue
+            columns = [str(value) for value in item.get("columns", [])] if isinstance(item.get("columns"), list) else []
+            rows = item.get("rows") if isinstance(item.get("rows"), list) else []
+            if {"value", "frequency"}.issubset(columns) and rows and isinstance(rows[0], Mapping):
+                top = rows[0]
+                statement = f"{_source_label(item)}的最高频分类值为 {top.get('value')}，出现 {top.get('frequency')} 次。"
+                deterministic_lines.append(statement)
+                sql_findings.append({"statement": statement, "evidence_ids": [str(item["evidence_id"])]})
+        for left_index, left in enumerate(table_sources):
+            for right in table_sources[left_index + 1:]:
+                if left[0] == right[0]:
+                    continue
+                shared = sorted(left[1] & right[1])
+                if not shared:
+                    continue
+                statement = f"多个选定表格共享字段：{'、'.join(shared[:MAX_REPORT_SQL_COLUMNS])}。"
+                deterministic_lines.append(statement)
+                profile_findings.append({"statement": statement, "evidence_ids": [left[2], right[2]]})
+                break
+            if deterministic_lines and any("多个选定表格共享字段" in str(item) for item in deterministic_lines):
+                break
+        for finding in table_findings:
+            if len(findings) >= MAX_REPORT_FINDINGS:
+                break
+            if finding not in findings:
+                findings.append(finding)
+        for finding in [*profile_findings, *sql_findings]:
+            if len(findings) >= MAX_REPORT_FINDINGS:
+                break
+            if finding not in findings:
+                findings.append(finding)
         summary = "；".join(answers)[:MAX_REPORT_CONTENT_CHARS] if answers else "当前数据不足以支持该结论。"
+        if table_lines:
+            summary = (summary + "\n\n本地可验证数据发现：" + "；".join(table_lines[:8]))[:MAX_REPORT_CONTENT_CHARS]
+        if deterministic_lines:
+            summary = (summary + "\n\n确定性统计：" + "；".join(deterministic_lines[:8]))[:MAX_REPORT_CONTENT_CHARS]
         if purpose.strip():
             summary = (purpose.strip() + "\n\n" + summary)[:MAX_REPORT_CONTENT_CHARS]
         source_lines = [f"本报告汇总 {len(records)} 次已保存分析。"] + [f"问题：{item}" for item in questions[:8]]
         sql_evidence = [item for item in snapshot if item.get("kind") == "sql_result"]
         sql_lines = [f"已保存 {len(sql_evidence)} 个 Safe SQL 结果快照；打开报告不会重新执行查询。"] if sql_evidence else ["本次报告没有已保存的 SQL 结果快照。"]
         source_lines.extend(f"来源：{_source_label(item)}" for item in snapshot[:MAX_REPORT_EVIDENCE])
+        is_overview = report_type == "overview"
+        first_heading = "文件综述" if is_overview else "分析概述"
+        second_heading = "文件证据" if is_overview else "数据分析结果"
+        second_lines = [
+            f"已汇总 {len(snapshot)} 条文件证据；本综述不重新执行 SQL。"
+        ] if is_overview else sql_lines
+        if is_overview and table_lines:
+            second_lines = table_lines[:MAX_REPORT_FINDINGS]
+        elif not is_overview and deterministic_lines:
+            second_lines = [*sql_lines, *deterministic_lines[:MAX_REPORT_FINDINGS]]
         return {
             "title": self._deterministic_title(records, title),
+            "report_type": report_type,
             "executive_summary": summary,
             "sections": [
-                {"heading": "分析概述", "content": "\n".join(source_lines)[:MAX_REPORT_CONTENT_CHARS], "evidence_ids": []},
-                {"heading": "数据分析结果", "content": "\n".join(sql_lines), "evidence_ids": [str(item["evidence_id"]) for item in sql_evidence[:MAX_REPORT_EVIDENCE]]},
+                {"heading": first_heading, "content": "\n".join(source_lines)[:MAX_REPORT_CONTENT_CHARS], "evidence_ids": []},
+                {"heading": second_heading, "content": "\n".join(second_lines), "evidence_ids": [] if is_overview else [str(item["evidence_id"]) for item in sql_evidence[:MAX_REPORT_EVIDENCE]]},
                 {"heading": "来源与依据", "content": "\n".join(_source_label(item) for item in snapshot[:MAX_REPORT_EVIDENCE]) or "没有可展示的来源。", "evidence_ids": [str(item["evidence_id"]) for item in snapshot[:MAX_REPORT_EVIDENCE]]},
             ],
             "key_findings": findings,
@@ -730,7 +1022,13 @@ class ReportComposer:
             values = [str(item) for item in existing] if isinstance(existing, list) else []
             structured[field] = list(dict.fromkeys(values + additions))[:MAX_REPORT_FINDINGS]
 
-    def _ai_compose(self, context: Mapping[str, object], valid_ids: set[str]) -> dict[str, object]:
+    def _ai_compose(
+        self,
+        context: Mapping[str, object],
+        valid_ids: set[str],
+        *,
+        cancel_event: Event | None = None,
+    ) -> dict[str, object]:
         if self.provider is None:
             raise ReportExecutionError("MODEL_NOT_CONFIGURED", "AI model is not configured", stage="composing")
         request = SemanticRequest(
@@ -745,8 +1043,50 @@ class ReportComposer:
             output_contract=REPORT_OUTPUT_CONTRACT,
         )
         try:
-            response = self.provider.generate(request)
+            cancellable = getattr(self.provider, "generate_cancellable", None)
+            if callable(cancellable) and cancel_event is not None:
+                response = cancellable(request, cancel_event)
+            elif cancel_event is None:
+                response = self.provider.generate(request)
+            else:
+                # Existing test/local providers may expose only blocking
+                # generate(). Keep the task cancellable and discard its late
+                # result; the provider call remains bounded by its timeout.
+                if not _REPORT_PROVIDER_SLOT.acquire(blocking=False):
+                    raise ReportExecutionError("MODEL_PROVIDER_BUSY", "another cancelled report request is still finishing", stage="composing", retryable=True)
+                result: list[object] = []
+                failure: list[BaseException] = []
+
+                def invoke() -> None:
+                    try:
+                        result.append(self.provider.generate(request))
+                    except BaseException as exc:  # worker boundary re-raises below
+                        failure.append(exc)
+                    finally:
+                        _REPORT_PROVIDER_SLOT.release()
+
+                worker = Thread(target=invoke, name="chongzu-report-provider", daemon=True)
+                try:
+                    worker.start()
+                except BaseException:
+                    _REPORT_PROVIDER_SLOT.release()
+                    raise
+                while worker.is_alive():
+                    if cancel_event.is_set():
+                        raise CancellationRequested()
+                    worker.join(0.05)
+                if cancel_event.is_set():
+                    raise CancellationRequested()
+                if failure:
+                    raise failure[0]
+                response = result[0]
+        except ReportExecutionError:
+            raise
+        except CancellationRequested:
+            raise
         except SemanticProviderError as exc:
+            if cancel_event is not None and (cancel_event.is_set() or str(getattr(exc, "code", "")) == "cancelled"):
+                raise CancellationRequested() from exc
             code = str(getattr(exc, "code", "provider_error")).casefold()
             if code == "timeout":
                 mapped = "MODEL_TIMEOUT"
@@ -770,6 +1110,7 @@ class ReportComposer:
         report_id: str | None = None,
         title: object = "",
         purpose: object = "",
+        report_type: str = "analysis",
         cancel_event: Event | None = None,
         progress_callback: Callable[..., None] | None = None,
     ) -> dict[str, object]:
@@ -778,35 +1119,53 @@ class ReportComposer:
             raise ReportExecutionError("REPORT_INPUT_INVALID", "report ID is invalid", stage="loading_analysis")
         title_text = _text(title, limit=MAX_REPORT_TITLE_CHARS, name="title", required=False)
         purpose_text = _text(purpose, limit=MAX_REPORT_PURPOSE_CHARS, name="purpose", required=False)
+        if report_type not in {"overview", "analysis"}:
+            raise ReportExecutionError("REPORT_INPUT_INVALID", "report type must be overview or analysis", stage="loading_analysis")
+        telemetry: list[dict[str, object]] = []
+        active_telemetry: dict[str, object] | None = None
+        active_started = 0.0
 
         def emit(stage: str, progress: float) -> None:
+            nonlocal active_telemetry, active_started
+            now = time.perf_counter()
+            if active_telemetry is not None:
+                active_telemetry["duration_ms"] = round((now - active_started) * 1000, 3)
+            active_telemetry = {"stage": stage, "started_at": _utc_now(), "duration_ms": 0.0}
+            active_started = now
+            telemetry.append(active_telemetry)
             if progress_callback is not None:
                 progress_callback("report_generation", progress, current_file="Analysis Report", current_substage=stage)
 
         check_cancel(cancel_event)
-        emit("loading_analysis", 0.05)
+        emit("loading_sources", 0.05)
         records = self.load_selected(run_ids)
         check_cancel(cancel_event)
-        emit("preparing_evidence", 0.2)
+        emit("loading_file_insights", 0.15)
         snapshot, valid_ids = self._evidence_snapshot(records)
-        context = self._safe_inputs(records, snapshot, title=title_text, purpose=purpose_text)
+        emit("preparing_analysis", 0.25)
+        context = self._safe_inputs(records, snapshot, title=title_text, purpose=purpose_text, report_type=report_type)
+        context_bytes_before = len(canonical_json(context).encode("utf-8"))
+        context = self._compact_model_context(context)
+        context_bytes_after = len(canonical_json(context).encode("utf-8"))
         check_cancel(cancel_event)
-        emit("composing", 0.45)
+        emit("executing_analysis", 0.35)
+        check_cancel(cancel_event)
+        emit("calling_model", 0.45)
         generation_error: dict[str, object] | None = None
         generation_mode = "deterministic_fallback"
         if self.provider is not None:
             try:
-                structured = self._ai_compose(context, valid_ids)
+                structured = self._ai_compose(context, valid_ids, cancel_event=cancel_event)
                 generation_mode = "ai_enhanced"
             except ReportExecutionError as exc:
                 if exc.code == "REPORT_CONTEXT_TOO_LARGE":
                     generation_error = {"code": exc.code, "message": exc.message, "retryable": exc.retryable}
                 else:
                     generation_error = {"code": exc.code, "message": exc.message, "retryable": exc.retryable}
-                structured = self._deterministic(records, snapshot, title=title_text, purpose=purpose_text)
+                structured = self._deterministic(records, snapshot, title=title_text, purpose=purpose_text, report_type=report_type)
         else:
             generation_error = {"code": "MODEL_NOT_CONFIGURED", "message": "AI model is not configured", "retryable": False}
-            structured = self._deterministic(records, snapshot, title=title_text, purpose=purpose_text)
+            structured = self._deterministic(records, snapshot, title=title_text, purpose=purpose_text, report_type=report_type)
         check_cancel(cancel_event)
         emit("validating", 0.78)
         if generation_mode == "ai_enhanced":
@@ -822,6 +1181,7 @@ class ReportComposer:
             "updated_at": _utc_now(),
             "title": final_title,
             "purpose": purpose_text,
+            "report_type": report_type,
             "source_analysis_run_ids": [str(record.get("analysis_run_id")) for record in records],
             "generation_mode": generation_mode,
             "model_identity": {"provider": self.provider_name, "model": self.model_name, "prompt_version": REPORT_PROMPT_VERSION, "schema_version": REPORT_SCHEMA_VERSION},
@@ -842,6 +1202,12 @@ class ReportComposer:
             "schema_version": REPORT_SCHEMA_VERSION,
             "status": "completed",
             "generation_error": generation_error,
+            "context_telemetry": {
+                "before_bytes": context_bytes_before,
+                "after_bytes": context_bytes_after,
+                "reduction_bytes": max(0, context_bytes_before - context_bytes_after),
+            },
+            "telemetry": telemetry,
         }
         check_cancel(cancel_event)
         emit("persisting", 0.9)

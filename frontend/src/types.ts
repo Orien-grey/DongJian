@@ -59,6 +59,7 @@ export interface AISettings {
   configured: boolean;
   enabled: boolean;
   visionEnabled: boolean;
+  fileInsightEnabled?: boolean;
   configPath: string;
 }
 
@@ -170,6 +171,8 @@ export interface FileSummary {
   sha256: string | null;
   supportStatus: string;
   processingStatus: string;
+  evidenceStatus?: "available" | "no_evidence" | "not_assessed" | string;
+  fileInsightStatus: "disabled" | "not_started" | "queued" | "requesting_model" | "validating" | "persisting" | "completed" | "failed" | string;
   textAssets: number;
   textPages: number;
   tableAssets: number;
@@ -213,10 +216,12 @@ export interface FileContentTableBlock {
   order?: number | null;
   candidate: boolean;
   candidateStatus: string | null;
+  parserValidity?: string | null;
   qualityStatus: string | null;
   preview: TablePreview | null;
   rawPreview?: TablePreview | null;
   normalizedPreview?: TablePreview | null;
+  presentation?: Record<string, unknown> | null;
   previewLayer?: "raw" | "normalized" | null;
   previewAvailable: boolean;
   provenance: Record<string, unknown>;
@@ -240,7 +245,14 @@ export interface FileContentResponse {
     available: boolean;
     kind: "pdf_page" | "image" | string | null;
     url: string | null;
+    sourceUrl?: string | null;
     pageParameter: string | null;
+  };
+  navigation?: {
+    kind: "page" | "sheet" | "document" | "continuous" | "image" | string;
+    current: number | string | null;
+    total?: number | null;
+    items?: string[];
   };
   sections: FileContentSection[];
   limits: { maxTextChars: number; maxTableRows: number; maxTableColumns: number; maxTableCellChars?: number; maxTableAssets: number; maxBlocks: number };
@@ -250,6 +262,7 @@ export interface FileContentResponse {
 
 export interface SearchResult {
   resultId: string;
+  fileId?: string | null;
   assetId: string;
   assetType: AssetType;
   chunkId: string | null;
@@ -263,6 +276,14 @@ export interface SearchResult {
   score: number;
   qualityStatus: QualityStatus;
   matchOffsets: number[][];
+  locator?: {
+    kind: "text" | string;
+    assetId?: string;
+    chunkId?: string | null;
+    offset?: number;
+    length?: number;
+    matchOffsets?: number[][];
+  } | null;
   provenance: Record<string, unknown>;
 }
 
@@ -274,6 +295,44 @@ export interface SearchResponse {
   results: SearchResult[];
   backend: string;
   indexVersion: string;
+}
+
+export interface SearchOccurrence {
+  occurrenceId: string;
+  fileId: string;
+  assetId: string;
+  chunkId: string | null;
+  page: number | null;
+  section: string | null;
+  sheet: string | null;
+  startOffset: number;
+  endOffset: number;
+  bbox: unknown;
+  snippet: string;
+  matchOffsets?: number[][];
+  row?: number | null;
+  column?: number | null;
+  cellValue?: string | null;
+  locator?: {
+    kind: "text" | "table_cell" | string;
+    assetId?: string;
+    sheet?: string | null;
+    row?: number | null;
+    column?: number | null;
+    matchStart?: number;
+    matchEnd?: number;
+    occurrenceIndex?: number;
+  } | null;
+}
+
+export interface FileSearchResponse {
+  query: string;
+  totalOccurrences: number;
+  matchedPages: number[];
+  matchedSections: string[];
+  limit: number;
+  offset: number;
+  results: SearchOccurrence[];
 }
 
 export interface SqlColumn {
@@ -392,6 +451,7 @@ export interface TablePreview {
   rows: Array<Record<string, unknown>>;
   headerDetected?: boolean;
   presentationColumns?: string[];
+  presentation?: Record<string, unknown> | null;
   columnsTruncated?: boolean;
   cellValuesTruncated?: boolean;
   pagination: Pagination;
@@ -412,24 +472,36 @@ export interface TextPreview {
 export interface Task {
   taskId: string;
   source: string;
-  taskType?: "process" | "ai_analysis" | "report_generation" | string;
+  taskType?: "process" | "ai_analysis" | "report_generation" | "file_insight" | string;
   visionMode: VisionMode;
   status: TaskStatus;
   progress: number;
   currentStage: string;
   currentFile: string | null;
+  currentFileId?: string | null;
   currentPage: number | null;
+  currentPageTotal?: number | null;
   completed: number;
-  total: number;
+  total: number | null;
+  discoveredCount?: number;
+  registeredCount?: number;
+  readyLocalCount?: number;
+  failedCount?: number;
+  skippedCount?: number;
+  scanComplete?: boolean;
   currentSubstage: string | null;
   currentStep?: number;
   maxSteps?: number;
   elapsedSeconds: number;
+  recentFilesPerMinute?: number | null;
+  fileInsightId?: string | null;
+  cancelReason?: string | null;
   analysisRunId?: string | null;
   reportId?: string | null;
   counts: Record<string, number>;
   startedAt: string | null;
   finishedAt: string | null;
+  updatedAt?: string | null;
   errorSummary: string | null;
   error: TaskError | null;
   summary: Record<string, unknown> | null;
@@ -443,12 +515,66 @@ export interface TaskError {
   affectedFile: string | null;
   runId: string | null;
   requestId: string | null;
-  scope: "file" | "directory" | "analysis" | "report";
+  scope: "file" | "directory" | "analysis" | "report" | string;
   technicalDetail?: string;
 }
 
 export interface TasksResponse {
   items: Task[];
+}
+
+export interface WorkspaceSnapshot {
+  workspaceVersion: number;
+  changedFileId: string | null;
+  changedFileIds?: string[];
+  tasks: Task[];
+}
+
+export interface FileInsight {
+  fileId: string;
+  status: "disabled" | "not_started" | "queued" | "requesting_model" | "validating" | "persisting" | "completed" | "failed" | "not_found" | string;
+  insight: {
+    file_type: string;
+    document_kind: string;
+    summary: string;
+    important_topics: string[];
+    key_entities_or_fields: string[];
+    important_metrics: string[];
+    table_summaries: string[];
+    date_range: string;
+    quality_notes: string[];
+    analysis_suggestions: string[];
+    evidence_refs: Array<Record<string, unknown>>;
+    confidence: number;
+  } | null;
+  metadata: Record<string, unknown> | null;
+}
+
+export interface FileInsightQueueSummary {
+  queued: number;
+  running: number;
+  completed: number;
+  failed: number;
+  cancelled?: number;
+  total: number;
+  pendingReady: number;
+  ready: number;
+  cached: number;
+  active: number;
+  disabled?: number;
+  notStarted?: number;
+  requestingModel?: number;
+  validating?: number;
+  persisting?: number;
+}
+
+export interface FileInsightBulkResponse extends Partial<FileInsightQueueSummary> {
+  fileIds?: string[];
+  confirmationRequired?: boolean;
+  confirmationMessage?: string;
+  pending?: number;
+  taskId?: string;
+  task?: Task;
 }
 
 export type AnalysisScopeKind = "all" | "selected";
@@ -603,6 +729,7 @@ export interface Report {
   updated_at: string;
   title: string;
   purpose: string;
+  report_type?: "overview" | "analysis" | string;
   source_analysis_run_ids: string[];
   generation_mode: "ai_enhanced" | "deterministic_fallback" | string;
   model_identity: Record<string, unknown>;
@@ -613,6 +740,7 @@ export interface Report {
   schema_version: string;
   status: string;
   generation_error: { code: string; message: string; retryable?: boolean } | null;
+  telemetry?: Array<{ stage: string; started_at: string; duration_ms: number }>;
 }
 
 export interface ReportSummary {
@@ -620,6 +748,7 @@ export interface ReportSummary {
   created_at: string;
   updated_at: string;
   title: string;
+  report_type?: "overview" | "analysis" | string;
   source_analysis_run_ids: string[];
   generation_mode: string;
   status: string;

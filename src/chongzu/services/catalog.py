@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import copy
 from datetime import date, datetime
 import json
+import mimetypes
 import os
 from pathlib import Path
+import threading
 import time
 from typing import Any, Mapping
 from urllib.parse import quote
@@ -151,10 +154,17 @@ WITH file_scope AS (
 ), issue_counts AS (
     SELECT q.asset_id,
            COUNT(*) FILTER (WHERE q.status IN ('open','accepted')) AS issue_count
-    FROM quality_issues q
+    FROM (
+        SELECT q.*, ROW_NUMBER() OVER (
+            PARTITION BY q.asset_id, q.issue_type
+            ORDER BY q.created_at DESC NULLS LAST, q.issue_id
+        ) AS issue_rank
+        FROM quality_issues q
+        WHERE q.issue_type <> 'possible_table_candidate'
+    ) q
     JOIN asset_keys k ON k.asset_id=q.asset_id
     LEFT JOIN latest_cleaning c ON c.cleaning_run_id=q.cleaning_run_id
-    WHERE q.issue_type <> 'possible_table_candidate'
+    WHERE q.issue_rank=1
       AND (q.cleaning_run_id IS NULL OR c.cleaning_run_id IS NOT NULL)
     GROUP BY q.asset_id
 ), semantic_current AS (
@@ -353,6 +363,17 @@ class CatalogService:
     ) -> None:
         self.registry_path = Path(registry_path or paths.REGISTRY_PATH).resolve()
         self.workspace_root = Path(workspace_root or paths.WORKSPACE_ROOT).resolve()
+        self._content_cache: dict[tuple[str, int | None, str | None], dict[str, Any]] = {}
+        self._content_cache_lock = threading.RLock()
+        self._pdf_page_counts: dict[str, int] = {}
+
+    def invalidate_file(self, file_id: str) -> None:
+        """Drop every cached content locator for one file."""
+
+        normalized = str(file_id)
+        with self._content_cache_lock:
+            for key in [item for item in self._content_cache if item[0] == normalized]:
+                self._content_cache.pop(key, None)
 
     def _open(self) -> Registry:
         return Registry.open_reader(self.registry_path)
@@ -455,9 +476,11 @@ class CatalogService:
                 "sha256": row.get("sha256"),
                 "supportStatus": row.get("support_status"),
                 "processingStatus": row.get("processing_status", "not_processed"),
-                "textAssets": row.get("text_assets", 0),
-                "textPages": row.get("text_pages", 0),
-                "tableAssets": row.get("table_assets", 0),
+                "evidenceStatus": row.get("evidence_status", "not_assessed"),
+                "fileInsightStatus": row.get("file_insight_status", "not_started"),
+                "textAssets": int(row.get("text_assets") or 0),
+                "textPages": int(row.get("text_pages") or 0),
+                "tableAssets": int(row.get("table_assets") or 0),
                 "qualityStatus": row.get("quality_status", "not_assessed"),
                 "qualityIssueCount": row.get("quality_issue_count", 0),
                 "semanticStatus": row.get("semantic_status", "pending"),
@@ -477,9 +500,11 @@ class CatalogService:
             return "f.business_format IN ('pdf', 'docx', 'txt', 'doc', 'ppt', 'pptx')"
         if category == "image":
             return "f.business_format IN ('jpeg', 'png')"
+        if category == "ignored":
+            return "f.support_status <> 'supported'"
         if category in {"unprocessed", "failed"}:
             return "f.processing_status = ?"
-        raise ValueError("category must be all, table_file, document, image, unprocessed, or failed")
+        raise ValueError("category must be all, table_file, document, image, ignored, unprocessed, or failed")
 
     def list_files(
         self,
@@ -490,6 +515,7 @@ class CatalogService:
         query: str | None = None,
         limit: int = MAX_CATALOG_LIMIT,
         offset: int = 0,
+        include_ignored: bool = False,
     ) -> dict[str, Any]:
         if limit < 1 or limit > MAX_CATALOG_LIMIT:
             raise ValueError(f"limit must be between 1 and {MAX_CATALOG_LIMIT}")
@@ -500,8 +526,13 @@ class CatalogService:
         category_clause = self._file_category_clause(category)
         clauses = ["f.current_presence_state='present'"]
         params: list[Any] = []
+        if category == "ignored":
+            clauses.append("f.support_status <> 'supported'")
+        elif not include_ignored:
+            clauses.append("f.support_status='supported'")
         if category_clause:
-            clauses.append(category_clause)
+            if category != "ignored":
+                clauses.append(category_clause)
             if category in {"unprocessed", "failed"}:
                 params.append("failed" if category == "failed" else "not_processed")
         if source_format:
@@ -523,6 +554,7 @@ class CatalogService:
                        t.page_number,
                        t.source_kind,
                        t.extractor,
+                       CAST(NULL AS BIGINT) AS chars,
                        f.business_format,
                        CASE
                            WHEN f.business_format = 'pdf'
@@ -543,6 +575,7 @@ class CatalogService:
                        t.page_number,
                        t.source_kind,
                        t.extractor,
+                       LENGTH(t.text) AS chars,
                        f.business_format,
                        CASE
                            WHEN LENGTH(TRIM(t.text)) = 0 THEN 'unusable'
@@ -567,10 +600,17 @@ class CatalogService:
             ), issue_counts AS (
                 SELECT q.asset_id,
                        COUNT(*) FILTER (WHERE q.status IN ('open','accepted')) AS issue_count
-                FROM quality_issues q
+                FROM (
+                    SELECT q.*, ROW_NUMBER() OVER (
+                        PARTITION BY q.asset_id, q.issue_type
+                        ORDER BY q.created_at DESC NULLS LAST, q.issue_id
+                    ) AS issue_rank
+                    FROM quality_issues q
+                    WHERE q.issue_type <> 'possible_table_candidate'
+                ) q
                 JOIN current_assets a ON a.asset_id=q.asset_id
                 LEFT JOIN latest_cleaning c ON c.cleaning_run_id=q.cleaning_run_id
-                WHERE q.issue_type <> 'possible_table_candidate'
+                WHERE q.issue_rank=1
                   AND (q.cleaning_run_id IS NULL OR c.cleaning_run_id IS NOT NULL)
                 GROUP BY q.asset_id
             ), semantic_current AS (
@@ -592,6 +632,15 @@ class CatalogService:
                        a.asset_type,
                        a.page_number,
                        COALESCE(c.quality_status, a.base_quality) AS quality_status,
+                       CASE
+                           WHEN a.asset_type='text' AND COALESCE(a.chars, 0) > 0 THEN 1
+                           WHEN a.asset_type='table'
+                                AND COALESCE(c.quality_status, a.base_quality)='ready'
+                                AND COALESCE(a.source_kind, '') NOT IN ('page', 'image')
+                                AND LOWER(COALESCE(a.extractor, '')) NOT LIKE '%img2table%'
+                           THEN 1
+                           ELSE 0
+                       END AS usable_evidence,
                        COALESCE(i.issue_count, 0) AS quality_issue_count,
                        CASE WHEN s.asset_id IS NULL THEN 'pending' ELSE 'enriched' END AS semantic_status
                 FROM current_assets a
@@ -607,6 +656,7 @@ class CatalogService:
                        COUNT(*) FILTER (WHERE quality_status='unusable') AS unusable_assets,
                        COUNT(*) FILTER (WHERE quality_status='needs_review') AS review_assets,
                        COUNT(*) FILTER (WHERE quality_status='ready') AS ready_assets,
+                       SUM(usable_evidence) AS usable_evidence,
                        SUM(quality_issue_count) AS quality_issue_count,
                        COUNT(*) FILTER (WHERE semantic_status='enriched') AS semantic_enriched
                 FROM asset_values GROUP BY file_id
@@ -625,6 +675,7 @@ class CatalogService:
                        CASE WHEN COALESCE(a.text_pages_with_page, 0) > 0 THEN a.text_pages_with_page
                             WHEN COALESCE(a.text_assets_without_page, 0) > 0 THEN 1 ELSE 0 END AS text_pages,
                        CASE WHEN f.support_status <> 'supported' THEN 'unsupported'
+                            WHEN COALESCE(r.successful_routes, 0) > 0 AND COALESCE(a.usable_evidence, 0) = 0 THEN 'no_evidence'
                             WHEN COALESCE(r.successful_routes, 0) > 0 THEN 'ready'
                             WHEN COALESCE(r.failed_routes, 0) > 0 THEN 'failed'
                             WHEN COALESCE(r.route_count, 0) = 0 THEN 'not_processed'
@@ -634,6 +685,9 @@ class CatalogService:
                             WHEN COALESCE(a.ready_assets, 0) > 0 THEN 'ready'
                             ELSE 'not_assessed' END AS quality_status,
                        COALESCE(a.quality_issue_count, 0) AS quality_issue_count,
+                       CASE WHEN f.support_status='supported' AND COALESCE(r.successful_routes, 0) > 0 AND COALESCE(a.usable_evidence, 0) = 0 THEN 'no_evidence'
+                            WHEN f.support_status='supported' AND COALESCE(r.successful_routes, 0) > 0 THEN 'available'
+                            ELSE 'not_assessed' END AS evidence_status,
                        CASE WHEN COALESCE(a.semantic_enriched, 0) > 0 THEN 'enriched' ELSE 'pending' END AS semantic_status
                 FROM files f
                 LEFT JOIN asset_counts a ON a.file_id=f.file_id
@@ -662,6 +716,9 @@ class CatalogService:
                     params,
                 )
                 total = int(count_cursor.fetchone()[0] or 0)
+            insight_statuses = self._file_insight_statuses(rows)
+            for row in rows:
+                row["file_insight_status"] = insight_statuses.get(str(row.get("file_id") or ""), "not_started")
             items = [self._file_item(row) for row in rows]
             return {
                 "items": items,
@@ -702,6 +759,15 @@ class CatalogService:
                 COUNT(*) FILTER (WHERE quality_status='unusable') AS unusable_assets,
                 COUNT(*) FILTER (WHERE quality_status='needs_review') AS review_assets,
                 COUNT(*) FILTER (WHERE quality_status='ready') AS ready_assets,
+                COALESCE(SUM(CASE
+                    WHEN asset_type='text' AND COALESCE(chars, 0) > 0 THEN 1
+                    WHEN asset_type='table'
+                         AND quality_status='ready'
+                         AND COALESCE(source_kind, '') NOT IN ('page', 'image')
+                         AND LOWER(COALESCE(extractor, '')) NOT LIKE '%img2table%'
+                    THEN 1
+                    ELSE 0
+                END), 0) AS usable_evidence,
                 COALESCE(SUM(quality_issue_count), 0) AS quality_issue_count,
                 COUNT(*) FILTER (WHERE semantic_status='enriched') AS semantic_enriched
             FROM assets
@@ -761,6 +827,8 @@ class CatalogService:
             text_pages = 1
         if str(file_row.get("support_status") or "") != "supported":
             processing_status = "unsupported"
+        elif int(route_counts.get("successful_routes") or 0) > 0 and int(asset_counts.get("usable_evidence") or 0) == 0:
+            processing_status = "no_evidence"
         elif int(route_counts.get("successful_routes") or 0) > 0:
             processing_status = "ready"
         elif int(route_counts.get("failed_routes") or 0) > 0:
@@ -783,12 +851,55 @@ class CatalogService:
                 "text_assets": text_assets,
                 "text_pages": text_pages,
                 "processing_status": processing_status,
+                "evidence_status": (
+                    "no_evidence"
+                    if int(route_counts.get("successful_routes") or 0) > 0 and int(asset_counts.get("usable_evidence") or 0) == 0
+                    else "available"
+                    if int(route_counts.get("successful_routes") or 0) > 0
+                    else "not_assessed"
+                ),
                 "quality_status": quality_status,
                 "quality_issue_count": int(asset_counts.get("quality_issue_count") or 0),
                 "semantic_status": "enriched" if int(asset_counts.get("semantic_enriched") or 0) > 0 else "pending",
             }
         )
         return cls._file_item(combined)
+
+    def _file_insight_statuses(self, rows: list[Mapping[str, Any]]) -> dict[str, str]:
+        """Add the file-level insight state without reopening the registry."""
+
+        try:
+            from .file_insight import FileInsightQueueStore, FileInsightStore
+
+            queue = {str(item.get("file_id") or ""): item for item in FileInsightQueueStore(self.workspace_root).entries()}
+            store = FileInsightStore(self.workspace_root)
+        except (ImportError, OSError):
+            return {}
+        valid_phases = {"requesting_model", "validating", "persisting"}
+        statuses: dict[str, str] = {}
+        for row in rows:
+            file_id = str(row.get("file_id") or "")
+            if not file_id:
+                continue
+            if str(row.get("processing_status") or "") == "no_evidence" or str(row.get("evidence_status") or "") == "no_evidence":
+                statuses[file_id] = "no_evidence"
+                continue
+            entry = queue.get(file_id)
+            entry_status = str(entry.get("status") or "") if entry else ""
+            if entry_status == "queued":
+                statuses[file_id] = "queued"
+                continue
+            if entry_status == "running":
+                phase = str(entry.get("phase") or "requesting_model")
+                statuses[file_id] = phase if phase in valid_phases else "requesting_model"
+                continue
+            if entry_status == "failed":
+                statuses[file_id] = "failed"
+                continue
+            record = store.read_current(file_id, str(row.get("sha256") or ""))
+            record_status = str(record.get("status") or "") if record else ""
+            statuses[file_id] = "completed" if record_status == "completed" else ("failed" if record_status == "failed" else "not_started")
+        return statuses
 
     def _file_snapshot(
         self,
@@ -902,7 +1013,27 @@ class CatalogService:
                     except (TypeError, ValueError):
                         pass
             presentation_columns: list[str] | None = None
-            if header_detected and records:
+            if layer == "raw":
+                mappings = metadata.get("column_mapping")
+                mapped_headers: list[str | None] = []
+                if isinstance(mappings, list):
+                    for index, column in enumerate(frame.columns):
+                        mapping = mappings[index] if index < len(mappings) and isinstance(mappings[index], Mapping) else {}
+                        original = mapping.get("original")
+                        mapped_headers.append(str(original).strip() if original is not None and str(original).strip() else None)
+                metadata_headers = metadata.get("headers")
+                if isinstance(metadata_headers, list) and len(metadata_headers) >= len(frame.columns):
+                    mapped_headers = [
+                        str(metadata_headers[index]).strip() if metadata_headers[index] is not None and str(metadata_headers[index]).strip() else None
+                        for index in range(len(frame.columns))
+                    ]
+                if any(mapped_headers):
+                    header_detected = True
+                    presentation_columns = [mapped or column for mapped, column in zip(mapped_headers, frame.columns)]
+            if presentation_columns is None and header_detected and records:
+                # Legacy artifacts may not contain column_mapping. Preserve
+                # their existing presentation behavior, but never replace a
+                # known original header with a data-row value.
                 first_record = records[0]
                 presentation_columns = [
                     str(first_record.get(column) or "").strip() or column
@@ -917,6 +1048,7 @@ class CatalogService:
                     "rows": records,
                     "headerDetected": header_detected,
                     "presentationColumns": presentation_columns,
+                    "presentation": metadata.get("presentation") if isinstance(metadata.get("presentation"), Mapping) else None,
                     "columnsTruncated": len(schema_columns) > MAX_FILE_CONTENT_TABLE_COLUMNS,
                     "cellValuesTruncated": cell_values_truncated,
                     "pagination": {
@@ -973,10 +1105,12 @@ class CatalogService:
             "sheetName": row.get("sheet_name"),
             "candidate": candidate,
             "candidateStatus": metadata.get("candidate_status") if candidate else None,
+            "parserValidity": metadata.get("parser_validity"),
             "qualityStatus": row.get("quality_status"),
             "preview": preview,
             "rawPreview": raw_preview,
             "normalizedPreview": normalized_preview,
+            "presentation": metadata.get("presentation") if isinstance(metadata.get("presentation"), Mapping) else None,
             "previewLayer": preview.get("layer") if isinstance(preview, Mapping) else None,
             "previewAvailable": preview is not None,
             "provenance": self._content_provenance(row, metadata),
@@ -1105,6 +1239,33 @@ class CatalogService:
             raise FileNotFoundError("source file is unavailable")
         return source_path
 
+    def source_file(self, file_id: str) -> tuple[Path, str, str]:
+        """Resolve one registered source for the read-only native viewer."""
+
+        registry = self._open()
+        try:
+            file_row = self._direct_file_row(registry, file_id)
+        finally:
+            registry.close()
+        if file_row is None:
+            raise FileNotFoundError("file was not found")
+        source_path = self._source_path(file_row)
+        fmt = str(file_row.get("business_format") or "").casefold()
+        content_types = {
+            "pdf": "application/pdf",
+            "csv": "text/csv; charset=utf-8",
+            "tsv": "text/tab-separated-values; charset=utf-8",
+            "txt": "text/plain; charset=utf-8",
+            "png": "image/png",
+            "jpeg": "image/jpeg",
+            "jpg": "image/jpeg",
+            "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        }
+        content_type = content_types.get(fmt) or mimetypes.guess_type(source_path.name)[0] or "application/octet-stream"
+        return source_path, content_type, source_path.name
+
     def _preview_cache_path(self, file_id: str, page_number: int) -> Path:
         safe_id = "".join(character for character in str(file_id) if character.isalnum() or character in {"-", "_"})
         if not safe_id:
@@ -1121,7 +1282,13 @@ class CatalogService:
         finally:
             temporary.unlink(missing_ok=True)
 
-    def file_preview(self, file_id: str, *, page: int = 1) -> tuple[bytes, str]:
+    def file_preview(
+        self,
+        file_id: str,
+        *,
+        page: int = 1,
+        bbox: tuple[float, float, float, float] | None = None,
+    ) -> tuple[bytes, str]:
         """Render one bounded source preview for the file reading surface.
 
         PDF pages are rendered on demand and cached below the resettable
@@ -1140,16 +1307,34 @@ class CatalogService:
             raise FileNotFoundError("file was not found")
         source_path = self._source_path(file_row)
         fmt = str(file_row.get("business_format") or "").casefold()
-        if fmt in {"png", "jpeg"}:
+        if fmt in {"png", "jpeg", "jpg"}:
             if source_path.stat().st_size > MAX_SOURCE_PREVIEW_BYTES:
                 raise ValueError("source image exceeds the local preview limit")
+            if bbox is not None:
+                try:
+                    import pymupdf
+                except ImportError as exc:  # pragma: no cover - provisioning/doctor owns this boundary
+                    raise RuntimeError("PyMuPDF is not provisioned for source preview") from exc
+                with pymupdf.open(str(source_path)) as document:
+                    page_image = document.load_page(0)
+                    clip = pymupdf.Rect(*bbox) & page_image.rect
+                    if clip.is_empty or clip.width < 1 or clip.height < 1:
+                        raise ValueError("preview crop is outside the source image")
+                    largest_dimension = max(float(clip.width), float(clip.height), 1.0)
+                    scale = min(2.0, MAX_SOURCE_PREVIEW_DIMENSION / largest_dimension)
+                    content = page_image.get_pixmap(matrix=pymupdf.Matrix(scale, scale), clip=clip, alpha=False).tobytes("png")
+                if len(content) > MAX_SOURCE_PREVIEW_BYTES:
+                    raise ValueError("source image crop exceeds the local preview limit")
+                return content, "image/png"
             content_type = "image/png" if fmt == "png" else "image/jpeg"
             return source_path.read_bytes(), content_type
         if fmt != "pdf":
             raise ValueError("source preview is not available for this file format")
 
-        cache_path = self._preview_cache_path(file_id, page)
-        if cache_path.is_file() and cache_path.stat().st_size <= MAX_SOURCE_PREVIEW_BYTES:
+        # Crops are intentionally not cached under the page cache key: a
+        # table candidate may have many rectangles on one page.
+        cache_path = self._preview_cache_path(file_id, page) if bbox is None else None
+        if cache_path is not None and cache_path.is_file() and cache_path.stat().st_size <= MAX_SOURCE_PREVIEW_BYTES:
             return cache_path.read_bytes(), "image/png"
         try:
             import pymupdf
@@ -1160,14 +1345,20 @@ class CatalogService:
                 raise ValueError("requested PDF page is outside the document")
             source_page = document.load_page(page - 1)
             rect = source_page.rect
+            clip = None
+            if bbox is not None:
+                clip = pymupdf.Rect(*bbox) & rect
+                if clip.is_empty or clip.width < 1 or clip.height < 1:
+                    raise ValueError("preview crop is outside the PDF page")
             largest_dimension = max(float(rect.width), float(rect.height), 1.0)
             scale = min(2.0, MAX_SOURCE_PREVIEW_DIMENSION / largest_dimension)
-            pixmap = source_page.get_pixmap(matrix=pymupdf.Matrix(scale, scale), alpha=False)
+            pixmap = source_page.get_pixmap(matrix=pymupdf.Matrix(scale, scale), clip=clip, alpha=False)
             content = pixmap.tobytes("png")
         if len(content) > MAX_SOURCE_PREVIEW_BYTES:
             raise ValueError("rendered PDF page exceeds the local preview limit")
         try:
-            self._write_preview_cache(cache_path, content)
+            if cache_path is not None:
+                self._write_preview_cache(cache_path, content)
         except OSError:
             # Rendering remains useful if a cache directory is temporarily
             # unavailable; reset can remove any successfully written cache.
@@ -1177,11 +1368,12 @@ class CatalogService:
     @staticmethod
     def _source_preview_descriptor(file_row: Mapping[str, Any], file_id: str) -> dict[str, Any]:
         fmt = str(file_row.get("business_format") or "").casefold()
-        available = fmt in {"pdf", "png", "jpeg"}
+        available = fmt in {"pdf", "png", "jpeg", "jpg"}
         return {
             "available": available,
-            "kind": "pdf_page" if fmt == "pdf" else ("image" if fmt in {"png", "jpeg"} else None),
+            "kind": "pdf_page" if fmt == "pdf" else ("image" if fmt in {"png", "jpeg", "jpg"} else None),
             "url": f"/api/v1/files/{quote(str(file_id), safe='')}/preview" if available else None,
+            "sourceUrl": f"/api/v1/files/{quote(str(file_id), safe='')}/source",
             "pageParameter": "page" if fmt == "pdf" else None,
         }
 
@@ -1222,6 +1414,8 @@ class CatalogService:
                     }
                 )
             detail = dict(snapshot["file"])
+            insight_statuses = self._file_insight_statuses([file_row])
+            detail["fileInsightStatus"] = insight_statuses.get(str(file_id), "not_started")
             detail["textAssets"] = len(text_rows)
             detail["textPages"] = sum(1 for row in text_rows if row.get("page_number") is not None) or (1 if text_rows else 0)
             detail["tableAssets"] = sum(1 for row in asset_rows if row.get("asset_type") == "table")
@@ -1247,10 +1441,24 @@ class CatalogService:
         finally:
             registry.close()
 
-    def file_content(self, file_id: str) -> dict[str, Any] | None:
+    def file_content(
+        self,
+        file_id: str,
+        *,
+        page: int | None = None,
+        sheet: str | None = None,
+    ) -> dict[str, Any] | None:
         """Return bounded mixed content for the file-level primary view."""
 
         started = time.perf_counter_ns()
+        cache_key = (str(file_id), page, sheet)
+        with self._content_cache_lock:
+            cached = copy.deepcopy(self._content_cache.get(cache_key))
+        if cached is not None:
+            result = cached
+            result.setdefault("timings", {})["cache_hit"] = True
+            result["timings"]["total_ms"] = round((time.perf_counter_ns() - started) / 1_000_000, 3)
+            return result
         registry = self._open()
         try:
             queried = time.perf_counter_ns()
@@ -1266,6 +1474,42 @@ class CatalogService:
             )
             table_rows = [row for row in asset_rows if row.get("asset_type") == "table"]
             fmt = str(file_row.get("business_format") or "").casefold()
+            navigation: dict[str, Any] = {"kind": "continuous", "current": None, "total": None}
+            if fmt == "pdf":
+                page_numbers = sorted({int(row["page_number"]) for row in [*text_rows, *table_rows] if row.get("page_number") is not None})
+                total_pages = self._pdf_page_counts.get(str(file_id), max(page_numbers, default=0))
+                if str(file_id) not in self._pdf_page_counts:
+                    try:
+                        import pymupdf
+
+                        with pymupdf.open(str(self._source_path(file_row))) as document:
+                            total_pages = document.page_count
+                        self._pdf_page_counts[str(file_id)] = total_pages
+                    except (OSError, RuntimeError, ValueError):
+                        pass
+                if page is not None:
+                    selected_page = int(page)
+                    if selected_page < 1 or (total_pages and selected_page > total_pages):
+                        raise ValueError("requested PDF page is outside the document")
+                    text_rows = [row for row in text_rows if row.get("page_number") == selected_page]
+                    table_rows = [row for row in table_rows if row.get("page_number") == selected_page]
+                    navigation = {"kind": "page", "current": selected_page, "total": total_pages}
+                else:
+                    # Keep direct CatalogService callers backward compatible;
+                    # the viewer supplies page=1 and remains single-page.
+                    navigation = {"kind": "page", "current": None, "total": total_pages}
+            elif fmt in {"xls", "xlsx"}:
+                sheet_names = list(dict.fromkeys(str(row.get("sheet_name") or "Sheet") for row in table_rows))
+                selected_sheet = sheet
+                if selected_sheet is not None:
+                    table_rows = [row for row in table_rows if str(row.get("sheet_name") or "Sheet") == selected_sheet]
+                navigation = {"kind": "sheet", "current": selected_sheet, "items": sheet_names, "total": len(sheet_names)}
+            elif fmt == "docx":
+                navigation = {"kind": "document", "current": "document", "total": 1}
+            elif fmt == "txt":
+                navigation = {"kind": "continuous", "current": "text", "total": 1}
+            elif fmt in {"png", "jpeg"}:
+                navigation = {"kind": "image", "current": "image", "total": 1}
             sections: list[dict[str, Any]] = []
             text_budget = MAX_FILE_TEXT_PREVIEW_CHARS
             emitted_blocks = 0
@@ -1463,6 +1707,7 @@ class CatalogService:
                     "format": file_row.get("business_format"),
                 },
                 "sourcePreview": self._source_preview_descriptor(file_row, file_id),
+                "navigation": navigation,
                 "sections": sections,
                 "limits": {
                     "maxTextChars": MAX_FILE_TEXT_PREVIEW_CHARS,
@@ -1478,7 +1723,12 @@ class CatalogService:
                     "total_ms": round((time.perf_counter_ns() - started) / 1_000_000, 3),
                 },
             }
-            return _json_value(response)
+            materialized = _json_value(response)
+            with self._content_cache_lock:
+                self._content_cache[cache_key] = copy.deepcopy(materialized)
+                while len(self._content_cache) > 16:
+                    self._content_cache.pop(next(iter(self._content_cache)))
+            return materialized
         finally:
             registry.close()
 
@@ -1611,6 +1861,7 @@ class CatalogService:
             "fallbackDisplayName": row.get("fallback_display_name"),
             "semanticDisplayName": row.get("semantic_display_name"),
             "qualityStatus": row.get("quality_status"),
+            "parserValidity": (metadata or {}).get("parser_validity") if isinstance(metadata, Mapping) else None,
             "qualityIssueCount": row.get("quality_issue_count", 0),
             "cleaningStatus": row.get("cleaning_status"),
             "semanticStatus": row.get("semantic_status"),
@@ -1702,11 +1953,28 @@ class CatalogService:
         frame = pl.scan_parquet(str(path)).slice(offset, limit).collect()
         records = frame.to_dicts()
         total = row.get("rows")
+        metadata = self._metadata_for_row(row)
+        presentation_columns: list[str] | None = None
         if layer == "raw":
             try:
                 total = int(pl.scan_parquet(str(path)).select(pl.len()).collect().item())
             except Exception:  # pragma: no cover - defensive for a damaged preview artifact
                 total = None
+            mappings = metadata.get("column_mapping")
+            mapped_headers: list[str | None] = []
+            if isinstance(mappings, list):
+                for index, column in enumerate(frame.columns):
+                    mapping = mappings[index] if index < len(mappings) and isinstance(mappings[index], Mapping) else {}
+                    original = mapping.get("original")
+                    mapped_headers.append(str(original).strip() if original is not None and str(original).strip() else None)
+            metadata_headers = metadata.get("headers")
+            if isinstance(metadata_headers, list) and len(metadata_headers) >= len(frame.columns):
+                mapped_headers = [
+                    str(metadata_headers[index]).strip() if metadata_headers[index] is not None and str(metadata_headers[index]).strip() else None
+                    for index in range(len(frame.columns))
+                ]
+            if any(mapped_headers):
+                presentation_columns = [mapped or column for mapped, column in zip(mapped_headers, frame.columns)]
         return _json_value(
             {
                 "assetId": asset_id,
@@ -1714,6 +1982,8 @@ class CatalogService:
                 "layer": layer,
                 "columns": frame.columns,
                 "rows": records,
+                "presentationColumns": presentation_columns,
+                "presentation": metadata.get("presentation"),
                 "pagination": {
                     "limit": limit,
                     "offset": offset,

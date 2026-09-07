@@ -14,6 +14,7 @@ from .models import FileExtractionResult, StructuredSource
 
 
 EXTRACTOR_NAME = "polars-delimited"
+EXTRACTOR_VERSION = version("polars")
 
 
 class DelimitedStructureError(ValueError):
@@ -86,7 +87,7 @@ def extract_csv(source: StructuredSource, extraction_run_id: str, extraction_ide
         extraction_run_id=extraction_run_id,
         extraction_identity=extraction_identity,
         extractor=EXTRACTOR_NAME,
-        extractor_version=version("polars"),
+        extractor_version=EXTRACTOR_VERSION,
     )
     utf8_path: Path | None = None
     temporary = False

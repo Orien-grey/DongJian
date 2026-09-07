@@ -343,6 +343,8 @@ def _terminate_verified_descendants(records: list[dict[str, object]], project_ro
             pid = int(record["pid"])
         except (KeyError, TypeError, ValueError):
             continue
+        if pid == os.getpid():
+            continue
         if not process_record_matches(record, project_root):
             continue
         completed = subprocess.run(
@@ -377,7 +379,7 @@ def _cleanup_orphaned_descendants(
     return wait_for_owned_tree_exit(root_pid, pids, timeout)
 
 
-def stop_server(project_root: Path) -> int:
+def stop_server(project_root: Path, *, reset: bool = False) -> int:
     state_path = _state_file(project_root)
     state = _read_state(state_path) if state_path.exists() else None
     if not state:
@@ -439,7 +441,11 @@ def stop_server(project_root: Path) -> int:
                 f"http://{DEFAULT_HOST}:{port}/api/v1/internal/shutdown",
                 data=b"{}",
                 method="POST",
-                headers={"Content-Type": "application/json", "X-ChongZu-Control": control_token},
+                headers={
+                    "Content-Type": "application/json",
+                    "X-ChongZu-Control": control_token,
+                    "X-ChongZu-Shutdown-Reason": "reset" if reset else "stop",
+                },
             )
             with urlopen(request, timeout=2) as response:
                 if response.status not in {200, 202}:

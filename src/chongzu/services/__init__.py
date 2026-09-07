@@ -6,6 +6,14 @@ Parquet implementation details.
 """
 
 from .catalog import CatalogService
+from .file_insight import (
+    FileInsightError,
+    FileInsightPolicyStore,
+    FileInsightQueueStore,
+    FileInsightService,
+    FileInsightStore,
+    configured_file_insight_provider,
+)
 from .analysis import (
     ANALYSIS_ACTION_CONTRACT_VERSION,
     ANALYSIS_PROMPT_VERSION,
@@ -41,7 +49,15 @@ from .report import (
     validate_report_payload,
 )
 from .quality import QualityService
-from .reset import WorkspaceResetError, WorkspaceResetService
+from .reset import WorkspaceResetError, WorkspaceResetJournal, WorkspaceResetService
+from .table_trust import (
+    BEST_EFFORT,
+    CANDIDATE_ONLY,
+    CONFIRMED_STRUCTURE,
+    UNUSABLE,
+    is_table_trusted_for_analysis,
+    table_trust_level,
+)
 from .sql import (
     SqlAssetError,
     SqlExecutionError,
@@ -57,6 +73,12 @@ from .sql import (
 
 __all__ = [
     "CatalogService",
+    "FileInsightError",
+    "FileInsightPolicyStore",
+    "FileInsightQueueStore",
+    "FileInsightService",
+    "FileInsightStore",
+    "configured_file_insight_provider",
     "AnalysisService",
     "AnalysisServiceError",
     "AnalysisExecutionError",
@@ -71,7 +93,14 @@ __all__ = [
     "ProcessTaskManager",
     "QualityService",
     "WorkspaceResetError",
+    "WorkspaceResetJournal",
     "WorkspaceResetService",
+    "BEST_EFFORT",
+    "CANDIDATE_ONLY",
+    "CONFIRMED_STRUCTURE",
+    "UNUSABLE",
+    "is_table_trusted_for_analysis",
+    "table_trust_level",
     "SqlAssetError",
     "SqlExecutionError",
     "SqlQueryService",

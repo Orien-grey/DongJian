@@ -170,7 +170,7 @@ def test_reset_and_release_contracts_are_narrow_and_exclude_development_data() -
     assert "workspace" not in directory_copies
 
 
-def test_reset_workspace_removes_generated_data_but_preserves_source_input(tmp_path: Path) -> None:
+def test_reset_workspace_requires_bundled_python(tmp_path: Path) -> None:
     project = tmp_path / "project"
     for name in ("src", "runtime", "models", "config", "workspace", "cache"):
         (project / name).mkdir(parents=True)
@@ -200,10 +200,11 @@ def test_reset_workspace_removes_generated_data_but_preserves_source_input(tmp_p
         check=False,
     )
 
-    assert completed.returncode == 0, completed.stdout + completed.stderr
+    assert completed.returncode == 1, completed.stdout + completed.stderr
+    assert "bundled Python is missing" in completed.stdout + completed.stderr
     assert source.read_text(encoding="utf-8") == "user evidence"
-    assert not generated.exists()
-    assert not cached.exists()
+    assert generated.is_file()
+    assert cached.is_file()
 
 class _ConnectionHandler(BaseHTTPRequestHandler):
     mode = "ok"
